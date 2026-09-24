@@ -1,5 +1,11 @@
 // client/src/pages/tools/ATSToolPage.jsx — Standalone ATS scorer
 import { useState, useRef } from "react";
+// ⛔ `Link` WAS USED FOUR TIMES IN THIS FILE AND NEVER IMPORTED, so the page threw
+// "ReferenceError: Link is not defined" the moment it rendered — it has never worked. Found while
+// verifying the extension's ATS button in a real browser; a build succeeds because JSX compiles an
+// undefined identifier to a runtime lookup, and nothing here is covered by a rendering test.
+// That was the THIRD reason that button was broken, after the dead route and the ignored ?jd=.
+import { Link, useSearchParams } from "react-router-dom";
 import { useTheme } from "../../styles/theme.jsx";
 import { Footer } from "../../components/Footer.jsx";
 import ScrollDock from "../../components/ScrollDock.jsx";
@@ -26,8 +32,18 @@ function ScoreDonut({ score }) {
 
 export function ATSToolPage() {
   const { theme } = useTheme();
+  // ?jd= IS THE JOB TEXT THE EXTENSION ALREADY READ. Its popup extracts the posting from the page
+  // and encodes it into the URL; before this the page ignored it and opened an empty textarea, so
+  // the extension's ATS button asked the user to paste in text it had already captured. The other
+  // half of the same defect was that the URL pointed at /ats-score, which was never a route at all
+  // (see App.jsx's legacy aliases and docs/EXTENSION_DIAGNOSIS.md §4) — fixing only one of the two
+  // leaves the button still not working.
+  //
+  // Read as the INITIAL value, not synced: once the page is open the textarea is the user's, and a
+  // later re-render must not overwrite an edit with the URL it arrived on.
+  const [searchParams] = useSearchParams();
   const [pdfFile,   setPdfFile]   = useState(null);
-  const [jdText,    setJdText]    = useState("");
+  const [jdText,    setJdText]    = useState(() => searchParams.get("jd") || "");
   const [loading,   setLoading]   = useState(false);
   const [result,    setResult]    = useState(null);
   const [error,     setError]     = useState("");

@@ -225,3 +225,40 @@ export async function callModel({
     }
   }
 }
+
+// ── IS THIS WORTH RETRYING? ─────────────────────────────────────────────────────────────────────
+//
+// "Could not import this job. Please try again" was shown for an EXHAUSTED BILLING BALANCE. No
+// number of retries can clear that, so the message sent every user into a loop that could only
+// fail, and told whoever read the report that capture was flaky rather than unfunded. A wrong
+// remedy is worse than no remedy: it hides the real one.
+//
+// Lives here because this is the one path every model call passes through, so every caller can ask
+// the same question and get the same answer. It classifies the CONDITION, not the feature — the
+// import route was simply the first place the distinction mattered.
+//
+// ⛔ MATCHES ON THE PROVIDER'S OWN WORDING, which is fragile, so it fails SAFE: anything it does
+// not recognise is treated as retryable, which is the status quo. A false "retryable" costs one
+// pointless retry; a false "permanent" would tell a user to give up on a blip.
+const PERMANENT_SIGNATURES = [
+  /credit balance is too low/i,        // Anthropic, billing exhausted
+  /insufficient[_ ]quota/i,            // quota consumed, not rate-limited
+  /billing/i,
+  /invalid[_ ]api[_ ]key/i,
+  /authentication[_ ]error/i,
+  /permission[_ ]error/i,
+];
+
+/**
+ * True when retrying CANNOT succeed without a human changing something — funding an account,
+ * fixing a key, granting access.
+ *
+ * ⛔ A 429 is NOT permanent. Rate limiting is the case retrying exists for, and it carries billing
+ * words often enough ("quota") that it has to be excluded before the signature scan, not after.
+ */
+export function isPermanentModelFailure(err) {
+  const status = err?.status ?? err?.statusCode ?? null;
+  if (status === 429) return false;
+  const text = `${err?.message ?? ""} ${err?.error?.message ?? ""}`;
+  return PERMANENT_SIGNATURES.some(re => re.test(text));
+}

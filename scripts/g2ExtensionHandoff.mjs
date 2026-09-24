@@ -444,6 +444,89 @@ async function main() {
     check('the handoff reports the attachment as verified',
       gh?.resume?.attached === true, JSON.stringify(gh?.resume));
 
+    // ── 5b. EVERY VALUE IS VERIFIED BY READ-BACK, AND THE HARD CONTROLS FILL (task D) ──────
+    //
+    // The defect: applyPlan pushed to `filled` the instant after the setter ran. A React-controlled
+    // input that discards a programmatic write was therefore REPORTED AS FILLED over a form the
+    // candidate could see was empty — and telling someone a field is answered when it is not is
+    // worse than failing to answer it, because only one of those is visible before they submit.
+    //
+    // /widgets carries one of each shape a real ATS uses. `reverting_text` is the one that matters.
+    console.log('\n── read-back and the hard control types ──');
+    // resolvedAnswers, not the canonical fallback: this is the path a REAL run takes — the
+    // resolver discovers the employer's actual form and matches against what it found. The
+    // canonical set only covers first_name/email/etc., so it could never describe a combobox or a
+    // contenteditable, which are exactly the controls under test here.
+    //
+    // ⛔ NO ELIGIBILITY ANSWER APPEARS IN THIS PACKET. Those resolve by exact handler mapping or
+    // not at all, and that rule is proved by the eligibility section above — widening it here to
+    // reach a combobox is the one thing this task must not do.
+    const wAnswer = (name, label, type, value) => ({
+      name, label, type, value, field_id: `w_${name}`,
+      provenance: 'profile', required: false, handler_type: null,
+    });
+    const widgetPacket = buildGatePacket({
+      resolvedAnswers: [
+        wAnswer('plain_text',     'Full name',      'text',     'Ada Lovelace'),
+        wAnswer('reverting_text', 'Preferred name', 'text',     'Ada'),
+        wAnswer('start_date',     'Start date',     'date',     '2026-11-02'),
+        wAnswer('skills_multi',   'Skills',         'select',   'go,postgres'),
+        wAnswer('combo_country',  'Country',        'combobox', 'Germany'),
+        wAnswer('bio',            'Short bio',      'text',     'Backend engineer, payments platforms.'),
+      ],
+      applyUrl: `${PORTAL}/widgets`, jobId: 'g2widgets', runId: 1, runJobId: 1,
+      resumeArtifactId: 1, gateReason: 'login_required',
+    });
+    db.prepare(`INSERT INTO apply_gate_packets
+      (user_id, run_id, run_job_id, job_id, apply_url, expected_origin, gate_reason, answers_json,
+       resume_artifact_id, token_hash, expires_at)
+      VALUES (1,1,1,'g2widgets',?,?,'login_required',?,1,'unminted:seed3',0)`)
+      .run(`${PORTAL}/widgets`, PORTAL, JSON.stringify(widgetPacket));
+    await page.goto(`${PORTAL}/widgets`, { waitUntil: 'domcontentloaded' });
+    await control.evaluate(() => chrome.storage.session.get(null).then(all =>
+      chrome.storage.session.remove(Object.keys(all).filter(k => k.startsWith('gate:')))));
+    const wr = await invoke();
+
+    const named = (list, n) => (list || []).find(x => (x.field || '').toLowerCase().includes(n));
+    const wasFilled  = (n) => !!named(wr?.filled, n);
+    const wasSkipped = (n) => named(wr?.skipped, n);
+
+    // ⛔ THE ASSERTION THIS WHOLE TASK EXISTS FOR.
+    const reverted = wasSkipped('preferred name');
+    check('a value the page REVERTS is reported skipped, not filled',
+      !wasFilled('preferred name') && reverted?.reason === 'reverted_after_set',
+      JSON.stringify(reverted || { wronglyFilled: wasFilled('preferred name') }));
+
+    // And it is distinguishable from a field that was never there, because the remedies differ.
+    check('the revert is named distinctly from field_moved',
+      reverted?.reason !== 'field_moved', reverted?.reason);
+
+    // Read the PAGE's own state, never the extension's report — the report is what is on trial.
+    const dom = await page.evaluate(() => ({
+      plain:   document.getElementById('plain_text')?.value,
+      revert:  document.getElementById('reverting_text')?.value,
+      date:    document.getElementById('start_date')?.value,
+      multi:   [...(document.getElementById('skills_multi')?.selectedOptions || [])].map(o => o.value),
+      combo:   document.getElementById('combo_country')?.textContent?.trim(),
+      bio:     document.getElementById('bio')?.textContent?.trim(),
+    }));
+
+    check('a plain control still fills, so a total failure is distinguishable',
+      dom.plain === 'Ada Lovelace' && wasFilled('full name'), JSON.stringify(dom.plain));
+    check('the page really did discard the reverting value', dom.revert === '', JSON.stringify(dom.revert));
+    check('a date input round-trips its format', dom.date === '2026-11-02', JSON.stringify(dom.date));
+    check('a multi-select receives the whole SET',
+      dom.multi.includes('go') && dom.multi.includes('postgres'), JSON.stringify(dom.multi));
+    check('a custom ARIA combobox is driven and lands on the option',
+      dom.combo === 'Germany', JSON.stringify(dom.combo));
+    check('a contenteditable is filled', /Backend engineer/.test(dom.bio || ''), JSON.stringify(dom.bio));
+
+    // Everything the run CLAIMS it filled must be true of the page. This is the general form of
+    // the assertion above: no claim without a matching value.
+    check('every field reported filled is verified by read-back',
+      (wr?.filled || []).every(f => f.verified === true),
+      `${(wr?.filled || []).length} filled, ${(wr?.filled || []).filter(f => f.verified).length} verified`);
+
     // ── 6. the packet is cleared when the tab closes ───────────────────────
     console.log('\n── session state ──');
     const before = await control.evaluate(() => chrome.storage.session.get(null)

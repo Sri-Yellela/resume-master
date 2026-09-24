@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { importJob, ImportInputError } from "../services/jobs/importJob.js";
+import { isPermanentModelFailure } from "../services/modelCall.js";
 
 // Sibling to routes/importedJobs.js, NOT an extension of it — importedJobs.js manages the
 // legacy per-user `imported_jobs` table (LinkedIn-extension saved jobs). This router writes
@@ -23,7 +24,22 @@ export function createImportJobRouter(db, anthropic) {
         return res.status(400).json({ error: err.message });
       }
       console.error("[POST /api/import/job] Error:", err.message);
-      res.status(502).json({ error: "Could not import this job. Please try again." });
+
+      // ⛔ DO NOT TELL A USER TO RETRY SOMETHING THAT CANNOT SUCCEED.
+      // Import requires a model call, and when the balance is exhausted every attempt fails the
+      // same way in about 200ms. The old blanket "Please try again" sent people into a loop that
+      // could only fail, and made an unfunded account read as a flaky feature — which is exactly
+      // how it was reported. 503 rather than 502: the service is unavailable, not the upstream
+      // misbehaving, and `retryable` says so in a field a client can branch on instead of
+      // pattern-matching prose.
+      if (isPermanentModelFailure(err)) {
+        return res.status(503).json({
+          error: "Job capture is unavailable right now — the AI service this needs is not " +
+                 "currently funded. Retrying will not help; this needs an account change.",
+          retryable: false,
+        });
+      }
+      res.status(502).json({ error: "Could not import this job. Please try again.", retryable: true });
     }
   });
 

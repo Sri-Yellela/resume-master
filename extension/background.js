@@ -181,9 +181,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  // ⛔ THESE TWO PATHS WERE NEVER ROUTES. `/ats-score` and `/resume` both fell through to the
+  // client's catch-all, which redirects an authenticated ADMIN to /admin — the whole "the resume
+  // builder opened an admin session" report (docs/EXTENSION_DIAGNOSIS.md §4). The real pages are
+  // /tools/ats and /tools/generate.
+  //
+  // The server-side aliases added alongside this keep the OLD paths working for every copy of
+  // v1.0.0 already installed, because this file only reaches users after a Web Store update. Both
+  // halves are deliberate: the alias fixes today, this fixes the next build.
   if (message.type === 'OPEN_ATS_SCORE') {
     const encoded = encodeURIComponent((message.jobText || '').slice(0, 5000));
-    chrome.tabs.create({ url: `${RESUME_MASTER_URL}/ats-score?jd=${encoded}` });
+    chrome.tabs.create({ url: `${RESUME_MASTER_URL}/tools/ats?jd=${encoded}` });
     sendResponse({ success: true });
     return true;
   }
@@ -195,7 +203,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'OPEN_RESUME_BUILDER') {
-    chrome.tabs.create({ url: `${RESUME_MASTER_URL}/resume` });
+    // /tools/generate is the standalone resume generator. There is no separate "resume builder"
+    // surface in the client and there never was, which is why /resume could not have worked.
+    chrome.tabs.create({ url: `${RESUME_MASTER_URL}/tools/generate` });
     sendResponse({ success: true });
     return true;
   }

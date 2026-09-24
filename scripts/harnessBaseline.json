@@ -77,6 +77,9 @@
   "dx2ExtensionIdentity": {
     "pass": 21
   },
+  "dx4ToolRoutes": {
+    "pass": 8
+  },
   "e2CaptureConvergence": {
     "pass": 15
   },
@@ -96,7 +99,7 @@
     "pass": 41
   },
   "g2ExtensionHandoff": {
-    "pass": 27
+    "pass": 36
   },
   "g3ReviewOverlay": {
     "pass": 19

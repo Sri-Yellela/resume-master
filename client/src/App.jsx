@@ -577,6 +577,19 @@ function AppDashboard({ authUser, setAuthUser }) {
   );
 }
 
+/**
+ * A dead path from the published extension, forwarded to the page that actually exists.
+ *
+ * Its own component rather than an inline `<Navigate>` for one reason: the query string has to
+ * survive. `?jd=` carries the job text the extension extracted from the page, and reading it needs
+ * a hook — putting `useLocation()` in AppRouter instead would re-render the whole router on every
+ * navigation to carry a value only these two routes use.
+ */
+function LegacyToolRedirect({ to }) {
+  const { search } = useLocation();
+  return <Navigate to={`${to}${search}`} replace/>;
+}
+
 function AppRouter() {
   const { theme } = useTheme();
   const [authUser,    setAuthUser]    = useState(null);
@@ -648,6 +661,25 @@ function AppRouter() {
         <Route path="/tools/ats"      element={<ATSToolPage/>}/>
         <Route path="/tools/generate" element={<GenerateToolPage/>}/>
         <Route path="/tools/apply"    element={<ApplyToolPage/>}/>
+
+        {/* ── LEGACY ALIASES FOR THE PUBLISHED EXTENSION ──────────────────────────────────────
+            The extension shipped as v1.0.0 opens `/resume` and `/ats-score?jd=…`. NEITHER HAS
+            EVER BEEN A ROUTE, so both fell through to the catch-all below — and for a signed-in
+            admin that catch-all redirects to /admin. That is the entire "the resume builder
+            opened an admin session" report: not a session bug, a dead link landing on a 404
+            handler that promotes admins. See docs/EXTENSION_DIAGNOSIS.md §4.
+
+            ⛔ THESE FIX THE INSTALLED BUILD, AND THAT IS WHY THEY EXIST. The extension is frozen
+            for P4 (Web Store review), so correcting its URLs only helps after a store update that
+            has not happened. An alias here works for every copy already installed, today. Keep
+            them until telemetry says no build is opening the old paths — which, for an extension
+            users are never forced to update, is effectively forever.
+
+            `replace` so the dead path does not sit in history behind the user's back button, and
+            the SEARCH STRING IS CARRIED: `?jd=` is the job text the popup extracted, and dropping
+            it is the second half of the same defect (ATSToolPage reads it now). */}
+        <Route path="/resume"    element={<LegacyToolRedirect to="/tools/generate"/>}/>
+        <Route path="/ats-score" element={<LegacyToolRedirect to="/tools/ats"/>}/>
 
         {/* Marketing pages — always public */}
         <Route path="/features"     element={<FeaturesPage/>}/>

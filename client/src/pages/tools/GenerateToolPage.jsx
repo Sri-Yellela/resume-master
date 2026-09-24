@@ -1,5 +1,9 @@
 // client/src/pages/tools/GenerateToolPage.jsx — Standalone resume generator
 import { useState, useRef } from "react";
+// ⛔ Same defect as ATSToolPage: `Link` was used and never imported, so this page threw
+// "ReferenceError: Link is not defined" on render and has never worked. It is the page the
+// extension's "Open Resume Builder" button opens.
+import { Link } from "react-router-dom";
 import { useTheme } from "../../styles/theme.jsx";
 import { Footer } from "../../components/Footer.jsx";
 import ScrollDock from "../../components/ScrollDock.jsx";

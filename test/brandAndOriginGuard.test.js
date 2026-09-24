@@ -140,9 +140,26 @@ const ALLOWED_FILES = {
     "This guard. It names the forbidden literals in order to search for them.",
   "documentation.md":
     "The repository's long-form history and deploy log, written in the past tense about a service " +
-    "that WAS at the old address. P5 rewrites it from measured state.",
+    "that WAS at the old address. P5 ran on 2026-09-24 and deliberately did NOT touch it — the " +
+    "reset produced README/HANDOFF/ARCHITECTURE as new documents and left doc retirement to its " +
+    "own pass. Removed when that pass classifies this file.",
   "deploy_guide.md":
-    "Same: a historical deploy record. P5 classifies it KEEP / FOLD IN / DELETE.",
+    "Same: a historical deploy record, left in place by P5 for the same reason. Removed when the " +
+    "doc-retirement pass classifies it.",
+
+  // ── Written BY P5, and they name the old origin because the system still serves it ──────────
+  // Not history: both describe live, current behaviour that a reader has to know about. Removing
+  // the literal would make them wrong, and deriving it from LEGACY_ORIGIN inside prose would be
+  // unreadable. Both go when P4 lands — at which point the statements themselves stop being true.
+  "HANDOFF.md":
+    "States that the published extension still talks to the old origin, and that funding/Web Store " +
+    "work is the owner's. Removed at P4, when the extension update goes live and the old origin " +
+    "can be retired.",
+  "ARCHITECTURE.md":
+    "§1, §7 and §10 document that BOTH origins serve one app, that the session cookie is host-only " +
+    "so a Google sign-in started on the old origin lands its cookie on the new one, and that there " +
+    "must be NO 301 on the old origin while the reviewed extension points at it. Every one of " +
+    "those is a fact about the old host and cannot be written without naming it. Removed at P4.",
 };
 
 // ════════════════════════════════════════════════════════════════════════════════════════════

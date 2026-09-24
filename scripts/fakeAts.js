@@ -983,6 +983,90 @@ function parseMultipart(buf, boundary) {
   return { fields, files, partCount: parts.length };
 }
 
+// ── THE CONTROL TYPES applyPlan COULD NOT FILL, PLUS THE ONE IT LIED ABOUT (task D) ───────────
+//
+// Every field here is a shape a real ATS uses and the old fill path either skipped or misreported:
+//
+//   reverting_text  A REACT-CONTROLLED INPUT. Its component state is the source of truth, so a
+//                   programmatic `value =` that never went through setState is discarded on the
+//                   next render. The old applyPlan pushed to `filled` the instant after the setter
+//                   ran, so this field was REPORTED AS FILLED over a form the candidate could see
+//                   was empty. This is the single most important fixture on the page.
+//   combo_country   A Workday/react-select combobox: a div with role=combobox and a popup listbox.
+//                   Invisible to the old probe, which only enumerated input/select/textarea.
+//   bio             contenteditable — same invisibility.
+//   skills_multi    select[multiple]: the one control where "the value" is a set.
+//   start_date      input[type=date], to pin that the date format survives a round trip.
+//   plain_text      A control that simply works, so a run where EVERYTHING fails is distinguishable
+//                   from one where only the hard cases do.
+function widgetsForm() {
+  return page('Widgets — Application', `
+    <h1>Widgets — Application</h1>
+    <form id="widgets-form">
+      <label for="plain_text">Full name</label>
+      <input id="plain_text" name="plain_text" type="text">
+
+      <label for="reverting_text">Preferred name (React-controlled, reverts)</label>
+      <input id="reverting_text" name="reverting_text" type="text">
+
+      <label for="start_date">Earliest start date</label>
+      <input id="start_date" name="start_date" type="date">
+
+      <label for="skills_multi">Skills (multi-select)</label>
+      <select id="skills_multi" name="skills_multi" multiple size="4">
+        <option value="go">Go</option>
+        <option value="node">Node.js</option>
+        <option value="postgres">Postgres</option>
+        <option value="rust">Rust</option>
+      </select>
+
+      <label id="combo_country_label">Country</label>
+      <div id="combo_country" role="combobox" aria-controls="combo_country_list"
+           aria-label="Country" tabindex="0"
+           style="border:1px solid #999;padding:8px;cursor:pointer">Select…</div>
+      <ul id="combo_country_list" role="listbox" style="display:none;border:1px solid #ccc;margin:0;padding:0;list-style:none">
+        <li role="option" style="padding:6px">United States</li>
+        <li role="option" style="padding:6px">United Kingdom</li>
+        <li role="option" style="padding:6px">Germany</li>
+      </ul>
+
+      <label for="bio">Short bio (contenteditable)</label>
+      <div id="bio" contenteditable="true" aria-label="Short bio"
+           style="border:1px solid #999;min-height:60px;padding:8px"></div>
+
+      <button type="submit">Submit</button>
+    </form>
+    <script>
+      // A React-controlled input, reproduced honestly: the component's state is authoritative and
+      // a value it did not set is thrown away on the next frame. requestAnimationFrame, not a
+      // microtask, because that is when a real render commits — and it is exactly the window a
+      // synchronous read-back would miss.
+      (function () {
+        var rev = document.getElementById('reverting_text');
+        var state = '';
+        rev.addEventListener('input', function () {
+          requestAnimationFrame(function () { rev.value = state; });
+        });
+      })();
+
+      // A custom combobox. There is no value to assign — it only changes when its own option is
+      // clicked, which is what applyPlan's setCombobox drives.
+      (function () {
+        var box  = document.getElementById('combo_country');
+        var list = document.getElementById('combo_country_list');
+        box.addEventListener('click', function () {
+          list.style.display = list.style.display === 'none' ? 'block' : 'none';
+        });
+        list.addEventListener('click', function (e) {
+          var opt = e.target.closest('[role="option"]');
+          if (!opt) return;
+          box.textContent = opt.textContent;
+          list.style.display = 'none';
+        });
+      })();
+    </script>`);
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const path = url.pathname;
@@ -1030,6 +1114,7 @@ const server = http.createServer(async (req, res) => {
     if (path === '/gated/form')    return send(200, gatedForm({ presentation: url.searchParams.get('presentation') === '1' }));
     if (path === '/gated/captcha') return send(200, gatedCaptcha());
     if (path === '/gated/mixed')   return send(200, gatedMixed());
+    if (path === '/widgets')         return send(200, widgetsForm());
     if (path === '/multistep')       return send(200, multistepStep1());
     // Also GET-able so the pushState URL is a real address — a reload after an SPA advance must
     // land on the same step rather than a 404, as it does on a real portal.

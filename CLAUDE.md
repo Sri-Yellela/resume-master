@@ -37,7 +37,7 @@ file back to CRLF, not to change the test.
 
 ## Deliberate test failures — currently 2
 
-`npm test` is **2626 tests, 2624 pass, 2 fail**, and those two failures are intentional:
+`npm test` is **2636 tests, 2634 pass, 2 fail**, and those two failures are intentional:
 
 ```
 test/extensionSubmission.test.js

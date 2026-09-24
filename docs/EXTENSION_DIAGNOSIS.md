@@ -118,6 +118,14 @@ it is close enough that a user cannot distinguish it from nothing happening. Wor
 
 ## 4. DEFECT A — dead routes, and a 404 fallback that promotes admins
 
+> **✅ RESOLVED 2026-09-24.** And it was THREE defects, not two. Legacy aliases in `App.jsx`
+> forward `/resume` → `/tools/generate` and `/ats-score` → `/tools/ats` **carrying the query**,
+> which fixes every already-installed copy without a store update; `ATSToolPage` now reads
+> `?jd=`; and — found only by opening the page — **both tool pages used `<Link>` without
+> importing it**, so each threw `ReferenceError` on render and had never worked. `vite build`
+> exits 0 on that. Verified by `scripts/dx4ToolRoutes.mjs`, which asserts the pages RENDER, not
+> just that the URL is right. Guarded by `test/jsxIdentifiersResolve.test.js`.
+
 **This is the reported "resume builder opened an ADMIN session" symptom, in full.**
 
 Every URL the extension navigates a user to:
@@ -152,6 +160,13 @@ button still not working.
 ---
 
 ## 5. DEFECT B — capture cannot degrade, so it fails whole
+
+> **⚠ PARTIALLY RESOLVED 2026-09-24 — the MESSAGE only.** The root cause is deliberately left:
+> the balance stays unfunded. `isPermanentModelFailure()` in `services/modelCall.js` now
+> separates a billing exhaustion from a transient failure, and `/api/import/job` answers 503
+> with `retryable: false` and *"Retrying will not help; this needs an account change."*
+> Measured in a real browser: that is what the toast says now. Capture still does not work, and
+> a deterministic title-plus-URL fallback remains unscheduled.
 
 Reproduced in a real browser (`scripts/dx1CaptureDiagnosis.mjs`) with a real `activeTab` grant from
 a real OS keypress, against the **real `server.js`** on a throwaway data dir, on two deliberately
@@ -394,8 +409,16 @@ domain flip repackages it anyway — at which point both tests go green on their
 
 ### The real gap
 
-**No read-back.** `filled.push(...)` runs immediately after `nativeSetter` with no re-read of the
-element. A React-controlled select that silently reverts is reported as filled. The **only** place
+**No read-back — ✅ RESOLVED 2026-09-24.** `applyPlan` is now async: it sets everything, yields
+two animation frames so a framework re-render can disagree, then **re-reads every value** and
+reports `reverted_after_set` for anything that did not stick. A synchronous re-read would not
+have caught it. `select[multiple]`, date inputs, `contenteditable` and ARIA/custom comboboxes
+are handled too. Proven in a real browser against a deliberately-reverting React-controlled
+input (`scripts/fakeAts.js` `/widgets`, asserted in `g2ExtensionHandoff`). The original text
+follows.
+
+**The defect as found:** `filled.push(...)` ran immediately after `nativeSetter` with no re-read
+of the element. A React-controlled select that silently reverts is reported as filled. The **only** place
 read-back exists in the whole file is the resume attachment, which does it correctly and is the
 model to copy.
 

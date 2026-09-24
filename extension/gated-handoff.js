@@ -44,7 +44,21 @@ const sessionKey = (tabId) => `gate:${tabId}`;
 function probeFormShape() {
   const form = document.querySelector('form');
   const scope = form || document;
-  const controls = [...scope.querySelectorAll('input, select, textarea')].filter(
+  // ⛔ THIS SELECTOR AND THE FILTER BELOW MUST STAY BYTE-IDENTICAL TO applyPlan'S.
+  // The plan addresses controls by POSITION, so the two functions have to enumerate the same list
+  // in the same order or every step lands on the wrong element. They cannot share a constant —
+  // each is serialised separately into the page by executeScript — so the duplication is
+  // deliberate and has to be maintained by hand. applyPlan re-verifies identity by name/id before
+  // writing, so a divergence shows up as every field reporting `field_moved` rather than as a
+  // stray value, which is the safe direction to fail.
+  //
+  // `[role=combobox]` and `[contenteditable]` are here because Workday and react-select render a
+  // div, not a <select>: those fields were invisible to the probe and so could never be filled.
+  // Adding them does NOT widen what an attestation can match — matchAnswersToFields applies the
+  // eligibility exact-match rule to every field uniformly, whatever its type.
+  const controls = [...scope.querySelectorAll(
+    'input, select, textarea, [role="combobox"], [contenteditable=""], [contenteditable="true"]'
+  )].filter(
     el => !['hidden', 'submit', 'button', 'image', 'reset'].includes((el.type || '').toLowerCase())
   );
 
@@ -84,12 +98,20 @@ function probeFormShape() {
 // changed, so the next render puts the old value back. Assigning through the prototype's NATIVE
 // setter and then dispatching input/change is what makes the change real to the framework. G0
 // confirmed activeTab alone reaches the MAIN world.
-function applyPlan(plan, resume) {
+async function applyPlan(plan, resume) {
   const form = document.querySelector('form');
   const scope = form || document;
-  const controls = [...scope.querySelectorAll('input, select, textarea')].filter(
+  // ⛔ MUST STAY BYTE-IDENTICAL TO probeFormShape'S. See the note there — the plan addresses
+  // controls by position, so the two enumerations have to agree.
+  const controls = [...scope.querySelectorAll(
+    'input, select, textarea, [role="combobox"], [contenteditable=""], [contenteditable="true"]'
+  )].filter(
     el => !['hidden', 'submit', 'button', 'image', 'reset'].includes((el.type || '').toLowerCase())
   );
+
+  const isEditable = (el) => el.isContentEditable === true;
+  const isCombo    = (el) => el.getAttribute?.('role') === 'combobox' && !('options' in el);
+  const same       = (a, b) => String(a ?? '').trim().toLowerCase() === String(b ?? '').trim().toLowerCase();
 
   const nativeSetter = (el, value) => {
     const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype
@@ -102,16 +124,46 @@ function applyPlan(plan, resume) {
     el.dispatchEvent(new Event('change', { bubbles: true }));
   };
 
-  const filled = [], skipped = [];
+  // A custom combobox (Workday, react-select) is a div with a popup listbox. There is no value to
+  // assign — the widget only changes when its own option is clicked, so this drives it the way a
+  // person would and then reads back what it is displaying.
+  const setCombobox = (el, want) => {
+    el.click();
+    const id = el.getAttribute('aria-controls') || el.getAttribute('aria-owns');
+    const list = (id && document.getElementById(id))
+      || el.parentElement?.querySelector('[role="listbox"]')
+      || document.querySelector('[role="listbox"]');
+    const options = list ? [...list.querySelectorAll('[role="option"]')] : [];
+    const hit = options.find(o => same(o.textContent, want))
+             || options.find(o => String(o.textContent || '').trim().toLowerCase()
+                                    .includes(String(want).trim().toLowerCase()));
+    if (!hit) { el.blur?.(); return false; }
+    hit.click();
+    return true;
+  };
+
+  const filled = [], skipped = [], pending = [];
 
   for (const step of plan) {
     const el = controls[step.index];
     // The DOM can move between the probe and the fill on an SPA. Re-verify identity rather than
     // trusting an index: writing a home address into whatever happens to be at position 7 is exactly
     // the stray release this design refuses to make.
+    //
+    // A combobox or contenteditable often carries NEITHER name NOR id, so those two checks pass
+    // vacuously for them — the label is the only identity left, and it is checked for exactly that
+    // case rather than for everything, because a label is the weaker signal of the three.
+    const labelless = !step.name && !step.id;
     if (!el || (step.name && el.name !== step.name) || (step.id && el.id !== step.id)) {
       skipped.push({ field: step.label, reason: 'field_moved' });
       continue;
+    }
+    if (labelless && step.label) {
+      const shown = (el.getAttribute?.('aria-label') || el.closest?.('label')?.textContent || '').trim();
+      if (shown && !same(shown.slice(0, 200), step.label)) {
+        skipped.push({ field: step.label, reason: 'field_moved' });
+        continue;
+      }
     }
     try {
       if (el.type === 'checkbox' || el.type === 'radio') {
@@ -121,6 +173,19 @@ function applyPlan(plan, resume) {
           el.dispatchEvent(new Event('input',  { bubbles: true }));
           el.dispatchEvent(new Event('change', { bubbles: true }));
         }
+        pending.push({ step, el, kind: 'toggle', want });
+      } else if (el.tagName === 'SELECT' && el.multiple) {
+        // One answer may carry several values; a multi-select is the only control where "the
+        // value" is a set. Accepts an array or a comma-separated string.
+        const wants = (Array.isArray(step.value) ? step.value : String(step.value).split(','))
+          .map(v => String(v).trim()).filter(Boolean);
+        const hits = wants.map(w =>
+          [...el.options].find(o => o.value === w || same(o.text, w))).filter(Boolean);
+        if (!hits.length) { skipped.push({ field: step.label, reason: 'value_not_in_options' }); continue; }
+        for (const o of el.options) o.selected = hits.includes(o);
+        el.dispatchEvent(new Event('input',  { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        pending.push({ step, el, kind: 'multi', want: hits.map(o => o.value) });
       } else if (el.tagName === 'SELECT') {
         const match = [...el.options].find(
           o => o.value === step.value ||
@@ -130,12 +195,74 @@ function applyPlan(plan, resume) {
         // anyway left the select on its blank first option while the run recorded it as answered.
         if (!match) { skipped.push({ field: step.label, reason: 'value_not_in_options' }); continue; }
         nativeSetter(el, match.value);
+        pending.push({ step, el, kind: 'value', want: match.value });
+      } else if (isCombo(el)) {
+        if (!setCombobox(el, step.value)) {
+          skipped.push({ field: step.label, reason: 'value_not_in_options' });
+          continue;
+        }
+        pending.push({ step, el, kind: 'combo', want: String(step.value) });
+      } else if (isEditable(el)) {
+        el.focus?.();
+        el.textContent = String(step.value);
+        el.dispatchEvent(new Event('input',  { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        pending.push({ step, el, kind: 'editable', want: String(step.value) });
       } else {
         nativeSetter(el, String(step.value));
+        pending.push({ step, el, kind: 'value', want: String(step.value) });
       }
-      filled.push({ field: step.label, name: step.name, provenance: step.provenance });
     } catch (e) {
       skipped.push({ field: step.label, reason: `error:${e.message}` });
+    }
+  }
+
+  // ── READ BACK, AFTER GIVING THE PAGE A CHANCE TO DISAGREE ────────────────────────────────────
+  //
+  // ⛔ THIS IS THE POINT OF THE WHOLE FUNCTION'S ASYNC SHAPE. Before this, a step was recorded as
+  // `filled` the instant after the setter ran — so a React-controlled input that reverts on its
+  // next render was reported as filled, and the run told the candidate a field was answered while
+  // the form in front of them was empty. Reporting a value we did not place is worse than failing
+  // to place it, because only one of those is visible to the person about to submit.
+  //
+  // A synchronous re-read would NOT catch it: the revert happens when the framework re-renders,
+  // which is a task or two away. Two animation frames puts this after the next paint, which is
+  // after React has committed. The setTimeout is the fallback for a backgrounded tab, where
+  // requestAnimationFrame may never fire and the whole handoff would otherwise hang.
+  await new Promise((resolve) => {
+    let done = false;
+    const finish = () => { if (!done) { done = true; resolve(); } };
+    setTimeout(finish, 400);
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => requestAnimationFrame(finish));
+    }
+  });
+
+  for (const { step, el, kind, want } of pending) {
+    let ok = false, got = '';
+    try {
+      if (kind === 'toggle')        { ok = el.checked === want; got = String(el.checked); }
+      else if (kind === 'multi')    { const sel = [...el.selectedOptions].map(o => o.value);
+                                      ok = want.every(w => sel.includes(w)); got = sel.join(','); }
+      else if (kind === 'editable') { got = (el.textContent || '').trim(); ok = same(got, want); }
+      else if (kind === 'combo')    { got = (el.textContent || el.value || '').trim();
+                                      // The widget renders its own label, so containment is the
+                                      // honest test — an exact match would fail on "Yes ✓".
+                                      ok = got.toLowerCase().includes(String(want).trim().toLowerCase()); }
+      else                          { got = el.value; ok = same(got, want); }
+    } catch (e) {
+      skipped.push({ field: step.label, reason: `verify_failed:${e.message}` });
+      continue;
+    }
+    if (ok) {
+      filled.push({ field: step.label, name: step.name, provenance: step.provenance, verified: true });
+    } else {
+      // The value did not stick. Named distinctly from `field_moved` because the remedy differs:
+      // this one means the page actively rejected or overwrote what we wrote.
+      skipped.push({
+        field: step.label, reason: 'reverted_after_set',
+        wanted: String(want).slice(0, 80), got: String(got).slice(0, 80),
+      });
     }
   }
 
