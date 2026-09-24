@@ -43,12 +43,20 @@ postal address into an employer's form · docs describing a fill that no longer 
 describing shipped mobile features for code that never existed · commit `f8be63c`
 *"feat: JobRepository.swift — consumes /api/jobs"* for a file not in the build target.
 
-**A seventh, newer: a guard blind to what it guards.** `modelCallGuard` scanned for
-`.messages.create(` and missed `messages.batches.create` · its comment stripper used `/\/\/.*$/`, so
-`https://api.groq.com/...` was erased as a comment before the scan ran · three source anchors were
-already dead in passing tests, over-slicing by up to 4.8× because `indexOf` returns `-1` and
-`slice(-1)` means "one from the end". **A guard never seen to fail is not evidence** — verify by
-injecting a violation.
+**A seventh, newer: a guard blind to what it guards.** Six have now shipped inert.
+`modelCallGuard` scanned for `.messages.create(` and missed `messages.batches.create` · its comment
+stripper used `/\/\/.*$/`, so `https://api.groq.com/...` was erased as a comment before the scan
+ran · three source anchors were already dead in passing tests, over-slicing by up to 4.8× because
+`indexOf` returns `-1` and `slice(-1)` means "one from the end" · `ae5BoardUi` stubbed
+`logo.clearbit.com` with a 1×1 PNG, so its logo assertions passed while **every logo on the board
+was dead** · `ak2BandSurfaces` stayed green for months against a fixture that **invented the field
+under test** — `baseAtsScore`, a key `/api/jobs` has never emitted · the monetisation lever was
+cached as a boot constant, making both of its states unreachable inside one test process.
+
+**A guard never seen to fail is not evidence** — verify by injecting a violation. Note the shape
+the last three share: the guard and the thing it guards were both supplied by the test. A fixture
+that invents the field, a stub that answers for a dead host, and a constant frozen at boot are the
+same defect wearing three costumes.
 
 ---
 

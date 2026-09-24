@@ -24,7 +24,7 @@
 //       46            100%                   58%
 //
 // Below 44 the band admits a posting the owner rated poorly; above 44 it only loses good ones. The
-// explicit, accepted cost: **4 of the 12 postings the owner graded 5 do not reach Strong** — they
+// explicit, accepted cost: **5 of the 12 postings the owner graded 5 do not reach Strong** — they
 // render Moderate. A Strong band that admits a bad match is worse than a smaller one, because
 // Strong is the band a user acts on.
 //

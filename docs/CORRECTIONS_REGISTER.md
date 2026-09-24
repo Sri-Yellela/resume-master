@@ -188,16 +188,33 @@ fifteen times.
 
 ---
 
-## Corrections to make in the docs
+---
 
-- [x] `NEXT_WORK.md` — ~~replace every `skills_json` 37% reference with 99.8%~~ **with 43.7%**, per
-      the row above. Done 2026-09-21, with the superseded figure struck through in place rather than
-      deleted, because this metric has now had three values and the next reader needs to see that
-- [x] `NEXT_WORK.md` — baseline 2443, migration 106, production `eecbe09` → **2596 / 109 /
-      `2e4429e`**, read from `/api/version`. Done 2026-09-21
-- [ ] `NEXT_WORK.md` — delete the "25 rows/day" lesson; AE's loop supersedes it
-- [ ] `FINDINGS_ARCHIVE.md` — add the three new blind guards (`ak2BandSurfaces`, the cached lever, `ae5BoardUi`)
-- [ ] `shared/atsBands.js` — the accepted cost is **5 of 12** graded-5 missing Strong, not 4
-- [ ] `docs/am1-ats-graded-corpus.json` — 26 of 30 postings now score differently from the key, max \|delta\| 40. ρ still reproduces at 0.737 within tolerance
-- [ ] `PRIVACY_RECONCILIATION.md` — DuckDuckGo Icons in, Clearbit out; and the third-party row is **manually maintained and unguarded** by the four-column test
-- [ ] Anywhere claiming the mobile repos are two phases behind — Android has Phase 1, 2a and persistence; **iOS has had no session at all**
+## Why this file stays
+
+⛔ **RECOMMENDED KEEP, and not as a backlog.** The checklist that used to end this file was closed
+out during the P5 documentation reset on 2026-09-24 and removed, because a checklist is the one
+part of this document with an expiry date.
+
+What remains has none. This is the record of **HOW the docs went wrong** — the shapes, the
+verification methods that proved nothing, the silent failures and how long each ran. That outlives
+every individual entry, because the next wrong figure will be new but the way it becomes wrong
+will not.
+
+"Current" has a half-life of about one session in this repository. A register of *methods* does
+not.
+
+**How the checklist closed, 2026-09-24:**
+
+| item | outcome |
+|---|---|
+| `NEXT_WORK.md` — delete the "25 rows/day" lesson | **File deleted.** Superseded by `HANDOFF.md`; it was stale eight times and only ever named in comments, never read by code |
+| `FINDINGS_ARCHIVE.md` — add three blind guards | **Done.** `ak2BandSurfaces`, `ae5BoardUi` and the cached monetisation lever added to the seventh defect shape, with the shape they share named |
+| `shared/atsBands.js` — 5 of 12, not 4 | **Corrected** in the source comment |
+| `am1-ats-graded-corpus.json` — 26 of 30 drifted, rho 0.737 | **Documented** in `ARCHITECTURE.md` §3, alongside the 0.746 the tests assert. Owner 2026-09-24: record both figures and the drift — the drift is the finding |
+| `PRIVACY_RECONCILIATION.md` — DuckDuckGo in, Clearbit out | **Already done.** Verified in the file: DuckDuckGo is the live logo provider, Clearbit and Google Fonts are both named as retired recipients |
+| mobile "two phases behind" | **No action needed.** No document made the claim except this checklist |
+
+⛔ **One correction this register itself needs.** Its `skills_json` row records 37% → 99.8% → 43.7%.
+Measured 2026-09-24: **41.0% production, 35.8% local.** That metric has now had five values. Do not
+quote it from any document, including this one — measure it.
