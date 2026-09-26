@@ -1,4 +1,30 @@
-# Domain migration + rebrand — resumemaster.one → jobsviadraft.com, "Resume Master" → "Draft"
+# Domain migration + rebrand — resumemaster.one → jobsviadraft.com, "Resume Master" → "draft"
+
+## ⛔ CORRECTED 2026-09-26 — READ BEFORE TICKING ANYTHING IN THE CHECKLIST AT THE BOTTOM
+
+**`resumemaster.one` is not being retired.** The owner decided on 2026-09-25 that Resume Master is
+a PRODUCT — a separate, stateless processing service that keeps that domain
+(`docs/PRODUCT_MODEL.md`). This document was written on the opposite premise and its final
+checklist section still instructed the teardown. **Four of its instructions were wrong:**
+
+| | Said | Actually |
+|---|---|---|
+| 1 | Retire the old domain once the extension update is live | **Never.** It is a product's address |
+| 2 | Remove the old OAuth redirect URIs after a week of no traffic | **Never.** That callback is how Resume Master's own users sign in |
+| 3 | "Consider the 301" once the extension is approved | ⛔ **The 301 must never happen** |
+| 4 | `www` can be activated once a domain slot frees up | **No slot ever frees.** `www` is dropped; the bare apex is canonical |
+
+⛔ **The 301 is the one that can silently break a live service, and the reason is now PERMANENT
+rather than a review-queue delay.** A credentialed `fetch` does not follow redirects. A 301 on an
+`/api/...` route therefore fails **silently** — the caller gets an opaque response that reads as an
+empty answer rather than an error — for every credentialed client of that origin, present and
+future. It is not only about the extension that prompted the rule, and there is no date after which
+it becomes fine. **Serve both origins directly, always.**
+
+Each item is struck in place below rather than deleted, because a reader who saw the earlier version
+needs to know which way it flipped.
+
+---
 
 **Two separate projects.** Do them in this order, with a gap between.
 
@@ -25,8 +51,10 @@ Agents cannot reach any of this. Do these before M1's code work.
    certificate; it will give you a `CNAME` target.
 2. At the registrar, add the records Railway specifies. An apex domain needs either `ALIAS`/`ANAME`
    or the registrar's flattening — a bare `CNAME` at the apex is invalid.
-3. **Keep `resumemaster.one` attached to the same service.** Both domains serve, one app. Do not
-   remove the old one at any point in M1.
+3. **Keep `resumemaster.one` attached — permanently, not just through M1.** Both domains serve
+   one app today. ⚠ Whether Resume Master later becomes a second Railway service with its own
+   database is an open owner decision (`docs/PRODUCT_MODEL.md`); nothing is built, so today both
+   hosts reach this deployment. Either way the domain stays.
 4. Wait for the certificate to issue on the new domain before changing anything in code. Confirm
    `https://jobsviadraft.com/api/version` answers JSON — not a certificate warning, and not the
    SPA shell.
@@ -48,11 +76,15 @@ In Google Cloud Console → APIs & Services → Credentials → your OAuth clien
 2. Add `https://jobsviadraft.com` to Authorised JavaScript origins, keeping the old.
 3. Only once the new domain is live and sign-in is confirmed working on it, change
    `GOOGLE_CALLBACK_URL` in Railway to the new URL.
-4. Remove the old redirect URI only at the end of M1, after a week of no traffic on it.
+4. ~~Remove the old redirect URI only at the end of M1, after a week of no traffic on it.~~
+   ⛔ **STRUCK 2026-09-26 — DO NOT.** "No traffic on it" was the wrong test even then; it measures
+   whether anyone signed in that week, not whether anyone will. Resume Master's users sign in
+   through that callback. **Both URIs stay listed indefinitely.** An OAuth client may hold many.
 
 ### LinkedIn OAuth
 The app has an `/auth/linkedin` route. In the LinkedIn Developer app → Auth → Authorised redirect
-URLs, add the new domain alongside the old. Same rule: add first, remove last.
+URLs, add the new domain alongside the old. ~~Same rule: add first, remove last.~~ — corrected
+2026-09-26: **add, and never remove.** Same reasoning as the Google client.
 
 ### Chrome Web Store — ⛔ NOT YET
 Nothing here until the extension clears review. When it does, M2 covers it.
@@ -101,12 +133,14 @@ extension under review declares https://resumemaster.one/* as its only host perm
    invalidates the reviewed artifact or forces a resubmission. Record the extension's occurrences
    and leave them. They are M2's problem.
 
-4 · REDIRECT, DO NOT BREAK. resumemaster.one must keep answering. Decide and state which:
-   a. serve both origins identically (simplest, and required while the extension is under review)
-   b. 301 resumemaster.one → jobsviadraft.com  ⛔ NOT while the extension is under review — a 301
-      on an API route can break a fetch that does not follow redirects, and the extension's
-      credentialed calls are exactly that shape
-   Recommend (a) now, (b) later, and say when (b) becomes safe.
+4 · REDIRECT, DO NOT BREAK. resumemaster.one must keep answering. **The choice is settled and it
+   is (a):**
+   a. ⭐ serve both origins identically — permanently
+   b. ~~301 resumemaster.one → jobsviadraft.com~~ ⛔ **NEVER.** A credentialed fetch does not
+      follow redirects, so a 301 on an API route fails silently for every credentialed client of
+      that origin — not just the extension that prompted the rule
+   ~~Recommend (a) now, (b) later, and say when (b) becomes safe.~~ — struck 2026-09-26. There is
+   no "later" and no "when": the old origin belongs to a product that is staying.
 
 5 · COOKIES AND SESSIONS. The session cookie is HttpOnly connect.sid, 7-day rolling, scoped to a
    domain. A user signed in on the old domain has no session on the new one. Report what happens:
@@ -202,12 +236,26 @@ policy names the right operator and domain.
 - [ ] Railway: `GOOGLE_CALLBACK_URL` → the new callback
 - [ ] Confirm sign-in still works on **both** domains
 
-**After the Chrome extension clears review:**
-- [ ] Make the naming decision (M2 step 1) and write it down
-- [ ] Run M2
-- [ ] Resubmit the extension with new screenshots and a version bump
-- [ ] Only then: remove the old OAuth redirect URIs, and consider the 301
+**The naming decision, M2 and the extension repackage are DONE** — see
+`docs/MIGRATION_AND_REBRAND.md` P1–P4 and `docs/BRAND.md`. What remains of the extension is the
+dashboard upload, listed under P4 there.
+
+- [ ] Upload extension **v1.1.0** and re-paste the `storage` and host-permission justifications
+- [ ] Create a reviewer test account on the new domain — ⛔ **none exists**, and the extension does
+      nothing without one
+- [ ] Deploy the client first: the privacy policy text changed, and reviewers fetch it
+
+**⛔ STRUCK 2026-09-26 — DO NOT DO THESE. They were on this list and they are wrong:**
+
+- [ ] ~~Retire `resumemaster.one`~~ — it is a product's address (`docs/PRODUCT_MODEL.md`)
+- [ ] ~~Remove the old OAuth redirect URIs~~ — that callback is how Resume Master's users sign in
+- [ ] ~~Consider the 301~~ — ⛔ **never.** A credentialed fetch does not follow redirects, so it
+      fails silently rather than working, and that is permanent
+- [ ] ~~Activate `www.jobsviadraft.com` once a domain slot frees~~ — no slot frees, and
+      `host_permissions` would not match a `www` host anyway
 
 **Not blocking, worth doing:**
 - [ ] Trademark class check — software/SaaS is Class 42, often with 9 and 35
 - [ ] Decide whether the git repos get renamed (optional, disruptive, cosmetic)
+- [ ] Confirm whether Railway counts custom domains **per service or per account** — a separate
+      Resume Master service needs its own slot, and the old plan assumed one would be free

@@ -1,11 +1,46 @@
 # Migration + Rebrand + Documentation Reset
 
-**One project.** `resumemaster.one` → `jobsviadraft.com`, "Resume Master" → **Draft**. The Chrome
+**One project.** `resumemaster.one` → `jobsviadraft.com`, "Resume Master" → **draft**. The Chrome
 extension package is replaced in place rather than resubmitted from scratch where the dashboard
 allows it.
 
 The rename touches every file that hardcodes a name or an origin, which makes it the right moment to
 collapse those into single sources and to rebuild the documentation from measured state.
+
+---
+
+## ⛔ CORRECTED 2026-09-26 — THIS DOCUMENT ASSUMED THE OLD DOMAIN GOES AWAY. IT DOES NOT.
+
+Every phase below was written on one premise: that `resumemaster.one` is a *former* address being
+walked away from, and that once the extension update ships, the old domain, its OAuth entries and
+its traffic can all be wound down. **The owner decided on 2026-09-25 that Resume Master is a
+PRODUCT** — a separate, stateless processing service on its own deployment
+(`docs/PRODUCT_MODEL.md`). The domain is not a legacy address. It is an address that is staying.
+
+**Four instructions in this document were wrong as a result. Each is struck below where it appears,
+with the reason attached rather than silently deleted — a reader who saw the old version needs to
+know which way it flipped.**
+
+| | Said | Actually |
+|---|---|---|
+| 1 | Keep the old domain attached **until P4 lands** | Keep it attached, **full stop**. There is no event that detaches it |
+| 2 | Remove the old OAuth redirect URI **at the very end** | **Never remove it.** Resume Master's own users sign in through it |
+| 3 | State **when the 301 becomes safe** | ⛔ **It never becomes safe**, and the reason is permanent, not a review-queue delay |
+| 4 | Add `www.jobsviadraft.com`; the slot frees up on retirement | **The slot never frees.** `www` is dropped; the bare apex is canonical |
+
+⛔ **THE 301 IS THE ONE THAT CAN ACTUALLY BREAK SOMETHING, AND THE REASONING CHANGED SHAPE.** The
+original ban was a *timing* argument — don't redirect while a reviewed extension points at the old
+origin, safe once the update is live. That made it sound like a countdown. It is not. A credentialed
+`fetch` does not follow redirects, so a 301 on `/api/...` fails **silently**: the call returns an
+opaque response rather than an error, and the caller sees an empty answer rather than a failure. Any
+client of Resume Master, present or future, that fetches with credentials breaks this way — not just
+the extension, and not just the ones that exist today. **There is no date after which this becomes
+fine.** Serve both origins directly, always.
+
+⚠ **What this document still cannot tell you**, because it is an owner decision that has not been
+made: whether the two origins go on serving ONE app, or whether Resume Master becomes a second
+Railway service with its own database. `docs/PRODUCT_MODEL.md` says the latter; nothing is built.
+Until it is, both hosts serve this app, which is why the no-301 rule binds *this* deployment today.
 
 ---
 
@@ -17,16 +52,28 @@ collapse those into single sources and to rebuild the documentation from measure
 | **P1** | Brand decision, written down once | all code work |
 | **P2** | Single-source the brand and origin, with a guard | the sweep |
 | **P3** | The sweep — all three repos | the extension |
-| **P4** | Extension: replace the package, new screenshots | — |
-| **P5** | Documentation reset | last, so it documents the end state |
+| **P4** | Extension: replace the package, new screenshots | ✅ **done 2026-09-26**, except the dashboard upload |
+| **P5** | Documentation reset | ✅ done 2026-09-24 |
 
 ---
 
 ## P0 — Owner actions, before any code
 
 ### DNS and Railway
-1. Railway → the service → **Settings → Networking → Custom Domain**. Add `jobsviadraft.com` and
-   `www.jobsviadraft.com`. **Keep `resumemaster.one` attached** — both serve one app until P4 lands.
+1. Railway → the service → **Settings → Networking → Custom Domain**. Add `jobsviadraft.com`.
+   **Keep `resumemaster.one` attached — permanently.**
+
+   ~~Add `www.jobsviadraft.com`~~ · ~~both serve one app until P4 lands~~ — ⛔ **struck
+   2026-09-26.** Both were written expecting the old domain to be detached after P4, which freed
+   the second of Railway's two custom-domain slots for `www`. The old domain is staying, so the
+   slot never frees and `www` is dropped: the bare apex is canonical and `docs/BRAND.md` says so.
+   This is not a loss — `host_permissions` is a match pattern and `https://jobsviadraft.com/*`
+   does **not** match a `www` host, so a `www` that worked would have been a way to break the
+   extension quietly.
+
+   ⚠ A separate Resume Master service would need a slot of its own. Confirm whether Railway counts
+   custom domains per service or per account **before** planning the split; this document does not
+   know and neither did the plan that assumed a free slot.
 2. At the registrar, add the records Railway specifies. An apex domain needs `ALIAS`/`ANAME` or the
    registrar's flattening; a bare `CNAME` at the apex is invalid.
 3. Wait for the certificate. Confirm `https://jobsviadraft.com/api/version` answers **JSON** — not a
@@ -39,10 +86,16 @@ In Cloud Console → Credentials → the OAuth client:
 2. **Add** `https://jobsviadraft.com` to Authorised JavaScript origins. Remove nothing.
 3. Only once the new domain serves and sign-in is confirmed there, set `GOOGLE_CALLBACK_URL` in
    Railway.
-4. Remove the old URI at the very end, after the extension update is live.
+4. ~~Remove the old URI at the very end, after the extension update is live.~~ ⛔ **STRUCK
+   2026-09-26 — DO NOT DO THIS.** Resume Master is a product on that domain, and its own users sign
+   in through that callback. Removing it is not cleanup; it is turning off sign-in for a live
+   service. **Both redirect URIs stay listed, indefinitely.** An OAuth client may hold many, and
+   holding an extra one costs nothing.
 
 ### LinkedIn
-Developer app → Auth → Authorised redirect URLs: add the new, remove nothing yet.
+Developer app → Auth → Authorised redirect URLs: add the new, **remove nothing — not "not yet",
+not ever.** Same reasoning as the Google client above: the old URL serves a product, not a legacy
+address.
 
 ### Railway env — only after the new domain serves
 ```
@@ -139,10 +192,14 @@ eight times. A guard test does not.
     policy URL the Web Store holds, anything written into stored data rather than rendered per
     request.
 
-6 · REDIRECT POLICY. Both origins serve identically until P4 lands. ⛔ Do NOT 301 the old domain
-    while the reviewed extension still points at it — a 301 on an API route breaks a fetch that does
-    not follow redirects, which is exactly the shape of the extension's credentialed calls. State
-    when the 301 becomes safe.
+6 · REDIRECT POLICY. Both origins serve identically. ⛔ **NEVER 301 the old domain.**
+
+    ~~while the reviewed extension still points at it~~ · ~~State when the 301 becomes safe~~ —
+    struck 2026-09-26. The original framing made this a countdown: a temporary ban that expires
+    when the extension update ships. It is permanent. A credentialed `fetch` does not follow
+    redirects, so a 301 on an API route fails SILENTLY — an opaque response that reads as an empty
+    answer, not as an error — and that is true of every credentialed client of that origin, now and
+    later, not only of the extension that happened to prompt the rule. **There is no "when".**
 
 VERIFY: GET https://jobsviadraft.com/api/version returns the expected commit — assert the JSON key,
 never a 200. Sign in end to end on the new domain including Google OAuth. The OLD domain still
@@ -152,24 +209,63 @@ grepping the deployed bundle, because the URL returns a ~2,044-byte SPA shell wi
 
 ---
 
-## P4 — Extension
+## P4 — Extension ✅ RAN 2026-09-26
 
-```
-1 · Replace the package in place if the dashboard allows; otherwise cancel and resubmit.
-2 · manifest: name, description, host_permissions → the new origin. Deliberate version bump.
-3 · STORE_LISTING.md in full — title, summary, description, single purpose, all four permission
-    justifications, data-use disclosures, privacy policy URL, test instructions. The test account's
-    credentials must still work on the new domain.
-4 · SCREENSHOTS: the three committed images show the old brand in-frame. Regenerate via the harness.
-    ⛔ It asserts 1280x800, 24-bit, no alpha, and checks captures against the owner's REAL profile
-    values — keep both assertions.
-5 · PRIVACY_RECONCILIATION.md's four-column join is enforced by a test. Update all four columns, and
-    note its third-party row is MANUALLY MAINTAINED and not covered by that test.
-6 · The policy must be live and correct on the new domain BEFORE the listing cites it. Reviewers
-    fetch it.
-7 · ⛔ A rename plus a host-permission change is the shape that triggers an in-depth review. Expect
-    a longer queue.
-```
+**Everything in this repository is done. The dashboard steps are not, and no agent can do them.**
+`npm test` went from 2646/2644/**2** to **2648/2648/0** — the two deliberate failures cleared by
+being fixed, which is how they were always meant to go.
+
+### What was done
+
+| | | |
+|---|---|---|
+| 1 | Package rebuilt | `resume-master-extension-v1.1.0.zip`, 14 files, byte-identical to source. The v1.0.0 artifact was **deleted** — two zips in `submission/` is the same "which artifact is real" ambiguity that produced the original hand-assembled bundle, and git keeps the old one |
+| 2 | Manifest | `name: "draft"`, `version: "1.1.0"`, `host_permissions` and `privacy_policy_url` → `jobsviadraft.com` |
+| 3 | `STORE_LISTING.md` | Rewritten, including a "what changed since v1.0.0" block for the reviewer. ⚠ **Test instructions are still EMPTY and that is a blocker** — see below |
+| 4 | Screenshots | All three regenerated, new brand in frame, 1280×800 / 24-bit / no alpha. Both assertions kept |
+| 5 | `PRIVACY_RECONCILIATION.md` | All four columns updated, plus new rows for `auth.js` |
+| 6 | The policy | Rewritten and verified in the built bundle by grep, not by loading the URL |
+| 7 | Casing | `WORDMARK = "draft"` added beside `BRAND = "Draft"`; see `docs/BRAND.md` |
+
+### ⛔ What P4 found that was not on the list, and it is the important part
+
+**The privacy policy had been factually wrong for two days and the test built to catch that was
+asleep.** `extension/auth.js` — added by the session-identity fix on 2026-09-24 — writes two
+storage keys. The policy said the extension "keeps four things"; it kept six. Worse, it said **"None
+of them is sent anywhere by the extension"**, which stopped being true the moment the extension
+carried a token of its own, and which a reviewer falsifies by watching a single request.
+
+`test/privacyReconciliation.test.js` counts storage writes and asserts the policy's stated count
+matches. It kept passing, because **its input was a hardcoded array of six filenames** and nobody
+added the seventh. The count is now derived from the shipped bundle, so a new extension file cannot
+be invisible to it. Both the count and the retracted claim are corrected; `docs/EXTENSION_DIAGNOSIS.md`
+§6.6 carries the full account.
+
+⚠ **The screenshot harness had also been unable to run since 2026-08-27**, for the same underlying
+reason and equally silently: its stub server had no `/api/auth/extension-token`, so every call
+through `authedFetch` returned null and the run died at "Sign in to Draft first" before the overlay
+rendered. Its `/api/auth/me` stub also returned a flat `{username}` where the real route returns
+`{user:{username}}` — a 200 with the wrong shape, which left the popup rendering its "your account"
+fallback into a store listing image. Both stubs fixed.
+
+### ⛔ What is LEFT, and it is all the owner's
+
+1. **A reviewer test account.** There is none. Checked, not assumed: the local database holds
+   `system`, `admin`, `johndoe` and the owner's account, and nothing named for Web Store review
+   exists anywhere in this repository or its history. **The extension does nothing without a signed-in
+   account** — a reviewer sees "Sign in to Draft first" and stops, and "I could not test it" is a
+   rejection. `STORE_LISTING.md` § Test instructions has the walkthrough written and the credentials
+   deliberately blank. ⛔ Do not commit them; that file is tracked.
+2. **Deploy the client before the listing cites the policy URL.** The policy TEXT changed this
+   release. Reviewers fetch it, and it is served by the client build.
+3. **Upload v1.1.0.** Replace in place if the pending v1.0.0 item allows it. ⛔ **Re-paste the
+   `storage` and host-permission justifications** — both changed materially, and a dashboard field
+   contradicting the policy is the rejection this whole four-column join exists to prevent.
+4. ⛔ A rename plus a host-permission change is the shape that triggers an in-depth review. Expect a
+   longer queue than the first submission.
+
+⚠ Not verified, and it cannot be from here: `privacy@jobsviadraft.com` is published in a legal
+document a reviewer reads. **Nothing in this repository can confirm that mailbox exists.**
 
 ---
 
