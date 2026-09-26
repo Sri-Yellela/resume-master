@@ -11,9 +11,9 @@ something you read elsewhere in `docs/`, re-measure before you believe either.
 | deployed commit | **read it from `/api/version`** — any value written here is stale by the next push, which is why the doc guard deliberately does not assert one |
 | contract | `1.1.1` (source and production agree) |
 | migration high-water | `109_restore_stripped_seniority_titles`, in **both** runners and production |
-| test baseline | **2636 tests, 2634 pass, 2 fail** — the two failures are deliberate, see `CLAUDE.md` |
+| test baseline | **2646 tests, 2644 pass, 2 fail** — the two failures are deliberate, see `CLAUDE.md` |
 | monetisation | **disabled** — the product presents as free and untiered |
-| Anthropic balance | **exhausted.** Every model-backed path returns 502 |
+| Anthropic balance | **exhausted.** Model-backed paths return 502 — except capture, which degrades (see below) |
 
 ## What this is
 
@@ -43,6 +43,10 @@ on their behalf without a gate.**
   `CUSTOM_SAMPLER` logged from LinkedIn in April, one is `MANUAL`.
 - **Enrichment is dead** and has been since 2026-09-17, on the exhausted balance. 1559 production
   rows have never been enriched. `skills_json` sits at **41.0% production / 35.8% local**.
+- **Capture still works, degraded.** Since 2026-09-25 `/api/import/job` files the posting without
+  a model when the balance is out — title, company, location and description, from the block the
+  extension already sends. Salary and skills stay NULL and enrichment completes the row once
+  funded. The extension says "Saved (partial)". `ARCHITECTURE.md` §10.
 - **`workday` and `smartrecruiters` produce zero rows** in both databases, while appearing in the
   boot log as active. *Owner confirmed 2026-09-24: not wired properly — a defect, not dormancy.*
 - **`scraped_jobs.ats_score` is NULL on every row**, both databases. *Owner confirmed 2026-09-24:
@@ -57,7 +61,7 @@ on their behalf without a gate.**
   ⛔ **A 200 is not evidence.** The SPA catch-all answers 200 with `index.html` for any unknown
   path. That has produced a false finding four times, most recently `/api/admin/stats` "returning
   200" for a route that does not exist. Judge by **response body and content-type**, always.
-- **Local:** `npm test`. Expect 2636 / 2634 / 2, and check `CLAUDE.md` before assuming a red is rot.
+- **Local:** `npm test`. Expect 2646 / 2644 / 2, and check `CLAUDE.md` before assuming a red is rot.
 - **Real behaviour:** `npm run verify:harness` (needs the app on `:3001`). A green node suite is
   **not** evidence about anything a browser does — see the note in `package.json`.
 
@@ -78,7 +82,8 @@ verify it by injecting a violation.
 
 ## What needs the owner, not an agent
 
-- **Funding the Anthropic balance.** Nothing model-backed works until then, and no agent can do it.
+- **Funding the Anthropic balance.** Enrichment, résumé generation and cover letters do nothing
+  until then, and no agent can do it. Capture degrades rather than waiting.
 - **The Chrome Web Store.** v1.0.0 is in review and still points at `resumemaster.one`. Repackaging
   mid-review can reset the queue, so the extension is frozen until **P4**.
 - **DNS, Railway env, and the OAuth consoles** — see `docs/DOMAIN_MIGRATION.md` Phase 0.

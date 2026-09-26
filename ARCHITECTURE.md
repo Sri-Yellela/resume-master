@@ -59,8 +59,9 @@ graph LR
 The system crawls applicant-tracking systems directly, reconciles postings into one board, enriches
 and scores them against a stored profile, and then either fills an application form or hands the
 filled form to the candidate to review and submit. **Every dotted edge above is currently dead:**
-the Anthropic balance is exhausted, so enrichment and import 502; the jobo feed is paused pending
-credit.
+the Anthropic balance is exhausted, so enrichment 502s and the jobo feed is paused pending credit.
+**Capture is the exception:** since the deterministic fallback landed it degrades rather than
+failing, filing the posting from the labelled block the extension already sends — see §10.
 
 ---
 
@@ -483,11 +484,19 @@ from the code.
 
 ## 10 · Known constraints and deadlines
 
-- ⛔ **The Anthropic balance is exhausted.** Every model-backed path returns 502: enrichment,
-  `/api/import/job` (so extension capture fails whole — it has **no deterministic fallback** and
-  cannot degrade to title-plus-URL), résumé generation, cover letters. This is a **design
-  constraint**, not only a defect: capture was built to require a model call, so an unfunded
-  balance takes the feature to zero rather than to a degraded mode.
+- ⛔ **The Anthropic balance is exhausted.** Enrichment, résumé generation and cover letters
+  return 502 and have no fallback — they exist to produce something only a model can.
+- **Capture no longer fails with them.** `/api/import/job` degrades: when the model call fails
+  *permanently*, `jobFromLabelledText()` files the posting from the labelled block
+  `extension/extractor.js` already sends (`Title:` / `Company:` / `Location:` + description).
+  The row lands with `enriched_at` NULL, so enrichment completes it once funded — degraded is
+  a **stage, not a state**. The response carries `degraded: true`, and the extension says
+  "Saved (partial)" rather than claiming a whole capture.
+  ⛔ It **flags rather than fabricates**: salary, remote and posted_at stay NULL, no title
+  means no row, and a host that is not a registrable domain may not name an employer — a
+  first real run filed a posting under the company "Localhost" before that rule existed. A
+  *transient* failure still throws, because silently filing a thin row over a brief outage
+  would trade a recoverable error for a permanently thinner row nobody revisits.
 - **Term weights refresh 2026-10-02**, and scoring silently reverts to unweighted at
   **2026-11-02**, with only a `console.warn`.
 - **Railway allows two custom domains** and both slots are in use, so `www.jobsviadraft.com` is in

@@ -13,6 +13,17 @@
  *
  * The service worker's console is mirrored to stdout, which is where a failed fetch inside it
  * would otherwise die silently.
+ *
+ * ⛔ THE TWO PAGES NOW DEMONSTRATE DIFFERENT THINGS, AND ONE "FAILURE" IS THE CORRECT ANSWER.
+ * Since the deterministic fallback landed (services/jobs/importJob.js jobFromLabelledText):
+ *
+ *   /careers   JSON-LD gives the extractor a Company, so capture SUCCEEDS degraded even with the
+ *              balance exhausted — "Saved (partial): <title> @ <company>".
+ *   /linkedin  Deliberately adversarial: no JSON-LD, and the extractor's per-host LinkedIn
+ *              selectors do not fire on localhost, so NO company is discoverable. Capture is
+ *              REFUSED rather than filing the posting under "Localhost". That refusal is the
+ *              flag-don't-fabricate rule working, not a regression. A real linkedin.com page
+ *              carries JSON-LD and would take the first path.
  */
 import fs from 'node:fs';
 import os from 'node:os';

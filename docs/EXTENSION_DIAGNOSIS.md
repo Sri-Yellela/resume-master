@@ -161,12 +161,21 @@ button still not working.
 
 ## 5. DEFECT B — capture cannot degrade, so it fails whole
 
-> **⚠ PARTIALLY RESOLVED 2026-09-24 — the MESSAGE only.** The root cause is deliberately left:
-> the balance stays unfunded. `isPermanentModelFailure()` in `services/modelCall.js` now
-> separates a billing exhaustion from a transient failure, and `/api/import/job` answers 503
-> with `retryable: false` and *"Retrying will not help; this needs an account change."*
-> Measured in a real browser: that is what the toast says now. Capture still does not work, and
-> a deterministic title-plus-URL fallback remains unscheduled.
+> **✅ RESOLVED 2026-09-25 — capture degrades instead of failing.** Two changes, a day apart.
+>
+> **The message (09-24).** `isPermanentModelFailure()` in `services/modelCall.js` separates a
+> billing exhaustion from a transient failure, so a non-retryable error stops telling people
+> to retry.
+>
+> **The fallback (09-25).** `jobFromLabelledText()` files the posting WITHOUT a model when the
+> model call fails permanently, reading the labelled block `extension/extractor.js` already
+> sends. Measured in a real browser with the balance still exhausted:
+> *"Saved (partial): Senior Backend Engineer @ Northwind Systems"*, HTTP 200, row persisted.
+>
+> ⛔ The balance is still unfunded and that was never the point — §10 of ARCHITECTURE.md had
+> recorded "no deterministic fallback" as a **design constraint**, and this removes the
+> constraint rather than the symptom. Enrichment completes the row once funded, because
+> `enriched_at` stays NULL: degraded is a stage, not a state.
 
 Reproduced in a real browser (`scripts/dx1CaptureDiagnosis.mjs`) with a real `activeTab` grant from
 a real OS keypress, against the **real `server.js`** on a throwaway data dir, on two deliberately
@@ -197,7 +206,7 @@ cleanly), not parsing. The 204 ms *is* the reported "under a second".
 ### Why this is a design constraint, not only a defect
 
 `/api/import/job` → `importJob()` → `extractJobFromContent()` (`services/jobs/importJob.js:316`)
-makes a **mandatory** Anthropic call. There is no deterministic fallback — not even
+made a **mandatory** Anthropic call with no deterministic fallback — not even
 title-plus-URL from the JSON-LD the extractor already parsed. When the model call fails, the whole
 import fails.
 

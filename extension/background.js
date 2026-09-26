@@ -50,12 +50,19 @@ async function importCapturedJob({ url, text }) {
 
     const job = json.job || {};
     const label = [job.title, job.company].filter(Boolean).join(' @ ') || 'job';
+    // A DEGRADED capture is a success with a smaller promise: the job is on the board with its
+    // title and link, but the model that fills salary, skills and the summary was unavailable, so
+    // those are empty until enrichment runs. Saying "Captured" flat would overstate it, and
+    // failing would have thrown away a posting the extractor had already read.
     return {
       success: true,
       // One message, produced in one place, so the popup and the hotkey cannot word it differently.
       message: json.alreadyImported || json.reconciled
         ? `Already on your board: ${label}`
-        : `Captured: ${label}`,
+        : json.degraded
+          ? `Saved (partial): ${label} — details fill in later`
+          : `Captured: ${label}`,
+      degraded: !!json.degraded,
       jobId: job.jobId || json.jobId || null,
     };
   } catch (e) {
