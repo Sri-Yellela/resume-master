@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "fs";
 import path from "path";
 import JSZip from "jszip";
-import { collectRequiredFiles } from "../scripts/buildExtension.mjs";
+import { collectRequiredFiles, bundleBytes } from "../scripts/buildExtension.mjs";
 
 // Guards the exact failure this replaced. The hand-assembled v1.1.0 submission drifted so far
 // from extension/ that it shipped a `saved-jobs-content.js` content script which no longer
@@ -11,27 +11,24 @@ import { collectRequiredFiles } from "../scripts/buildExtension.mjs";
 // missing the options page and capture shortcut the source had since gained. Nothing detected
 // it because the artifact was built by hand and there was nothing to diff it against.
 //
-// ⛔ TWO TESTS IN THIS FILE ARE CURRENTLY FAILING ON PURPOSE (decided 2026-09-24):
+// ✅ FROM 2026-09-24 TO 2026-09-26, TWO TESTS HERE FAILED ON PURPOSE. Both are green now, and the
+// way they went green is the point worth keeping:
 //
 //     every file in the submission zip is byte-identical to extension/ source
-//     every file the manifest references is present in the zip        (auth.js is new)
+//     every file the manifest references is present in the zip        (auth.js was new)
 //
-// They are doing their job. `extension/` has moved ahead of the published v1.0.0 package: the
-// session-identity security fix added `extension/auth.js`, which moved the extension off the
-// ambient browser cookie and onto its own sessionLess token (docs/EXTENSION_DIAGNOSIS.md §6).
+// `extension/` had moved ahead of the published v1.0.0 package — the session-identity fix added
+// `extension/auth.js` — and these correctly reported it for three weeks while the package sat in
+// Web Store review. No assertion was weakened and nothing was silenced. P4 bumped the manifest to
+// v1.1.0 and rebuilt the zip, which is what they were always waiting for.
 //
-// DO NOT SILENCE THEM, and do not weaken the assertions to make the board green. The drift they
-// report is real and is the thing this file exists to catch — the previous incident was exactly
-// a shipped artifact nobody could diff.
+// ⛔ THE WAIT WAS SAFE AND THE REASON MATTERS: the security fix was SERVER-side.
+// scripts/dx2ExtensionIdentity.mjs §8 loaded the published v1.0.0 build against the fixed server
+// with a live admin cookie and measured 0/7 admin routes reached, so installs were protected
+// without a store update. Red tests were the correct state to be in, not a cost being paid.
 //
-// They clear on their own when the zip is rebuilt at P4, which repackages for the domain flip
-// anyway. Repackaging sooner needs a version bump, and docs/DOMAIN_MIGRATION.md warns that
-// touching the package while v1.0.0 is in Web Store review can reset the queue position. Waiting
-// is safe because the security fix is SERVER-side: scripts/dx2ExtensionIdentity.mjs §8 loads the
-// published v1.0.0 build against the fixed server, with a live admin cookie, and measures 0/7
-// admin routes reached. Existing installs are already protected without a store update.
-//
-// Full reasoning: docs/EXTENSION_DIAGNOSIS.md §6.6. Count is tracked in CLAUDE.md.
+// Full history: docs/EXTENSION_DIAGNOSIS.md §6.6. The deliberate-failure count lives in CLAUDE.md
+// and currently reads zero, so a red here is now a real failure.
 
 const SRC = "extension";
 const manifest = JSON.parse(fs.readFileSync(path.join(SRC, "manifest.json"), "utf8"));
@@ -62,7 +59,41 @@ test("every file in the submission zip is byte-identical to extension/ source", 
     const srcPath = path.join(SRC, entry.name);
     assert.ok(fs.existsSync(srcPath), `zip contains ${entry.name}, which does not exist in source`);
     const inZip = Buffer.from(await entry.async("uint8array"));
-    assert.ok(inZip.equals(fs.readFileSync(srcPath)), `${entry.name} differs from extension/${entry.name}`);
+    // ⛔ THROUGH bundleBytes, NOT RAW — and it is the BUILDER'S function, not a copy.
+    //
+    // `.gitattributes` says `* text=auto`, so extension/*.js is CRLF on a Windows checkout and LF
+    // on Linux, while the zip is stored verbatim. Comparing raw bytes therefore asserted something
+    // about the machine rather than about the artifact: this test passed on Windows and would fail
+    // on a Linux CI clone of the same commit, and did fail here the moment a branch merge
+    // round-tripped the tree through git. The builder now writes LF-normalised text, so this reads
+    // the source the same way.
+    //
+    // Importing it rather than reimplementing it is deliberate: this file already kept its own
+    // copy of the reachability rules once, and the two drifted the moment the builder learned to
+    // follow ES imports.
+    assert.ok(inZip.equals(bundleBytes(entry.name, fs.readFileSync(srcPath))),
+      `${entry.name} differs from extension/${entry.name}`);
+  }
+});
+
+test("⛔ the zip is a function of the COMMIT, not of the machine that built it", async () => {
+  // The property the normalisation buys, asserted directly rather than implied. A published
+  // artifact that cannot be regenerated from its commit is the hand-assembled bundle problem in a
+  // new hat — and that bundle shipped a content script the repo no longer contained.
+  const zip = await loadZip();
+  for (const entry of Object.values(zip.files).filter(f => !f.dir && /\.(js|json|html|css)$/.test(f.name))) {
+    const bytes = Buffer.from(await entry.async("uint8array"));
+    assert.ok(!bytes.includes(Buffer.from("\r\n")),
+      `${entry.name} carries CRLF inside the zip — the bundle now depends on which platform built ` +
+      `it, so the same commit produces two different artifacts`);
+  }
+
+  // And binary assets must NOT have been through the normaliser: a "normalised" PNG is a corrupt
+  // PNG, and it would be corrupt identically everywhere, which is the worst kind of reproducible.
+  for (const entry of Object.values(zip.files).filter(f => !f.dir && f.name.endsWith(".png"))) {
+    const bytes = Buffer.from(await entry.async("uint8array"));
+    assert.ok(bytes.equals(fs.readFileSync(path.join(SRC, entry.name))),
+      `${entry.name} was altered on the way into the zip — icons must pass through untouched`);
   }
 });
 

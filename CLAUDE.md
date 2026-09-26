@@ -35,9 +35,43 @@ This has now cost three sessions. If a source-string or byte-identity test fails
 makes no sense, check `file server.js` before you debug anything else — the fix is to convert the
 file back to CRLF, not to change the test.
 
+### ⚠ "Don't change the test" is the right rule for ONE of the two cases. Work out which you have.
+
+The rule above is correct **because `server.js` and `scripts/migrations.js` must be byte-identical
+to each other.** Byte-level line endings ARE the invariant under test there, so a test that stopped
+caring about them would stop testing the thing it exists for. Convert the file.
+
+**But a test can also be line-ending sensitive by accident, and then the test is the defect.** A
+markdown parser, a source-string search, a config reader — none of those has any business caring
+whether a line ends `\n` or `\r\n`, and one that does will pass on the machine where the file
+happens to sit LF and fail on a fresh clone.
+
+That is not hypothetical. `test/manifestMinimumPermission.test.js` located sections with
+`startsWith(heading + "\n")`, which is false for `"Permissions\r\n"`. It passed for months and then
+four tests went red the moment a branch checkout round-tripped `extension/MANIFEST_RATIONALE.md`
+through git — reporting *"MANIFEST_RATIONALE.md has no ## Permissions section"*, which blames the
+document. Any fresh Windows clone would have hit it. Fixed by normalising on read, 2026-09-26.
+
+**Ask: is byte-for-byte equality the property being asserted, or is it incidental to how the file
+is read?**
+
+| | Fix the FILE | Fix the TEST |
+|---|---|---|
+| `server.js` ↔ `scripts/migrations.js` byte identity | ⭐ | |
+| Source-string assertions that quote real code | ⭐ | |
+| Parsing markdown, config or prose for structure | | ⭐ |
+| Anything that would fail on a colleague's fresh clone | | ⭐ |
+
+⛔ **The checkout is a way in, not just whole-file writes.** `.gitattributes` declares `* text=auto`,
+so this repository stores LF and materialises the platform convention. `git checkout` of another
+branch — including the round trip a merge makes — rewrites every file that differs and converts it.
+A tree whose *content* is byte-identical to one that just passed can therefore fail, with
+`git status` clean. If tests break right after a branch switch and nothing you did explains it,
+this is why.
+
 ## Deliberate test failures — currently 0
 
-`npm test` is **2654 tests, 2654 pass, 0 fail**.
+`npm test` is **2655 tests, 2655 pass, 0 fail**.
 
 **There are no deliberate failures right now.** From 2026-09-24 to 2026-09-26 there were two, both
 in `test/extensionSubmission.test.js`, reporting that `extension/` had moved ahead of the published

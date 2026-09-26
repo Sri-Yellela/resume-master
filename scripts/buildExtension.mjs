@@ -30,6 +30,50 @@ const OUT_DIR = path.join(SRC_DIR, 'submission');
 const problems = [];
 function fail(msg) { problems.push(msg); }
 
+/**
+ * Extensions whose bytes are TEXT and may therefore differ by line ending between checkouts.
+ * Everything not listed is treated as binary and passes through untouched — an icon that got
+ * "normalised" would be a corrupted PNG, and it would be corrupted identically on every machine,
+ * which is the worst kind of reproducible.
+ */
+const TEXT_EXT = new Set(['.js', '.json', '.html', '.css', '.md', '.txt', '.svg']);
+
+/**
+ * THE BYTES THAT GO IN THE BUNDLE — LF-normalised for text, raw for everything else.
+ *
+ * ⛔ DECIDED 2026-09-26, AND THE CHOICE IS "NORMALISE THE CONTENT", NOT "COMPARE NORMALISED".
+ *
+ * `.gitattributes` declares `* text=auto`: this repository stores LF and checks out the platform
+ * convention, so extension/*.js is CRLF on Windows and LF on Linux. The zip is `binary` in
+ * .gitattributes and therefore stored verbatim. That combination made the shipped artifact a
+ * function of WHOSE MACHINE BUILT IT — the same commit produced two different zips, and
+ * extensionSubmission.test.js's byte-identity assertion passed on Windows and would fail on a
+ * Linux CI clone or after any checkout that renormalised the tree. It did fail, exactly that way,
+ * the moment a branch merge round-tripped the files.
+ *
+ * The narrower fix is to normalise on COMPARISON and keep writing raw bytes. It was rejected: it
+ * makes the test green while leaving the artifact unreproducible, so a published zip still could
+ * not be checked against the commit it claims to come from unless you matched the builder's
+ * platform. That is the "hand-assembled artifact nobody could diff" problem this builder exists to
+ * end, wearing a different hat.
+ *
+ * Normalising the INPUT makes the bundle a function of the commit. Chrome does not care which line
+ * ending a bundled script uses — nothing in the extension reads its own source bytes — so there is
+ * no cost on the shipping side, and the guarantee gained is that anyone can rebuild this artifact
+ * and get the same thing.
+ *
+ * ⚠ ONE DEFINITION, THREE CALLERS. The builder writes through it, extensionSubmission.test.js
+ * compares through it, and publishExtension.mjs's preflight compares through it again at publish
+ * time. If any one of them read raw bytes instead, it would report drift that does not exist —
+ * which is how the test copy of collectRequiredFiles drifted from the builder once already.
+ */
+export function bundleBytes(rel, raw) {
+  const dot = rel.lastIndexOf('.');
+  const ext = dot > 0 ? rel.slice(dot).toLowerCase() : '';
+  if (!TEXT_EXT.has(ext)) return raw;
+  return Buffer.from(raw.toString('utf8').replace(/\r\n/g, '\n'), 'utf8');
+}
+
 export function readTextNoBom(file) {
   const raw = fs.readFileSync(file);
   const hasBom = raw[0] === 0xEF && raw[1] === 0xBB && raw[2] === 0xBF;
@@ -185,7 +229,9 @@ async function main() {
   const zip = new JSZip();
   for (const rel of required) {
     // Store POSIX-separated paths; a zip built on Windows must not carry backslash entry names.
-    zip.file(rel.split(path.sep).join('/'), fs.readFileSync(path.join(SRC_DIR, rel)));
+    // And LF-normalised text, for the same reason one step further in: see bundleBytes.
+    zip.file(rel.split(path.sep).join('/'),
+             bundleBytes(rel, fs.readFileSync(path.join(SRC_DIR, rel))));
   }
 
   fs.mkdirSync(OUT_DIR, { recursive: true });

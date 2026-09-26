@@ -42,7 +42,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import JSZip from 'jszip';
-import { collectRequiredFiles, readTextNoBom, SRC_DIR } from './buildExtension.mjs';
+import { collectRequiredFiles, readTextNoBom, bundleBytes, SRC_DIR } from './buildExtension.mjs';
 import { WORDMARK } from '../shared/brand.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -229,9 +229,13 @@ async function main() {
     Object.values(zip.files).filter(f => !f.dir)
       .map(async f => ({ name: f.name, bytes: Buffer.from(await f.async('uint8array')) }))
   );
+  // ⛔ bundleBytes, NOT fs.readFileSync alone. preflight compares these against the zip entries,
+  // and the builder writes LF-normalised text into the zip (see bundleBytes). Reading raw bytes
+  // here would report every text file as drifted on a CRLF checkout — a publish blocked by a
+  // difference that does not exist, which is worse than the one it was guarding against.
   const sourceFiles = collectRequiredFiles(manifest)
     .filter(rel => fs.existsSync(path.join(SRC_DIR, rel)))
-    .map(rel => ({ name: rel, bytes: fs.readFileSync(path.join(SRC_DIR, rel)) }));
+    .map(rel => ({ name: rel, bytes: bundleBytes(rel, fs.readFileSync(path.join(SRC_DIR, rel))) }));
 
   const result = preflight({
     manifest, zipEntries, sourceFiles,
