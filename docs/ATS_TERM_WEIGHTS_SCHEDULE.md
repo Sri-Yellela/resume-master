@@ -201,6 +201,88 @@ question.** Fixing it means either widening `roleFamilyForTitle` or bucketing we
 `job_role_map.role_key`, and either is a measurement task of its own — the weights change, so rho
 has to be re-measured against the graded corpus before and after. Not attempted here.
 
+**→ It was attempted on 2026-09-26. See §6c, and the answer is no.**
+
+---
+
+## 6c · The per-family fix was built, measured, and NOT adopted — 2026-09-26
+
+`scripts/an3FamilyWeightRho.mjs` does what §6b asked for. It drives the REAL
+`computeTermWeights` with a swappable `familyFor`, so both arms share term extraction, the DF
+floor, the thin-board guard and the weight formula; rebuilds the table each way on a scratch VACUUM
+copy of the pinned corpus; and re-scores the owner's 30 human grades through each.
+
+**Structurally the change works exactly as predicted.** Five families instead of three, `sales`
+appears at 208 postings, `pm` grows 94 → 147, `data` 98 → 116, and the graded 30 fall back to the
+global table 7 times instead of 12.
+
+**And the ranking gets worse, in every variant tried:**
+
+| bucketing | ρ | τ-b | mis-ordered |
+|---|---|---|---|
+| `roleFamilyForTitle` — **shipped** | **0.7460** | 0.6807 | **16.0%** |
+| `job_role_map` (the §6b proposal) | 0.7298 | 0.6677 | 16.6% |
+| union — narrow first, board as fallback | 0.7355 | 0.6687 | 16.6% |
+| `job_role_map` including `general` | 0.7281 | 0.6627 | 16.9% |
+
+⚠ **The honest reading is NOT "the board taxonomy is worse."** n=30, and a 0.016 difference is far
+inside what thirty graded postings can resolve. The reading is that **there is no evidence of
+improvement and what weak evidence exists points the wrong way**, so the change does not earn a
+place on the scoring path. §6b called the global-only fallback a "loss of resolution"; this is the
+first measurement of that loss and it could not find one.
+
+⛔ **Nothing about the default changed.** `computeTermWeights` still buckets by title, and a
+verification run confirms the live table rebuilds byte-for-byte identically
+(`__global__:424 data:41 engineering:123 pm:16` before and after). `weightFamilyForJob` and the
+harness are kept so the question can be re-asked the moment there are more grades — and if it is
+ever adopted, **server.js's read path must switch in the same commit**, because weights bucketed as
+`sales` and looked up by title miss every time and fall back to global.
+
+---
+
+## 6d · ⛔ THE MEASUREMENT FOUND A BIGGER DEFECT THAN THE ONE IT WENT LOOKING FOR
+
+The first AN3 run reported ρ identical to four decimal places and **zero of thirty scores moved**,
+across bucketings that demonstrably changed which weights each posting was scored with. "No effect"
+needs a mechanism, and the mechanism was this:
+
+```js
+loadTermWeights(db, family)   // -> { weights: Map, stale, computedAt, corpusSize }   ENVELOPE
+weightedRatio(...)            // -> if (!termWeights.size) return unweighted          MAP expected
+```
+
+`server.js` unwraps it (`loaded.weights.size ? loaded.weights : null`) and has always scored
+correctly. **Four harnesses did not:** `al3SynonymRhoEffect`, `am1GradedCorpusVerify`,
+`ak2AtsGradingSet` and `am3RestoreBoard` all passed the envelope straight through. `.size` is
+`undefined` on a plain object, so every one of them silently took the **unweighted** branch —
+no error, no warning, a perfectly plausible score.
+
+**Measured on the graded 30: passing the envelope moves 0 of 30 scores off unweighted; passing the
+Map moves 24 of 30.**
+
+So every figure those harnesses produced described the unweighted scorer while labelling itself
+weighted. The tell was visible and had been ignored: **AL3's control drifted 0.009 from the
+published ρ = 0.746 and called that "CONTROL OK"** because the tolerance is 0.02. It was not
+tolerance — it was the weighting being off. After the fix, both AL3 and AN3 reproduce the published
+figure to **0.000**.
+
+⚠ **AL3's conclusion survives re-measurement.** Re-run weighted, the synonym table still moves ρ by
++0.000, and its own coverage analysis explains why (an equivalent present in the résumé for 2 of
+240 missing terms, 0.8%). The finding was right; the evidence behind it was not.
+
+**Fixed in the scorer, not at the five call sites.** `resolveTermWeights()` accepts either shape,
+and — the part that matters — **preserves the staleness refusal**: a stale envelope resolves to
+null, exactly as server.js refuses one. Callers that reached in for `.weights` themselves would
+have applied weights the scorer is supposed to reject, replacing one silent wrongness with another.
+`test/termWeightEnvelope.test.js` pins both call styles to the same score, and asserts the fixture
+is weight-sensitive so it cannot pass vacuously — which is how the original defect survived.
+
+This is the **third** instance in this project of a table that nothing on the measured path
+actually read (CC3's synonym map, CC1b's soft-null role keys). The pattern is worth naming: the
+code is wired, the data is loaded, and one shape mismatch at the boundary makes it inert.
+
+---
+
 ## 7b · The louder signal — added 2026-09-26
 
 §7 below named one gap and left it: *"if the 45-day refusal is ever hit, that means the nightly
@@ -256,8 +338,9 @@ thin-board guard working correctly.
   "louder signal" this bullet asked for is built — see §7b.
 - **No alert.** Everything here is a log line or a field. Nothing pages anybody, and nothing
   watches `/api/version` on a timer — deliberately: that is monitoring, not scoring.
-- **Per-family weights on production** — see §6b. Global-only weighting works and is the designed
-  fallback; the resolution loss is real and the fix is its own measured task.
+- ~~**Per-family weights on production**~~ — ✅ measured 2026-09-26, §6c. Built, measured against
+  the human grades, and NOT adopted: every variant moved ρ the wrong way. The "resolution loss"
+  §6b assumed could not be measured. Re-ask when there are more than 30 grades.
 - **`weightsAreStale` still judges by AGE only**, never by corpus drift. A table computed
   yesterday from a corpus half the size of today's board reads as perfectly fresh. §6 is the
   evidence that this case is real.

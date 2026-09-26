@@ -99,11 +99,91 @@ function parseSkills(raw) {
 }
 
 /**
+ * `general` is classifyJob's "could not place this" bucket, and it is deliberately NOT a weight
+ * family. Semantically it is the same answer roleFamilyForTitle gives by returning null, and a
+ * table built from 200-odd unrelated roles is a second global table over a smaller, noisier
+ * corpus — not a per-family refinement. Rows here fall back to `__global__`, which is correct.
+ */
+const NOT_A_WEIGHT_FAMILY = new Set(["general"]);
+
+/**
+ * THE SHIPPED BUCKETER — the title mapper, unchanged, now named so the alternative has something
+ * to be compared against rather than silently replacing an anonymous inline call.
+ *
+ * ⛔ It must agree with server.js's `atsTermWeightsForJob`, which looks weights up the same way.
+ * Bucketing by one rule and reading by another means every lookup misses and falls back to the
+ * global table — silently, with a plausible score.
+ */
+export function titleWeightFamily(_db, job) {
+  return roleFamilyForTitle(job?.normalized_title || job?.title || "") || null;
+}
+
+/**
+ * ⛔ MEASURED AND NOT ADOPTED — 2026-09-26. READ THIS BEFORE MAKING IT THE DEFAULT.
+ *
+ * This is the board's own taxonomy (`job_role_map`, filled by classifyJob) answering "which weight
+ * family is this posting in". §6b of docs/ATS_TERM_WEIGHTS_SCHEDULE.md proposed it as a fix: the
+ * shipped bucketer, `roleFamilyForTitle`, is a narrow alias-map lookup that leaves 44.2% of the
+ * enriched corpus with no family at all — every `account executive`, every `customer success
+ * manager` — so most buckets never reach MIN_FAMILY_POSTINGS and PRODUCTION WRITES ONLY
+ * `__global__` despite holding 1,179 enriched postings.
+ *
+ * It does exactly what it was supposed to structurally: 5 families instead of 3, `sales` appears
+ * with 208 postings, `pm` grows 94 -> 147, and the graded 30 fall back to global 7 times instead
+ * of 12. **And it makes the ranking worse.** Against the human grades (scripts/an3FamilyWeightRho.mjs):
+ *
+ *     narrow (shipped)        rho 0.7460   tau-b 0.6807   mis-ordered 16.0%
+ *     board taxonomy          rho 0.7298   tau-b 0.6677   mis-ordered 16.6%
+ *     union of the two        rho 0.7355   tau-b 0.6687   mis-ordered 16.6%
+ *     board incl. `general`   rho 0.7281   tau-b 0.6627   mis-ordered 16.9%
+ *
+ * ⚠ n=30, and the honest reading is NOT "the board taxonomy is worse". A 0.016 difference is far
+ * inside what 30 graded postings can resolve. The reading is that **there is no evidence of
+ * improvement, and what weak evidence there is points the wrong way** — so the change does not
+ * earn a place on the scoring path yet. §6b called the global-only fallback a "loss of
+ * resolution"; this is the first measurement of that loss, and it could not find one.
+ *
+ * Kept exported, and the harness kept, so the question can be re-asked the moment there are more
+ * grades. ⛔ If you adopt it: server.js's read path must switch in the SAME commit. Weights
+ * bucketed as `sales` and looked up by title miss every time and fall back to global — the exact
+ * state this is meant to fix, wearing the costume of a fix.
+ *
+ * @param {import('better-sqlite3').Database} db
+ * @param {{job_id?: string, normalized_title?: string, title?: string}} job
+ * @returns {string|null} the family, or null meaning "use the global table"
+ */
+export function weightFamilyForJob(db, job) {
+  if (!job) return null;
+  if (job.job_id) {
+    try {
+      const row = db.prepare(
+        "SELECT role_family, role_key FROM job_role_map WHERE job_id = ? LIMIT 1"
+      ).get(job.job_id);
+      const fam = row?.role_family || row?.role_key || null;
+      if (fam) return NOT_A_WEIGHT_FAMILY.has(fam) ? null : fam;
+    } catch { /* table absent (pre-migration) — fall through to the title mapper */ }
+  }
+  const byTitle = roleFamilyForTitle(job.normalized_title || job.title || "");
+  return byTitle && !NOT_A_WEIGHT_FAMILY.has(byTitle) ? byTitle : null;
+}
+
+/**
  * Recompute the whole weight table from scraped_jobs. Idempotent: the table is replaced wholesale
  * inside one transaction, so a crashed recompute leaves the previous table intact rather than a
  * half-written one that would silently score some terms and not others.
+ *
+ * `familyFor` is injectable so that scripts/an3FamilyWeightRho.mjs can measure one bucketing
+ * against another through THIS function rather than through a copy of it — a harness that
+ * reimplements what it measures is measuring the reimplementation, which this repository has paid
+ * for twice.
+ *
+ * ⛔ THE DEFAULT IS THE TITLE MAPPER, AND IT STAYED THAT WAY ON PURPOSE. The obvious alternative
+ * (`weightFamilyForJob`, the board's own taxonomy) was implemented, measured against the human
+ * grades, and NOT adopted because it moved rho 0.7460 -> 0.7298. See the note on that function.
+ * It must also match server.js's read path, which is title-based; changing one without the other
+ * is a silent no-op.
  */
-export function computeTermWeights(db, { now = Math.floor(Date.now() / 1000) } = {}) {
+export function computeTermWeights(db, { now = Math.floor(Date.now() / 1000), familyFor = titleWeightFamily } = {}) {
   const rows = db.prepare(
     `SELECT job_id, title, normalized_title, skills_json
        FROM scraped_jobs
@@ -127,7 +207,7 @@ export function computeTermWeights(db, { now = Math.floor(Date.now() / 1000) } =
     }
     if (!terms.size) continue;
     bump(GLOBAL_FAMILY, terms);
-    const family = roleFamilyForTitle(row.normalized_title || row.title || "");
+    const family = familyFor(db, row);
     if (family) bump(family, terms);
   }
 

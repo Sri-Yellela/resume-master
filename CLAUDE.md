@@ -71,7 +71,7 @@ this is why.
 
 ## Deliberate test failures — currently 0
 
-`npm test` is **2655 tests, 2655 pass, 0 fail**.
+`npm test` is **2661 tests, 2661 pass, 0 fail**.
 
 **There are no deliberate failures right now.** From 2026-09-24 to 2026-09-26 there were two, both
 in `test/extensionSubmission.test.js`, reporting that `extension/` had moved ahead of the published

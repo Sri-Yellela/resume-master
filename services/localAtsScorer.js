@@ -955,13 +955,46 @@ function experienceRatio(requiredYears, candidateYears) {
   return 0.1;
 }
 
+/**
+ * ⛔ ACCEPT EITHER THE MAP OR loadTermWeights' ENVELOPE, BECAUSE THE DIFFERENCE WAS SILENT AND
+ * EVERY MEASUREMENT HARNESS GOT IT WRONG.
+ *
+ * `loadTermWeights()` returns `{ weights: Map, stale, computedAt, corpusSize }`. server.js unwraps
+ * it — `loaded.weights.size ? loaded.weights : null` — and scores correctly. FOUR harnesses did
+ * not: al3SynonymRhoEffect, am1GradedCorpusVerify, ak2AtsGradingSet and am3RestoreBoard all passed
+ * the envelope straight through as `termWeights`.
+ *
+ * `weightedRatio` then tested `termWeights.size`, which is `undefined` on a plain object, so it
+ * took the unweighted branch. No error, no warning, a perfectly plausible score — and every
+ * "measurement" those harnesses produced was of the UNWEIGHTED scorer while reporting itself as
+ * weighted. Measured on the graded 30: passing the envelope moves 0 of 30 scores off unweighted;
+ * passing the Map moves 24 of 30. AL3's headline finding that the synonym table "is not earning
+ * its keep (+0.000)" was produced this way.
+ *
+ * This is the CC3 shape for the third time — a table nothing on the measured path actually read.
+ *
+ * ⚠ THE STALENESS REFUSAL IS PRESERVED, and that is why this unwraps rather than the callers
+ * reaching in. The envelope carries `stale`, and server.js refuses a stale table by scoring
+ * unweighted; a caller that grabbed `.weights` itself would silently apply weights the scorer is
+ * supposed to have rejected. Unwrapping here keeps that decision in one place.
+ */
+export function resolveTermWeights(input) {
+  if (!input) return null;
+  if (input instanceof Map) return input.size ? input : null;
+  if (input.weights instanceof Map) {
+    if (input.stale) return null;                 // same refusal server.js applies
+    return input.weights.size ? input.weights : null;
+  }
+  return null;
+}
+
 export function scoreAtsLocally({ job = {}, resumeText = "", runtimeBasis = null, signalProfile = null, domainProfile = null, termWeights = null,
                                   // G1 — Map<term, equivalents[]>, CONFIRMED rows only, built by the caller.
                                   // Absent means "no synonyms", which is exactly the pre-G1 behaviour, so every
                                   // existing caller keeps scoring identically until it opts in.
                                   synonyms = null } = {}) {
   const basis = runtimeBasis || buildRuntimeAtsBasis({ resumeText, signalProfile, domainProfile });
-  const weights = termWeights || basis.termWeights || null;
+  const weights = resolveTermWeights(termWeights ?? basis.termWeights);
   const jobText = [
     job.title,
     job.company,
