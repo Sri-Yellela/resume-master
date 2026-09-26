@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
-import { CANONICAL_HOST, LEGACY_HOST, LEGACY_ORIGIN } from "../shared/brand.js";
+import { CANONICAL_HOST, CANONICAL_ORIGIN, LEGACY_HOST } from "../shared/brand.js";
 
 // The project's original Railway-generated hostname,
 // https://resume-master-production.up.railway.app, is no longer attached to the service — Railway's
@@ -17,13 +17,13 @@ import { CANONICAL_HOST, LEGACY_HOST, LEGACY_ORIGIN } from "../shared/brand.js";
 
 // ⛔ TWO HOSTS, AND THEY ARE NOT INTERCHANGEABLE WHILE THE MIGRATION IS IN FLIGHT.
 //
-// CANONICAL_HOST is where the app lives now. LEGACY_HOST is where the REVIEWED EXTENSION still
-// points, and will until its P4 update is live in the store. This test used to have one constant
-// called CANONICAL, hardcoded to the legacy host, and asserted the extension referenced it —
-// which meant that the moment the app moved, the test either failed for a correct state or, if
-// someone "fixed" it by repointing the constant, started demanding that the frozen extension be
-// edited mid-review. Both constants now come from shared/brand.js, so the extension is asserted
-// against the value it actually holds and P4 is a one-line change there rather than here.
+// CANONICAL_HOST is where the app lives. LEGACY_HOST is where the PUBLISHED v1.0.0 extension
+// still points, and will until the P4 update clears review and replaces every install. This test
+// used to have one constant called CANONICAL, hardcoded to the legacy host, and asserted the
+// extension referenced it — which meant that the moment the app moved, the test either failed for
+// a correct state or, if someone "fixed" it by repointing the constant, started demanding that the
+// frozen extension be edited mid-review. Both constants come from shared/brand.js, so the
+// extension is asserted against the value it actually holds and P4 WAS the one-line change below.
 const DEAD_HOST = "resume-master-production.up.railway.app";
 
 /** Tracked files only — keeps node_modules and build output out of the scan, and stays fast. */
@@ -60,11 +60,12 @@ test("the extension targets ONE live domain in every place it declares an origin
   // Three files, and all three have to agree: two runtime constants plus the manifest, whose
   // host_permissions is the one the Chrome Web Store reviews.
   //
-  // The expected host is LEGACY_HOST and not CANONICAL_HOST on purpose. extension/ is frozen for
-  // P4 while the package is under review; repointing it now either resets the queue position or
-  // ships a manifest that contradicts the listing a reviewer is reading. When P4 lands, flip this
-  // one constant.
-  const EXPECTED = LEGACY_HOST;
+  // ⛔ FLIPPED AT P4 (2026-09-26), and the direction matters. Until P4 this read LEGACY_HOST,
+  // because extension/ was frozen under review and repointing it would have shipped a manifest
+  // contradicting the listing a reviewer was reading. The P4 package declares CANONICAL_HOST, so
+  // the legacy host is now the FORBIDDEN one — a file that still names it is a half-migrated
+  // build, which is the case OTHER below catches.
+  const EXPECTED = CANONICAL_HOST;
   const OTHER    = EXPECTED === LEGACY_HOST ? CANONICAL_HOST : LEGACY_HOST;
 
   for (const f of ["extension/background.js", "extension/config.js", "extension/manifest.json"]) {
@@ -111,7 +112,7 @@ test("the two copies of the extension's URL constant are byte-identical", () => 
 
   // And the LIVE one must be the production origin, not the commented-out dev switch. Compared by
   // prefix because the line carries a trailing `// A: production` marker.
-  assert.ok(config[0].startsWith(`const RESUME_MASTER_URL = '${LEGACY_ORIGIN}';`),
+  assert.ok(config[0].startsWith(`const RESUME_MASTER_URL = '${CANONICAL_ORIGIN}';`),
     `the uncommented constant must be the production origin, not localhost — got: ${config[0]}`);
 });
 

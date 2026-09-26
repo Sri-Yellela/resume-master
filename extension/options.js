@@ -72,7 +72,7 @@ async function loadShortcuts() {
 
 btnChange.addEventListener('click', async () => {
   await chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
-  status.textContent = 'Find "Resume Master" in the list — both shortcuts are set there.';
+  status.textContent = 'Find "draft" in the list — both shortcuts are set there.';
   setTimeout(() => { status.textContent = ''; }, 6000);
 });
 

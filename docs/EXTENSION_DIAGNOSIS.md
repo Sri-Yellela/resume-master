@@ -48,12 +48,17 @@ has moved to `jobsviadraft.com`. Measured 2026-09-24:
 **CONFIRMED: the old origin still serves everything the extension expects.** This is deliberate and
 documented in `shared/brand.js`, which is the single source for both origins:
 
-- `extension/` is frozen for **P4** (Web Store review in progress).
-- Both origins serve one app until P4 lands.
-- ⛔ **There is deliberately no 301 on the old origin.** The extension's fetches are credentialed
-  and do not follow redirects, so a 301 on an `/api` route fails *silently* rather than working.
-  The redirect becomes safe only once the extension update is **live** in the store, not merely
-  submitted.
+- ~~`extension/` is frozen for **P4**~~ — P4 ran 2026-09-26; the package names the canonical
+  origin now. The v1.0.0 item still in the review queue names the old one, which is one reason the
+  old origin has to keep answering.
+- ~~Both origins serve one app until P4 lands.~~ Both origins serve one app, **permanently**: the
+  old host belongs to a second product (`docs/PRODUCT_MODEL.md`) and is not being retired.
+- ⛔ **There is deliberately no 301 on the old origin, and this is PERMANENT.** The extension's
+  fetches are credentialed and do not follow redirects, so a 301 on an `/api` route fails
+  *silently* rather than working. ~~The redirect becomes safe only once the extension update is
+  live~~ — corrected 2026-09-26: **it never becomes safe.** The original framing made it a
+  countdown, but the property holds for every credentialed client of that origin, present and
+  future, not only the extension that prompted the rule.
 
 ### The one real hazard here
 
@@ -386,18 +391,37 @@ That is the whole reason the extension side was not rushed into the store. The t
 identity and the disconnect control are an improvement to the identity MODEL; the privilege was
 removed the moment the server deployed.
 
-⛔ **TWO TESTS IN `test/extensionSubmission.test.js` FAIL ON PURPOSE**, decided 2026-09-24:
+✅ **RESOLVED 2026-09-26 — P4 rebuilt the package and both tests went green on their own.**
+
+From 2026-09-24 until then, two tests in `test/extensionSubmission.test.js` failed on purpose:
 
 ```
 every file in the submission zip is byte-identical to extension/ source
 every file the manifest references is present in the zip          (auth.js is new)
 ```
 
-`extension/` has moved ahead of the published v1.0.0 package, and those tests are correctly
-reporting it. They are NOT to be silenced. Resolving them means bumping the version and
-repackaging, and `docs/DOMAIN_MIGRATION.md` warns that touching the package while v1.0.0 is in
-Web Store review can reset the queue position. The zip is therefore rebuilt at **P4**, when the
-domain flip repackages it anyway — at which point both tests go green on their own.
+`extension/` had moved ahead of the published v1.0.0 package and those tests were correctly
+reporting it. They were never silenced and no assertion was weakened. P4 bumped the manifest to
+**v1.1.0**, repackaged for the domain flip, and `resume-master-extension-v1.1.0.zip` now contains
+`auth.js` and is byte-identical to source. The v1.0.0 artifact was deleted: leaving two zips in
+`extension/submission/` reintroduces exactly the "which artifact is real" ambiguity that the
+hand-assembled bundle caused in the first place, and git holds the old one.
+
+⚠ **Waiting cost nothing, which is the part worth keeping.** The privilege escalation was closed
+server-side the moment the server deployed — dx2 §8, above, measured 0/7 on the published build —
+so the three weeks the package spent un-rebuilt protected the review queue without leaving anyone
+exposed.
+
+⛔ **One thing the wait DID cost, and it was invisible until P4 looked.** `auth.js` writes two
+storage keys, `authToken` and `authIdentity`. `test/privacyReconciliation.test.js` counts storage
+writes and asserts the privacy policy's stated count matches — but it read a HARDCODED list of six
+filenames that did not include the new file. So it kept asserting four, kept passing, and the
+policy said "keeps four things" while the extension kept six, for the whole period. Worse, the
+policy's flat claim that "None of them is sent anywhere by the extension" became FALSE the moment
+the extension carried a token of its own. Both were corrected at P4, the count is now derived from
+the shipped bundle, and the retraction is recorded in `STORE_LISTING.md`'s storage field. **The
+lesson is not "rebuild sooner" — it is that a test whose INPUT LIST is hand-maintained can go
+silent about the exact file that was added.**
 
 ---
 

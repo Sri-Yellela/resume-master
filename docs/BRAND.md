@@ -9,7 +9,8 @@ Derive from it; do not decide per-file. Deciding per-file is how two names ship.
 
 | | |
 |---|---|
-| **Public brand** | **Draft** |
+| **Public brand** | **Draft** — the name, as a word in a sentence |
+| **Wordmark** | **draft** — lowercase, the name set as a mark. Added 2026-09-26 |
 | **Domain** | `jobsviadraft.com` |
 | **Canonical host** | `https://jobsviadraft.com` — bare apex, no `www` |
 
@@ -19,11 +20,52 @@ a product name.
 
 ---
 
+## ⬛ The casing rule — decided 2026-09-26
+
+**The mark is lowercase. The word is not.** Two constants in `shared/brand.js`:
+
+```js
+export const BRAND    = "Draft";   // the name, inside prose
+export const WORDMARK = "draft";   // the name, as a mark
+```
+
+| Use `WORDMARK` — the name stands alone as a label | Use `BRAND` — the name is a noun in a sentence |
+|---|---|
+| the nav and footer lockups | marketing copy, the About page, the FAQ |
+| the stamp logo | toasts and error messages the extension shows |
+| the extension's `manifest.name` | the email sender name |
+| the Chrome Web Store title | the `aria-label` on the logo link — a screen reader speaks it |
+| the extension's options-page heading | the copyright line |
+
+⛔ **WHY TWO CONSTANTS AND NOT ONE.** A single lowercase `BRAND` renders every sentence wrong:
+*"draft is an AI-powered job application platform"*, *"Does draft auto-apply to jobs on my
+behalf?"* — a reader parses those as typos, not as styling. Lowercasing in CSS instead was
+considered and rejected: `text-transform` does not reach the extension's `manifest.json`, the
+store title, or a `<title>` element, so the mark would be lowercase in the app and title-case
+everywhere a reviewer looks.
+
+⛔ **THE RISK THIS INTRODUCES, AND THE GUARD FOR IT.** A second constant holding a name is a second
+name waiting to happen, which is the exact failure this file opens by warning about. So
+`test/brandAndOriginGuard.test.js` asserts `WORDMARK === BRAND.toLowerCase()` and that the two
+differ — same letters, different case, nothing else. **If the mark ever needs to be a different
+WORD, that is a decision for this file, not a constant quietly diverging.** The same test also pins
+the extension's two directions: `manifest.name` must equal `WORDMARK` character for character —
+`extension/options.js` tells the user to look for that exact string in Chrome's shortcuts list —
+and its user-facing sentences must use `BRAND`.
+
+---
+
 ## Canonical host — why bare apex
 
-`www.jobsviadraft.com` is configured in DNS and points at the same Railway target, but **cannot be
-activated yet**: the Railway plan allows two custom domains and both slots are in use
-(`resumemaster.one` + `jobsviadraft.com`) until the old domain is retired.
+`www.jobsviadraft.com` is configured in DNS and points at the same Railway target, but **is not
+activated, and the plan to activate it is dropped.** The Railway plan allows two custom domains and
+both slots are in use (`resumemaster.one` + `jobsviadraft.com`).
+
+⛔ **Corrected 2026-09-26: the second slot never frees.** This section used to say "yet", on the
+assumption that `resumemaster.one` would be retired after the extension update. It is not being
+retired — it is a product's address (`docs/PRODUCT_MODEL.md`). **The bare apex is canonical,
+permanently.** That is not a loss: see the match-pattern warning immediately below, which makes a
+working `www` a way to break the extension quietly rather than a convenience.
 
 ⛔ **Everything that hardcodes a host uses the bare apex.** `APP_BASE_URL`, `FRONTEND_URL`, the
 OAuth redirect URIs, the extension manifest's `host_permissions`, the store listing, the privacy
@@ -34,27 +76,82 @@ policy URL.
 is blocked. Since the app's own origin constant is the bare apex this should not arise — but assert
 it during the sweep rather than assuming.
 
-**After `resumemaster.one` is retired:** add `www.jobsviadraft.com` in Railway, confirm the
-certificate issues, and keep it serving the same app directly — **no 301.** A redirect at the apex
-is what the migration plan exists to avoid: the extension's credentialed `fetch` calls do not follow
-redirects, so a redirected `/api/...` fails silently rather than working.
+~~**After `resumemaster.one` is retired:** add `www.jobsviadraft.com` in Railway…~~ — ⛔ **struck
+2026-09-26. There is no "after".** The old domain is staying.
+
+**The no-301 rule survives the correction and gets stronger.** It was stated here as a property of
+the apex redirect; it is a property of *any* redirect on *either* origin. A credentialed `fetch`
+does not follow redirects, so a redirected `/api/...` returns an opaque response that reads as an
+empty answer rather than an error — silently, for every credentialed client, not only the
+extension. **Serve every origin directly. Never redirect one at another.**
 
 ---
 
 ## Names, by surface
 
-| Surface | Value |
-|---|---|
-| UI / product name | **Draft** |
-| Chrome Web Store title | **Draft** |
-| App Store / Play Store | **Draft** |
-| Email sender name | **Draft** |
-| Marketing copy | **Draft** |
-| Domain | `jobsviadraft.com` |
+| Surface | Value | Which constant |
+|---|---|---|
+| UI lockups — nav, footer, stamp logo | **draft** | `WORDMARK` |
+| Chrome Web Store title | **draft** | `WORDMARK` |
+| Extension `manifest.name` | **draft** | `WORDMARK` |
+| App Store / Play Store | **draft** | `WORDMARK` |
+| Product name inside a sentence | **Draft** | `BRAND` |
+| Email sender name | **Draft** | `BRAND` |
+| Marketing copy | **Draft** | `BRAND` |
+| Domain | `jobsviadraft.com` | `CANONICAL_HOST` |
 
-**"Resume Master" survives nowhere** as a user-visible name. Legacy mentions are allowed only in:
-historical migration comments · `docs/CORRECTIONS_REGISTER.md` · `docs/FINDINGS_ARCHIVE.md` · git
-history. Those are the guard's allowlist.
+**"Resume Master" survives nowhere as a name for THIS product.** Legacy mentions are allowed only
+in: historical migration comments · `docs/CORRECTIONS_REGISTER.md` · `docs/FINDINGS_ARCHIVE.md` ·
+git history. Those are the guard's allowlist.
+
+---
+
+## ⛔ Resume Master is a SECOND PRODUCT — the guard needs a carve-out, and it cannot be pre-added
+
+**Corrected 2026-09-26.** The sentence above used to end the matter. It no longer does: the owner
+decided on 2026-09-25 (`docs/PRODUCT_MODEL.md`) that **Resume Master is a separate product** — a
+stateless processing service keeping `resumemaster.one`. So the repository will legitimately
+acquire `resumemaster` and `Resume Master` literals again, in files where they are **correct**.
+
+`test/brandAndOriginGuard.test.js` forbids exactly those literals outside an allowlist. The two
+facts have to be reconciled deliberately, because the failure mode is well documented in this
+project: **a guard that cries wolf gets suppressed, and then it is gone for the case that
+mattered.** Six guards here shipped inert that way.
+
+### The rule
+
+| | |
+|---|---|
+| **This product** | never "Resume Master", anywhere a user can see it. Unchanged |
+| **The other product** | "Resume Master" is its NAME. Its own files say so, correctly |
+| **Which files** | only files that are ABOUT the second product — its service, its privacy policy, its API docs |
+| **What is still forbidden** | this product's UI, listings, policy or marketing naming the old brand. That is a regression, not a second product |
+
+### ⛔ Why the allowlist entry cannot be added in advance
+
+**The allowlist self-prunes.** `test/brandAndOriginGuard.test.js` asserts that every allowlisted
+path *currently contains* a legacy literal, and fails the entry if it does not — the anti-rot
+mechanism that stops an entry outliving its reason and silently protecting a later regression.
+
+So an entry added today, before any Resume Master file exists, **fails immediately**. It is not
+possible to prepare the ground, and that is the mechanism working rather than getting in the way.
+
+**The entry is added in the SAME commit as the first file that needs it**, as a prefix — likely
+`resume-master/` or whatever the service directory is called — with a reason of the form:
+
+> "The second product's own source. `Resume Master` is its NAME, not a legacy mention of this
+> one's. Removed if that product is discontinued or renamed."
+
+⚠ **Two things to get right when that commit lands**, both of which this project has already been
+bitten by:
+
+1. **A PREFIX, not a blanket exemption on the word.** Widening `FORBIDDEN` to stop matching
+   `Resume Master` anywhere would disarm the guard for this product's files too, which is the whole
+   thing it protects. Scope the permission to the directory.
+2. **`git ls-files` only sees TRACKED files.** A brand-new directory is invisible to the scan until
+   it is staged, so the guard passes vacuously and then goes red on commit.
+   `git add -N` the new files before running the guard for the first time — `test/
+   productionOriginConsistency.test.js` learnt this the hard way.
 
 ---
 

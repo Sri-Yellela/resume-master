@@ -9,10 +9,13 @@
 // had to change. It is now one fixed initial plus one collapsible tail, derived from BRAND, which
 // works for any single-word name. The stamp, the rotation, the italic and the collapse animation
 // are all unchanged — only what the letters spell.
-import { BRAND } from '../../../shared/brand.js';
+import { WORDMARK } from '../../../shared/brand.js';
 
-const INITIAL = BRAND.slice(0, 1);
-const TAIL    = BRAND.slice(1);
+// WORDMARK, not BRAND: this component renders the name as a MARK, which is the one place the
+// lowercase casing decided on 2026-09-26 applies. The collapse still works letter-wise — 'd' plus
+// a collapsible 'raft' — because the derivation was already per-character rather than per-word.
+const INITIAL = WORDMARK.slice(0, 1);
+const TAIL    = WORDMARK.slice(1);
 
 export function StampLogo({ progress = 0, size = 'sm' }) {
   const pc = Math.min(Math.max(progress, 0), 1);

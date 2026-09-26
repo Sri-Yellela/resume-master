@@ -1,16 +1,16 @@
 {
   "manifest_version": 3,
-  "name": "Resume Master",
-  "version": "1.0.0",
+  "name": "draft",
+  "version": "1.1.0",
   "description": "Capture the job you're viewing, and fill the application you signed in to reach. You review every answer and submit it yourself.",
   "permissions": [
     "activeTab",
     "scripting",
     "storage"
   ],
-  "privacy_policy_url": "https://resumemaster.one/privacy",
+  "privacy_policy_url": "https://jobsviadraft.com/privacy",
   "host_permissions": [
-    "https://resumemaster.one/*"
+    "https://jobsviadraft.com/*"
   ],
   "background": {
     "service_worker": "background.js",
@@ -31,7 +31,7 @@
         "default": "Ctrl+Shift+K",
         "mac": "Command+Shift+K"
       },
-      "description": "Capture the current job into Resume Master"
+      "description": "Capture the current job into draft"
     },
     "fill-gated-application": {
       "suggested_key": {

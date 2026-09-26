@@ -46,13 +46,13 @@ import applyRoutes from '../routes/apply.js';
 import { MIGRATIONS } from './migrations.js';
 import { buildGatePacket } from '../services/applyGatePacket.js';
 import { toStorePng, readPngHeader, decodeToRgb, encodeRgbPng, compositeRgb } from '../services/pngTruecolor.js';
-import { LEGACY_ORIGIN } from '../shared/brand.js';
+import { CANONICAL_ORIGIN } from '../shared/brand.js';
 
 // extension/ is frozen for P4 (Web Store review), so its URL constant still names the LEGACY
 // origin. This rewrite has to match what is actually in that file today, not where the app has
-// moved to — deriving it from LEGACY_ORIGIN is what makes P4 a one-line change instead of a
+// moved to — deriving it from CANONICAL_ORIGIN is what makes P4 a one-line change instead of a
 // hunt through eight harnesses.
-const LEGACY_URL_DECL = `const RESUME_MASTER_URL = '${LEGACY_ORIGIN}';`;
+const APP_URL_DECL = `const RESUME_MASTER_URL = '${CANONICAL_ORIGIN}';`;
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT_DIR = path.join(os.tmpdir(), 'g3-review-overlay');
@@ -259,7 +259,27 @@ function startApi() {
   // and the popup renders its SIGN-IN wall — which is the wrong fixture state for a harness whose
   // whole scenario is a candidate who has already signed in to reach a gated form, and which was
   // also giving the store screenshots a signed-out popup.
-  app.get('/api/auth/me', (_req, res) => res.json({ authenticated: true, username: 'ada' }));
+  // ⛔ `user: { username }`, NOT a bare `username`. The real route answers
+  // `{ authenticated, user: publicUser(req.user) }`, and extension/auth.js reads
+  // `body.user?.username`. A flat shape here type-checks, returns 200, and leaves the popup
+  // rendering its "your account" fallback — which is a true rendering of a stub that lies, and was
+  // being photographed into the store listing as if it were the product.
+  app.get('/api/auth/me', (_req, res) =>
+    res.json({ authenticated: true, user: { username: 'ada', isAdmin: false } }));
+  // The extension's OWN credential. extension/auth.js routes EVERY call through authedFetch(),
+  // which bootstraps from this endpoint and returns null when it cannot — so without this stub the
+  // handoff dies at "Sign in to Draft first." before the overlay is ever rendered, and the store
+  // screenshots photograph a signed-out popup over an unfilled form.
+  //
+  // ⛔ This is a stub of the EXCHANGE, not of the authorisation. The real route is behind
+  // requireAuth and mints a sessionLess context; here every request is already `req.user` id 1, so
+  // the token is a constant. What it preserves is the SHAPE the extension depends on — a JSON
+  // `token`, then `X-RM-Auth-Context` on every subsequent call with `credentials: 'omit'` — which
+  // is the property the harness is exercising. It was added when the handoff stopped working here
+  // for a reason that had nothing to do with the handoff: auth.js landed after this harness last
+  // ran, and a stub server that answers 404 is indistinguishable to the extension from a user who
+  // has not signed in.
+  app.get('/api/auth/extension-token', (_req, res) => res.json({ token: 'g3-harness-token' }));
   applyRoutes(app, db, (q, r, n) => n(), () => ({ field_map: {}, handler_map: {}, custom_answers: {} }),
     async () => ({ error: 'not_needed' }), async () => fs.readFileSync(RESUME_PDF), async () => ({}));
   return new Promise(resolve => {
@@ -281,7 +301,7 @@ function buildTestExtension(apiOrigin) {
   for (const f of ['background.js', 'config.js']) {
     const p = path.join(dst, f);
     fs.writeFileSync(p, fs.readFileSync(p, 'utf8')
-      .replace(LEGACY_URL_DECL, `const RESUME_MASTER_URL = '${apiOrigin}';`));
+      .replace(APP_URL_DECL, `const RESUME_MASTER_URL = '${apiOrigin}';`));
   }
   const manifest = JSON.parse(fs.readFileSync(path.join(dst, 'manifest.json'), 'utf8'));
   manifest.host_permissions = [...manifest.host_permissions, `${apiOrigin}/*`];

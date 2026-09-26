@@ -11,7 +11,7 @@ something you read elsewhere in `docs/`, re-measure before you believe either.
 | deployed commit | **read it from `/api/version`** — any value written here is stale by the next push, which is why the doc guard deliberately does not assert one |
 | contract | `1.1.1` (source and production agree) |
 | migration high-water | `109_restore_stripped_seniority_titles`, in **both** runners and production |
-| test baseline | **2646 tests, 2644 pass, 2 fail** — the two failures are deliberate, see `CLAUDE.md` |
+| test baseline | **2648 tests, 2648 pass, 0 fail** — no deliberate failures since P4; see `CLAUDE.md` |
 | monetisation | **disabled** — the product presents as free and untiered |
 | Anthropic balance | **exhausted.** Model-backed paths return 502 — except capture, which degrades (see below) |
 
@@ -61,7 +61,8 @@ on their behalf without a gate.**
   ⛔ **A 200 is not evidence.** The SPA catch-all answers 200 with `index.html` for any unknown
   path. That has produced a false finding four times, most recently `/api/admin/stats` "returning
   200" for a route that does not exist. Judge by **response body and content-type**, always.
-- **Local:** `npm test`. Expect 2646 / 2644 / 2, and check `CLAUDE.md` before assuming a red is rot.
+- **Local:** `npm test`. Expect 2648 / 2648 / 0. ⛔ A red is now a REAL failure — the two deliberate
+  ones cleared at P4 on 2026-09-26. Check `CLAUDE.md` before assuming otherwise.
 - **Real behaviour:** `npm run verify:harness` (needs the app on `:3001`). A green node suite is
   **not** evidence about anything a browser does — see the note in `package.json`.
 
@@ -84,8 +85,13 @@ verify it by injecting a violation.
 
 - **Funding the Anthropic balance.** Enrichment, résumé generation and cover letters do nothing
   until then, and no agent can do it. Capture degrades rather than waiting.
-- **The Chrome Web Store.** v1.0.0 is in review and still points at `resumemaster.one`. Repackaging
-  mid-review can reset the queue, so the extension is frozen until **P4**.
+- **The Chrome Web Store.** ⛔ **Uploading v1.1.0 is the owner's, and it is the only thing P4 did
+  not finish.** P4 (2026-09-26) rebuilt the package for the new origin and brand, regenerated the
+  three listing screenshots and rewrote the listing copy — all of it sitting in
+  `extension/submission/`. The dashboard steps are manual: replace the package in place if the
+  pending v1.0.0 item allows it, re-paste the **storage** and **host permission** justifications
+  (both changed materially), and confirm the reviewer's test account signs in on the new domain.
+  A rename plus a host-permission change triggers an in-depth review; expect a longer queue.
 - **DNS, Railway env, and the OAuth consoles** — see `docs/DOMAIN_MIGRATION.md` Phase 0.
 - **Two mailboxes** that may not exist yet: `privacy@` and `noreply@` on the new domain.
 - **Whether the apply pipeline should ever auto-submit.** It never has; that is a product decision.

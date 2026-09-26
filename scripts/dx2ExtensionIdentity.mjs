@@ -31,7 +31,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer-core';
 import { resolveBrowserExecutable } from '../services/browserLauncher.js';
-import { LEGACY_ORIGIN } from '../shared/brand.js';
+import { CANONICAL_ORIGIN } from '../shared/brand.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(os.tmpdir(), 'dx2-extension-identity');
@@ -39,7 +39,7 @@ const PORT = 4614;
 const API = `http://127.0.0.1:${PORT}`;
 const ADMIN_USER = 'dx2_admin';
 const ADMIN_PASSWORD = 'Dx2-Admin-pass!9';
-const LEGACY_URL_DECL = `const RESUME_MASTER_URL = '${LEGACY_ORIGIN}';`;
+const APP_URL_DECL = `const RESUME_MASTER_URL = '${CANONICAL_ORIGIN}';`;
 
 // Routes that REALLY exist, grepped from server.js / routes/*.js. A 404 must never be mistaken
 // for a guard doing its job.
@@ -70,10 +70,10 @@ function buildTestExtension(apiOrigin) {
   for (const f of ['background.js', 'config.js']) {
     const p = path.join(dst, f);
     const t = fs.readFileSync(p, 'utf8');
-    if (!t.includes(LEGACY_URL_DECL)) {
+    if (!t.includes(APP_URL_DECL)) {
       throw new Error(`${f}: URL constant not found — the rewrite would be a silent no-op and the run void`);
     }
-    fs.writeFileSync(p, t.replace(LEGACY_URL_DECL, `const RESUME_MASTER_URL = '${apiOrigin}';`));
+    fs.writeFileSync(p, t.replace(APP_URL_DECL, `const RESUME_MASTER_URL = '${apiOrigin}';`));
   }
   const mf = JSON.parse(fs.readFileSync(path.join(dst, 'manifest.json'), 'utf8'));
   mf.host_permissions = [...mf.host_permissions, `${apiOrigin}/*`];
@@ -283,7 +283,7 @@ async function main() {
         const p = path.join(oldDir, f);
         if (!fs.existsSync(p)) continue;
         fs.writeFileSync(p, fs.readFileSync(p, 'utf8')
-          .replace(LEGACY_URL_DECL, `const RESUME_MASTER_URL = '${API}';`));
+          .replace(APP_URL_DECL, `const RESUME_MASTER_URL = '${API}';`));
       }
       const oldMf = JSON.parse(fs.readFileSync(path.join(oldDir, 'manifest.json'), 'utf8'));
       oldMf.host_permissions = [...oldMf.host_permissions, `${API}/*`];

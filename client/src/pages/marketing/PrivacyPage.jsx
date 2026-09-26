@@ -20,7 +20,17 @@ import { BRAND, CANONICAL_HOST, LEGACY_HOST, PRIVACY_CONTACT_EMAIL } from "../..
 // the policy wrong on its own face. BOTH hosts are named below on purpose: the reviewed
 // extension still posts to the legacy origin and will until its P4 update is LIVE, so naming
 // only the new one would describe software nobody is running yet.
-const EFFECTIVE_DATE = 'September 23, 2026';
+// 2026-09-26: bumped for P4, and this one is the closest any bump has come to the advance-notice
+// commitment. Two of the three changes REDUCE exposure: the extension no longer sends the browser's
+// session cookie, so it can no longer act as whatever account is signed in elsewhere in the same
+// browser, and it names the account it IS connected to. The third is a correction, not a change in
+// behaviour — the storage section said four keys and the extension wrote six, because auth.js was
+// added after the sentence was. ⛔ The retracted sentence matters more than the count: "None of them
+// is sent anywhere by the extension" was FALSE once the extension carried its own token, and a
+// reader could falsify it by watching one request. It now says which single value is transmitted
+// and to whom. Advance notice is not triggered — no new data leaves, and one recipient path closed
+// — but this is the bump to point at if anyone asks when the token was first disclosed.
+const EFFECTIVE_DATE = 'September 26, 2026';
 const CONTACT_EMAIL  = PRIVACY_CONTACT_EMAIL;
 
 function Section({ title, children }) {
@@ -198,11 +208,14 @@ export function PrivacyPage() {
             </LI>
             <LI>
               Data extracted by the extension is sent to {LEGACY_HOST} or {CANONICAL_HOST} —
-              both are ours and both reach the same servers — and associated with
-              your logged-in account using a browser session cookie — the same session used
-              when you log into the website. Because it is attached to your account, captured job
-              data is personal information, and we treat it as such. The extension never itself
-              reads or transmits the cookie's contents.
+              both are ours and both reach the same servers — and associated with the account you
+              connected the extension to. Because it is attached to your account, captured job data
+              is personal information, and we treat it as such. The extension identifies itself with
+              an access token of its own rather than with your website session: it asks for that
+              token once, when you connect it, and from then on it sends the token and not the
+              browser cookie. That is deliberate — it means the extension acts only as the account
+              you connected it to, and never as some other account you happen to be signed in to in
+              the same browser.
             </LI>
             <LI>
               Job descriptions you capture may be sent to Anthropic's API when you use them for
@@ -210,7 +223,9 @@ export function PrivacyPage() {
             </LI>
             <LI>
               It does <Strong>not</Strong> read, store, or transmit your session cookies, login
-              credentials, or any authentication tokens for any site.
+              credentials, or any authentication token belonging to any other site. The one
+              credential it holds is its own — the access token described above, which it obtained
+              from us, for us, when you connected it.
             </LI>
             <LI>
               It does <Strong>not</Strong> read any page you have not navigated to yourself, and
@@ -237,12 +252,13 @@ export function PrivacyPage() {
 
           <H3>What the Extension Stores in Your Browser</H3>
           <P>
-            The extension keeps four things in your browser's own extension storage. None of them is
-            sent anywhere by the extension. One is ordinary local storage and stays until you
-            uninstall the extension; the other three are memory-backed session storage, which your
-            browser discards when you restart it. (Earlier versions also stored a custom keyboard
-            shortcut; that setting was removed, and any value it left behind is deleted when you
-            open the extension's options page. Shortcuts are now managed by Chrome itself.)
+            The extension keeps six things in your browser's own extension storage. Three are
+            ordinary local storage and stay until you uninstall the extension or disconnect it; the
+            other three are memory-backed session storage, which your browser discards when you
+            restart it. Only one of the six — the extension's own access token, described last — is
+            ever sent anywhere, and it goes only to us. (Earlier versions also stored a custom
+            keyboard shortcut; that setting was removed, and any value it left behind is deleted
+            when you open the extension's options page. Shortcuts are now managed by Chrome itself.)
           </P>
           <UL>
             <LI>
@@ -271,6 +287,23 @@ export function PrivacyPage() {
               stating plainly: it holds no answers and nothing about you. Session storage: deleted
               when that tab closes or when the queue for that site empties, and gone when you
               restart your browser. The ten-minute expiry does not apply to it either.
+            </LI>
+            <LI>
+              <Strong>The account the extension is connected to</Strong> — your username, so the
+              popup can tell you whose account a capture would go to before you make one. Local
+              storage: refreshed when the extension checks in with us, and deleted the moment you
+              disconnect it. The ten-minute expiry does not apply to it.
+            </LI>
+            <LI>
+              <Strong>The extension's own access token</Strong>, which is how it identifies itself
+              to us. <Strong>This is the one stored value that is transmitted</Strong>: it is sent
+              with each request the extension makes to {CANONICAL_HOST}, and to nowhere else. It is
+              not your password and it is not your website session — the extension obtains a token
+              of its own the first time you connect it, precisely so that it acts only as the
+              account you connected and never as whatever else you happen to be signed in to in the
+              same browser. You can end it at any time from the extension's popup, or from your
+              account, and the extension then holds nothing. Local storage; the ten-minute expiry
+              does not apply to it.
             </LI>
           </UL>
 

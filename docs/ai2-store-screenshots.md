@@ -10,9 +10,14 @@ it lands.
 
 | file | dimensions | colour type | bits | bytes |
 |---|---|---|---|---|
-| `docs/store-screenshots/1-review-overlay.png` | 1280×800 | 2 (truecolour, no alpha) | 24 | 47,052 |
-| `docs/store-screenshots/2-popup.png` | 1280×800 | 2 (truecolour, no alpha) | 24 | 30,177 |
-| `docs/store-screenshots/3-options.png` | 1280×800 | 2 (truecolour, no alpha) | 24 | 31,109 |
+| `docs/store-screenshots/1-review-overlay.png` | 1280×800 | 2 (truecolour, no alpha) | 24 | 46,604 |
+| `docs/store-screenshots/2-popup.png` | 1280×800 | 2 (truecolour, no alpha) | 24 | 30,373 |
+| `docs/store-screenshots/3-options.png` | 1280×800 | 2 (truecolour, no alpha) | 24 | 29,785 |
+
+⚠ **Regenerated 2026-09-26 for P4.** The byte counts above are the post-rebrand ones; the shots
+taken on 2026-08-27 were 47,052 / 30,177 / 31,109 and showed the old brand in frame. ⛔ Do not read
+the delta as image noise — the *content* changed (see below), which is a different thing from the
+sub-1% form-control variance documented under "Deterministic and re-runnable".
 
 ---
 
@@ -51,9 +56,9 @@ The review overlay over a real form, before anything is acknowledged. It shows:
 - real filled fields — Ada, Lovelace, `ada@example.com`, `+1 555 0100`, Analytical Engines
 - the provenance cues — `eligibility` badges on the two attestation answers, `guessed field` on the
   label-only match, and an `acknowledge` control on it
-- the central claim of the listing copy, in the extension's own words: *"Resume Master never submits
-  for you"*, *"Not ready — 1 guess(es) still to acknowledge"*, *"Submit the form yourself when you
-  are happy with it"*
+- the central claim of the listing copy, in the extension's own words: *"Draft never submits for
+  you"*, *"Not ready — 1 guess(es) still to acknowledge"*, *"Submit the form yourself when you are
+  happy with it"*
 
 ### 2. `2-popup.png` — the popup over a posting
 

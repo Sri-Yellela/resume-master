@@ -4,7 +4,7 @@ import fs from "node:fs";
 import { execFileSync } from "node:child_process";
 
 import {
-  BRAND, LEGACY_BRAND,
+  BRAND, WORDMARK, LEGACY_BRAND,
   CANONICAL_HOST, CANONICAL_ORIGIN,
   LEGACY_HOST, LEGACY_ORIGIN,
   PRIVACY_POLICY_URL,
@@ -26,6 +26,18 @@ import {
  * Forbidden: `resumemaster` in any casing (which covers `resumemaster.one`, the stray
  * `resumemaster.app`, `ResumeMaster` and `com.resumemaster.*`) and `Resume Master` in any casing
  * (which covers the `RESUME MASTER` that the stamp logo and the admin schema export used to spell).
+ *
+ * ⛔ THE SECOND PRODUCT WILL NEED A CARVE-OUT, AND IT CANNOT BE PRE-ADDED. The owner decided on
+ * 2026-09-25 (docs/PRODUCT_MODEL.md) that Resume Master is a SEPARATE product keeping
+ * resumemaster.one. Its own source files will legitimately spell its name, and this guard forbids
+ * exactly that spelling. The reconciliation is written down in docs/BRAND.md § "Resume Master is a
+ * SECOND PRODUCT" and comes to: add a PREFIX entry for that product's directory, in the same commit
+ * as the first file that needs it, with a stated reason.
+ *
+ * It cannot be prepared in advance, because the self-pruning test below fails any allowlist entry
+ * whose files do not currently match. That is the mechanism working. ⛔ Do NOT instead widen
+ * FORBIDDEN to stop matching the name — that disarms the guard for THIS product's files, which is
+ * the only thing it protects. Scope the permission to the directory.
  *
  * NOT forbidden, on purpose: `resume-master`, `resume_master` and `RESUME_MASTER`. Those are the
  * IDENTIFIER spellings, and docs/BRAND.md decides they stay — npm package names, the two git repo
@@ -106,31 +118,23 @@ const ALLOWED_PREFIXES = [
 ];
 
 /**
- * extension/ is a PINNED SET rather than a prefix.
+ * extension/ WAS a pinned set of twelve files, and it is now empty. P4 landed 2026-09-26.
  *
- * The directory is frozen for P4 — the package is under Chrome Web Store review, and editing it
- * now either resets the queue position or ships a package that contradicts the listing a reviewer
- * is reading. But "frozen" has to be enforced, not trusted: a blanket `extension/` prefix would
- * let a NEW file carrying the old brand slip in unnoticed, and P4 could then clean eleven files,
- * miss the twelfth, and still be green. Pinning the exact set means any addition OR removal fails
- * here and has to be acknowledged.
+ * The pinned list existed because the directory was frozen under Chrome Web Store review, and
+ * "frozen" had to be enforced rather than trusted: a blanket `extension/` prefix would have let a
+ * NEW file carrying the old brand slip in unnoticed, and P4 could then have cleaned eleven files,
+ * missed the twelfth, and still gone green.
  *
- * ⛔ WHEN P4 LANDS: this list empties. Delete it and the block that uses it.
+ * It is kept as an empty array rather than deleted outright, because the assertion below is the
+ * one that now does the work: with the list empty, ANY extension/ file carrying a legacy literal
+ * fails. That is stricter than deleting both, which would leave extension/ unscanned-for-intent
+ * and looking deliberate.
+ *
+ * ⛔ DO NOT re-add a file here to make a failure go away. A legacy literal under extension/ after
+ * P4 means a half-migrated package — the manifest declaring one origin while a script fetches the
+ * other is a CORS failure that is invisible locally and silent in production.
  */
-const FROZEN_EXTENSION_FILES = [
-  "extension/MANIFEST_RATIONALE.md",
-  "extension/README.md",
-  "extension/background.js",
-  "extension/config.js",
-  "extension/gated-handoff.js",
-  "extension/manifest.json",
-  "extension/options.html",
-  "extension/options.js",
-  "extension/popup.html",
-  "extension/review-overlay.js",
-  "extension/submission/PRIVACY_RECONCILIATION.md",
-  "extension/submission/STORE_LISTING.md",
-];
+const FROZEN_EXTENSION_FILES = [];
 
 /** Individual files, each with its own reason. */
 const ALLOWED_FILES = {
@@ -147,19 +151,34 @@ const ALLOWED_FILES = {
     "Same: a historical deploy record, left in place by P5 for the same reason. Removed when the " +
     "doc-retirement pass classifies it.",
 
+  // ── Written BY P4, and it names the old brand and origin because it is ABOUT the change ─────
+  "extension/submission/STORE_LISTING.md":
+    "The 'what changed since v1.0.0' block a Web Store reviewer reads. It has to say " +
+    "'\"Resume Master\" → draft' and name the host permission's old value, because a rename plus a " +
+    "host-permission change is exactly what triggers an in-depth review and the reviewer is " +
+    "comparing the two packages. Stating the delta without naming the old side is not possible. " +
+    "Removed when v1.1.0 is LIVE and the next release's listing describes a different delta.",
+
   // ── Written BY P5, and they name the old origin because the system still serves it ──────────
   // Not history: both describe live, current behaviour that a reader has to know about. Removing
   // the literal would make them wrong, and deriving it from LEGACY_ORIGIN inside prose would be
-  // unreadable. Both go when P4 lands — at which point the statements themselves stop being true.
-  "HANDOFF.md":
-    "States that the published extension still talks to the old origin, and that funding/Web Store " +
-    "work is the owner's. Removed at P4, when the extension update goes live and the old origin " +
-    "can be retired.",
+  // unreadable.
+  //
+  // ⚠ BOTH ENTRIES SAID "Removed at P4". P4 landed on 2026-09-26 and neither became removable,
+  // which is worth recording rather than quietly re-dating: the removal event was predicated on
+  // the old origin being RETIRED after the extension update, and that is no longer the plan. The
+  // events below are the real ones.
+  // HANDOFF.md's entry is GONE, pruned by the test below on the same day it stopped being needed.
+  // P4 rewrote its Web Store bullet — the old text said the extension "still points at" the old
+  // origin, which stopped being true of the package — and the replacement does not need the
+  // literal at all. Recorded here rather than silently deleted because the self-pruning assertion
+  // is the thing that caught it, which is the first time it has fired for real.
   "ARCHITECTURE.md":
     "§1, §7 and §10 document that BOTH origins serve one app, that the session cookie is host-only " +
     "so a Google sign-in started on the old origin lands its cookie on the new one, and that there " +
-    "must be NO 301 on the old origin while the reviewed extension points at it. Every one of " +
-    "those is a fact about the old host and cannot be written without naming it. Removed at P4.",
+    "must be NO 301 on the old origin. Every one of those is a fact about the old host and cannot " +
+    "be written without naming it. ⛔ The no-301 rule is now PERMANENT, not a migration-window " +
+    "constraint, so this entry has no removal event — it goes only if the old origin stops serving.",
 };
 
 // ════════════════════════════════════════════════════════════════════════════════════════════
@@ -205,12 +224,18 @@ test("the allowlist prunes itself — no entry outlives the reason it was added 
   }
 });
 
-test("extension/ is frozen for P4, and the frozen set is exactly what was pinned", () => {
-  const actual = offenders().map(h => h.file).filter(f => f.startsWith("extension/")).sort();
+test("extension/ carries no legacy brand or origin — P4 cleaned it and it stays clean", () => {
+  // Files with their own ALLOWED_FILES entry are excluded here, not exempted twice: STORE_LISTING.md
+  // lives under extension/ and legitimately names the old brand, because its job is to tell a
+  // reviewer what changed. Its reason and removal event are stated there, and the self-pruning test
+  // above still holds it to them — so it cannot become a silent hole in this scan.
+  const actual = offenders().map(h => h.file)
+    .filter(f => f.startsWith("extension/") && !(f in ALLOWED_FILES)).sort();
   assert.deepEqual(actual, [...FROZEN_EXTENSION_FILES].sort(),
-    "the set of extension/ files carrying the legacy brand changed. If P4 is under way, update " +
-    "FROZEN_EXTENSION_FILES in the same commit; if it is not, something edited a package that is " +
-    "supposed to be under review");
+    "an extension/ file carries a legacy brand or origin literal. P4 moved the package to the " +
+    "canonical origin on 2026-09-26, so this is either an un-swept file or a half-migrated build " +
+    "— and a package that declares one origin while a script fetches the other fails CORS in " +
+    "production while passing every local test");
 });
 
 // ════════════════════════════════════════════════════════════════════════════════════════════
@@ -271,6 +296,40 @@ test("the canonical origin is the BARE APEX — no www, no trailing slash", () =
   assert.ok(!LEGACY_HOST.startsWith("www."));
   assert.equal(LEGACY_ORIGIN, `https://${LEGACY_HOST}`);
   assert.equal(PRIVACY_POLICY_URL, `${CANONICAL_ORIGIN}/privacy`);
+});
+
+test("WORDMARK and BRAND are the SAME NAME in two cases, and nothing else", () => {
+  // The lowercase mark was decided 2026-09-26. The risk it introduces is not styling — it is that
+  // a second constant holding a name drifts into a second NAME, which is the exact failure
+  // docs/BRAND.md was written to prevent ("deciding per-file is how two names ship"). So the
+  // relationship is asserted rather than trusted: same letters, different case, and the mark is
+  // the lowercase one.
+  assert.equal(WORDMARK, BRAND.toLowerCase(),
+    "WORDMARK must be BRAND lowercased — if the mark needs to be a different WORD, that is a brand " +
+    "decision for docs/BRAND.md, not a constant quietly diverging");
+  assert.notEqual(WORDMARK, BRAND, "the whole point is that the mark is cased differently");
+  assert.ok(!FORBIDDEN.some(p => p.re.test(WORDMARK)),
+    "WORDMARK itself must not contain a forbidden literal");
+});
+
+test("the extension's user-visible name is the WORDMARK, and its prose is the BRAND", () => {
+  // P4's specific trap: the manifest `name` is what Chrome shows in the toolbar, the store title
+  // and chrome://extensions/shortcuts, and extension/options.js tells the user to look for that
+  // exact string in that list. If the two disagree, the instruction sends them looking for
+  // something that is not there.
+  const manifest = JSON.parse(fs.readFileSync("extension/manifest.json", "utf8"));
+  assert.equal(manifest.name, WORDMARK,
+    "the manifest name is a wordmark surface — it is the label Chrome renders, not a sentence");
+
+  const options = fs.readFileSync("extension/options.js", "utf8");
+  assert.ok(options.includes(`Find "${WORDMARK}" in the list`),
+    "options.js tells the user which name to look for in Chrome's shortcuts list; it must be the " +
+    "manifest name, character for character");
+
+  // And the prose direction: a sentence that names the product uses BRAND, not the mark.
+  const gated = fs.readFileSync("extension/gated-handoff.js", "utf8");
+  assert.ok(gated.includes(`Sign in to ${BRAND} first.`),
+    "user-facing sentences use BRAND — a lowercase name mid-sentence reads as a typo");
 });
 
 test("the new brand and the old one are actually different, and neither is empty", () => {

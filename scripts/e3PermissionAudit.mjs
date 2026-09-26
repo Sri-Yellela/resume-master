@@ -31,7 +31,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer-core';
 import { resolveBrowserExecutable } from '../services/browserLauncher.js';
-import { LEGACY_HOST } from '../shared/brand.js';
+import { CANONICAL_HOST } from '../shared/brand.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = path.join(ROOT, 'extension');
@@ -188,7 +188,7 @@ async function main() {
         // Any host but our own backend would be a source of access other than the grant. The job
         // boards used to be listed as acceptable exceptions here; they are not declared any more,
         // so the check tightened along with the manifest instead of keeping a hole open for them.
-        const portalHost = manifest.host_permissions.find(h => !h.toLowerCase().includes(LEGACY_HOST));
+        const portalHost = manifest.host_permissions.find(h => !h.toLowerCase().includes(CANONICAL_HOST));
         check('no host permission could substitute for the grant',
           !portalHost,
           portalHost ? `${portalHost} would give standing access` : 'our own origin is the only host declared');

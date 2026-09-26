@@ -69,7 +69,7 @@ of them, and it holds no standing access to any site at any time.
 
 | Host | Required by | What breaks without it |
 |---|---|---|
-| `https://resumemaster.one/*` | `background.js:26` `/api/import/job`, `:76` `/api/auth/me`, `:195` `/api/apply/gate-review`, `:216` `/api/apply/gate-packets`; `gated-handoff.js:338,469` | The service worker's fetches become subject to CORS. `corsOrigin` refuses `chrome-extension://` in production, so capture, the auth probe and the whole handoff fail. |
+| `https://jobsviadraft.com/*` | `background.js:26` `/api/import/job`, `:76` `/api/auth/me`, `:195` `/api/apply/gate-review`, `:216` `/api/apply/gate-packets`; `gated-handoff.js:338,469` | The service worker's fetches become subject to CORS. `corsOrigin` refuses `chrome-extension://` in production, so capture, the auth probe and the whole handoff fail. |
 
 Measured, not argued: `scripts/e6PopupGrant.mjs` opens a real popup by a real invocation on an
 origin with no host permission and confirms it can both read `tab.url` and inject; its control arm —

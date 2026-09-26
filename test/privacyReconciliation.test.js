@@ -4,6 +4,7 @@ import fs from "fs";
 import { LOGO_HOST } from "../shared/companyLogos.js";
 import { at } from "../test-support/sourceAnchors.js";
 import { CANONICAL_HOST, LEGACY_HOST } from "../shared/brand.js";
+import { collectRequiredFiles } from "../scripts/buildExtension.mjs";
 
 // TASK E4 — the manifest, the privacy policy and the store listing must not contradict each other.
 //
@@ -100,9 +101,9 @@ test("the policy's account of WHAT the extension can read matches the manifest",
   // job boards now, so that rule passes vacuously and would keep passing if a host crept back in.
   // The real invariant is the other way round: the policy claims access is per-invocation, and that
   // claim is only true while no site is declared.
-  // Our own origin, under either name. extension/ is frozen for P4 and still declares the legacy
-  // host; the app has already moved to the canonical one. Neither is a "job board", which is what
-  // this filter is looking for.
+  // Our own origin, under either name. The P4 package declares the canonical host; the published
+  // v1.0.0 build still on users' machines declares the legacy one, which still serves. Neither is
+  // a "job board", which is what this filter is looking for.
   const ours = [LEGACY_HOST, CANONICAL_HOST];
   const jobHosts = manifest.host_permissions.filter(h => !ours.some(o => h.includes(o)));
   assert.deepEqual(jobHosts, [],
@@ -178,27 +179,47 @@ test("THE POLICY'S COUNT OF STORED ITEMS MATCHES THE NUMBER OF KEYS THE CODE WRI
   // reviewer falsifies by opening the extension's storage. Counting the write sites is what ties
   // the sentence to the code, so the next key added fails this instead of quietly making the
   // policy wrong again.
-  const sources = ["background.js", "gated-handoff.js", "popup.js", "options.js", "extractor.js",
-                   "review-overlay.js"]
-    .filter(f => fs.existsSync(`extension/${f}`))
+  // ⛔ THE FILE LIST IS DERIVED, AND IT IS DERIVED BECAUSE THE HARDCODED ONE FAILED.
+  //
+  // This used to be a literal array of six filenames. extension/auth.js was added after it was
+  // written — the session-identity fix — and it writes TWO more keys, `authToken` and
+  // `authIdentity`. It was not in the array, so this test kept asserting four, kept passing, and
+  // the policy kept saying "four things" while the extension stored six. That is precisely the
+  // failure the test was built for, reintroduced through its own input list.
+  //
+  // Reading the shipped bundle instead means a newly added extension file cannot be invisible
+  // here: if the manifest reaches it, it is counted.
+  const sources = collectRequiredFiles(manifest)
+    .filter(f => f.endsWith(".js") && fs.existsSync(`extension/${f}`))
     .map(f => fs.readFileSync(`extension/${f}`, "utf8"));
   const writes = sources.join("\n").match(/chrome\.storage\.(?:local|session)\.set\(/g) || [];
-  assert.equal(writes.length, 4,
-    `the extension writes ${writes.length} storage keys; the policy enumerates four. Update ` +
+  assert.equal(writes.length, 6,
+    `the extension writes ${writes.length} storage keys; the policy enumerates six. Update ` +
     `"What the Extension Stores in Your Browser", PRIVACY_RECONCILIATION.md's storage row and ` +
     `STORE_LISTING.md's storage justification together — the dashboard field is pasted from the last one`);
-  assert.match(policyText, /keeps four things/,
+  assert.match(policyText, /keeps six things/,
     "the policy must state the same count the code writes");
 
-  // Each of the four, named in prose a user can match to what they would see.
+  // Each of the six, named in prose a user can match to what they would see.
   for (const [key, re] of [
     ["lastCapture",      /result of your most recent capture/i],
     ["gate:{tabId}",     /prepared answers for an application in progress/i],
     ["lastGatedHandoff", /result of your most recent form fill/i],
     ["batch:{tabId}",    /part-way through applying/i],
+    ["authIdentity",     /account the extension is connected to/i],
+    ["authToken",        /extension's own access token/i],
   ]) {
     assert.match(policyText, re, `the policy does not describe the ${key} key`);
   }
+
+  // ⛔ THE TOKEN IS THE ONE STORED VALUE THAT LEAVES THE BROWSER, and the policy said the opposite
+  // of that for as long as auth.js was uncounted: "None of them is sent anywhere by the extension."
+  // A reviewer can falsify that by watching one request. The claim has to be the narrower true one.
+  assert.doesNotMatch(policyText, /None of them is\s*sent anywhere by the extension/i,
+    "the blanket 'none of them is sent anywhere' claim is false once the extension carries its " +
+    "own token — say which one is sent, and where");
+  assert.match(policyText, /is ever sent anywhere, and it goes only to us/i,
+    "the policy must say plainly that exactly one stored value is transmitted, and to whom");
 
   // sweepExpiredPackets() filters on 'gate:', so only ONE of the four gets the ten-minute expiry.
   // Promising it for all four would replace one false claim with another.
@@ -210,7 +231,7 @@ test("THE POLICY'S COUNT OF STORED ITEMS MATCHES THE NUMBER OF KEYS THE CODE WRI
     "the policy must say which keys the ten-minute expiry does NOT cover");
 
   // The dashboard field is pasted from STORE_LISTING.md, so it drifts silently unless pinned here.
-  assert.match(listing, /Four values/,
+  assert.match(listing, /Six values/,
     "STORE_LISTING.md's storage justification still describes a different number of values than " +
     "the policy — the owner would paste a contradiction into the Privacy practices tab");
 });
@@ -244,11 +265,11 @@ test("the manifest's privacy_policy_url is the page this repo actually serves", 
   const app = fs.readFileSync("client/src/App.jsx", "utf8");
   assert.match(app, new RegExp(`path="${path}"`),
     `manifest points at ${url} but App.jsx has no route for ${path}`);
-  // LEGACY_HOST, not CANONICAL_HOST: the manifest is frozen under review and the URL the Web Store
-  // holds points at the old origin, which still serves. P4 flips this to CANONICAL_HOST at the
-  // same time it flips the manifest — and ⛔ the policy must be live and correct on the new origin
-  // BEFORE that happens, because reviewers fetch it.
-  assert.equal(new URL(url).host, LEGACY_HOST,
+  // ⛔ FLIPPED AT P4 (2026-09-26), together with the manifest. This previously asserted
+  // LEGACY_HOST, because the reviewed manifest pointed there. It now asserts the canonical host,
+  // and the precondition that came with the flip is that the policy is LIVE AND CORRECT on that
+  // origin — reviewers fetch this URL, and a 404 on it is a rejection.
+  assert.equal(new URL(url).host, CANONICAL_HOST,
     "the policy must be on the origin the shipped manifest declares, not a dev subdomain");
 });
 

@@ -1,7 +1,7 @@
 // client/src/components/MarketingNav.jsx
 import { Link } from "react-router-dom";
 import { useMonetisationEnabled } from "../lib/monetisation.jsx";
-import { BRAND } from "../../../shared/brand.js";
+import { WORDMARK } from "../../../shared/brand.js";
 
 export function MarketingNav() {
   const monetisationEnabled = useMonetisationEnabled();
@@ -15,7 +15,7 @@ export function MarketingNav() {
       <Link to="/" style={{ textDecoration: "none" }}>
         <span style={{ fontSize: 17, fontWeight: 900, color: "var(--color-text)",
                         letterSpacing: "-0.5px" }}>
-          {BRAND}
+          {WORDMARK}
         </span>
       </Link>
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>

@@ -35,22 +35,19 @@ This has now cost three sessions. If a source-string or byte-identity test fails
 makes no sense, check `file server.js` before you debug anything else — the fix is to convert the
 file back to CRLF, not to change the test.
 
-## Deliberate test failures — currently 2
+## Deliberate test failures — currently 0
 
-`npm test` is **2646 tests, 2644 pass, 2 fail**, and those two failures are intentional:
+`npm test` is **2648 tests, 2648 pass, 0 fail**.
 
-```
-test/extensionSubmission.test.js
-  ✖ every file in the submission zip is byte-identical to extension/ source
-  ✖ every file the manifest references is present in the zip
-```
+**There are no deliberate failures right now.** From 2026-09-24 to 2026-09-26 there were two, both
+in `test/extensionSubmission.test.js`, reporting that `extension/` had moved ahead of the published
+`v1.0.0` package after the session-identity fix added `extension/auth.js`. **P4 cleared them on
+2026-09-26** by bumping the manifest to v1.1.0 and rebuilding the zip, which is exactly how they
+were always meant to go green — no assertion was edited and nothing was silenced.
 
-`extension/` has moved ahead of the published `v1.0.0` package (the session-identity security fix
-added `extension/auth.js`). The tests are correctly reporting that drift. **Do not silence them
-and do not "fix" them by editing the assertions.** They clear on their own when the zip is rebuilt
-at **P4**, which repackages for the domain flip anyway; repackaging sooner means a version bump,
-and `docs/DOMAIN_MIGRATION.md` warns that touching the package while v1.0.0 is in Web Store
-review can reset the queue position.
+⛔ **A red test in this repository is now a real failure.** Do not assume any given red is
+"the known one".
 
-Full reasoning: `docs/EXTENSION_DIAGNOSIS.md` §6.6. **If you change this count, update it here** —
-"deliberate failure" and "rot" are indistinguishable three weeks later.
+Full history: `docs/EXTENSION_DIAGNOSIS.md` §6.6. **If you change this count, update it here** —
+"deliberate failure" and "rot" are indistinguishable three weeks later, and so are "0 deliberate
+failures" and "nobody updated the number".

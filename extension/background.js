@@ -7,7 +7,7 @@ import { authedFetch, getIdentity, cachedIdentity, disconnect } from './auth.js'
 
 // Keep in sync with config.js (service workers cannot share plain-script globals).
 // DEV SWITCH: comment line A, uncomment line B.
-const RESUME_MASTER_URL = 'https://resumemaster.one'; // A: production
+const RESUME_MASTER_URL = 'https://jobsviadraft.com'; // A: production
 // const RESUME_MASTER_URL = 'http://localhost:3000'; // B: local dev
 
 // ── Capture (E2) ─────────────────────────────────────────────────────────────
@@ -21,7 +21,7 @@ const RESUME_MASTER_URL = 'https://resumemaster.one'; // A: production
 // invisible in development, where corsOrigin returns true for everything.
 //
 // A service worker fetch is not subject to CORS for a host in host_permissions, and
-// https://resumemaster.one/* is declared. Moving the call here fixes it without widening the
+// https://jobsviadraft.com/* is declared. Moving the call here fixes it without widening the
 // server's CORS to six job boards, which is the alternative and a far worse trade.
 async function importCapturedJob({ url, text }) {
   try {
@@ -36,7 +36,7 @@ async function importCapturedJob({ url, text }) {
     // null means there is no credential to be had — no session to bootstrap from, so the remedy
     // is signing in on the website, not retrying here.
     if (!res || res.status === 401) {
-      return { success: false, message: 'Sign in to Resume Master first' };
+      return { success: false, message: 'Sign in to Draft first' };
     }
     const json = await res.json().catch(() => ({}));
     if (json.needsClientCapture) {
@@ -66,7 +66,7 @@ async function importCapturedJob({ url, text }) {
       jobId: job.jobId || json.jobId || null,
     };
   } catch (e) {
-    return { success: false, message: 'Could not reach Resume Master' };
+    return { success: false, message: 'Could not reach Draft' };
   }
 }
 
@@ -255,7 +255,7 @@ async function reportHandoff(tab, result) {
   try {
     await chrome.action.setBadgeText({ tabId: tab?.id, text: badge.text });
     await chrome.action.setBadgeBackgroundColor({ tabId: tab?.id, color: badge.color });
-    await chrome.action.setTitle({ tabId: tab?.id, title: result.message || 'Resume Master' });
+    await chrome.action.setTitle({ tabId: tab?.id, title: result.message || 'draft' });
   } catch { /* a tab that closed mid-handoff is not an error worth surfacing */ }
 
   // Stored so the popup, and the verification harnesses, can see the detail a badge cannot.

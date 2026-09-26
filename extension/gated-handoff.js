@@ -530,14 +530,14 @@ export async function runGatedHandoff({ serverUrl, tab }) {
     // unscoped list is capped at 100 across every portal. See portalQueueFor for the full note.
     const res = await api(serverUrl, `/api/apply/gate-packets?origin=${encodeURIComponent(origin)}`);
     if (res.status === 401) {
-      return { ok: false, reason: 'not_signed_in', message: 'Sign in to Resume Master first.' };
+      return { ok: false, reason: 'not_signed_in', message: 'Sign in to Draft first.' };
     }
     if (!res.ok) return { ok: false, reason: 'server_error', message: `Server returned ${res.status}.` };
     list = await res.json();
   } catch (e) {
     // The underlying message is carried through: "could not reach" covers a dead server, a blocked
     // request and a bad URL, and troubleshooting any of them without it is guesswork.
-    return { ok: false, reason: 'network_error', message: 'Could not reach Resume Master.', detail: e.message };
+    return { ok: false, reason: 'network_error', message: 'Could not reach Draft.', detail: e.message };
   }
 
   // TARGET MATCH, first half. The server nominated an origin for each packet; this page has to be one
@@ -546,7 +546,7 @@ export async function runGatedHandoff({ serverUrl, tab }) {
   if (forOrigin.length === 0) {
     return {
       ok: false, reason: 'origin_mismatch',
-      message: `Nothing is prepared for ${origin}. Open the application from your Resume Master queue.`,
+      message: `Nothing is prepared for ${origin}. Open the application from your Draft queue.`,
     };
   }
 
@@ -561,7 +561,7 @@ export async function runGatedHandoff({ serverUrl, tab }) {
   if (fresh.length === 0) {
     return {
       ok: false, reason: 'packet_stale',
-      message: 'The answers prepared for this page have expired. Run it again in Resume Master to prepare fresh ones.',
+      message: 'The answers prepared for this page have expired. Run it again in Draft to prepare fresh ones.',
     };
   }
   // Newest first, but a packet whose POSTING is gone goes last. It is deprioritised rather than
@@ -609,7 +609,7 @@ export async function runGatedHandoff({ serverUrl, tab }) {
     }
     released = await exRes.json();
   } catch (e) {
-    return { ok: false, reason: 'network_error', message: 'Could not reach Resume Master.', detail: e.message };
+    return { ok: false, reason: 'network_error', message: 'Could not reach Draft.', detail: e.message };
   }
 
   // Defence in depth: the server states the expected origin in the release too. If that disagrees

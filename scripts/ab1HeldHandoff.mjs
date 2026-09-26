@@ -54,13 +54,13 @@ import { resolveBrowserExecutable } from '../services/browserLauncher.js';
 import applyRoutes from '../routes/apply.js';
 import { MIGRATIONS } from './migrations.js';
 import { PACKET_STALE_MS } from '../services/applyGatePacket.js';
-import { LEGACY_ORIGIN } from '../shared/brand.js';
+import { CANONICAL_ORIGIN } from '../shared/brand.js';
 
 // extension/ is frozen for P4 (Web Store review), so its URL constant still names the LEGACY
 // origin. This rewrite has to match what is actually in that file today, not where the app has
-// moved to — deriving it from LEGACY_ORIGIN is what makes P4 a one-line change instead of a
+// moved to — deriving it from CANONICAL_ORIGIN is what makes P4 a one-line change instead of a
 // hunt through eight harnesses.
-const LEGACY_URL_DECL = `const RESUME_MASTER_URL = '${LEGACY_ORIGIN}';`;
+const APP_URL_DECL = `const RESUME_MASTER_URL = '${CANONICAL_ORIGIN}';`;
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT_DIR = path.join(os.tmpdir(), 'ab1-held-handoff');
@@ -201,7 +201,7 @@ function buildTestExtension(apiOrigin) {
   for (const f of ['background.js', 'config.js']) {
     const p = path.join(dst, f);
     fs.writeFileSync(p, fs.readFileSync(p, 'utf8').replace(
-      LEGACY_URL_DECL,
+      APP_URL_DECL,
       `const RESUME_MASTER_URL = '${apiOrigin}';`));
   }
   const manifest = JSON.parse(fs.readFileSync(path.join(dst, 'manifest.json'), 'utf8'));

@@ -1,6 +1,6 @@
-# Resume Master — Chrome Extension v1.0.0
+# draft — Chrome Extension v1.1.0
 
-Companion extension for Resume Master. It asks for permission to no job site at all, and reads a
+Companion extension for Draft. It asks for permission to no job site at all, and reads a
 page only at the moment you point it at one.
 
 ## What It Does
@@ -34,7 +34,7 @@ page only at the moment you point it at one.
 
 Through `activeTab` — the grant Chrome creates when you invoke the extension — and
 `chrome.scripting.executeScript`. That is the whole access story, and it is why the manifest
-declares exactly one host permission (`resumemaster.one`, our own backend) and no job boards.
+declares exactly one host permission (`jobsviadraft.com`, our own backend) and no job boards.
 
 It used to work the other way: a declared content script running automatically on six named sites.
 That gave the extension standing access to those six and made every other job page unreachable,
@@ -110,11 +110,11 @@ Credentials come from the environment (`CWS_CLIENT_ID`, `CWS_CLIENT_SECRET`, `CW
 none of them, so the preflight is safe to run anywhere, including CI on a fork.
 
 ## Privacy
-Job description text is sent to Resume Master when you explicitly trigger a capture, click "Save
-Job", or click "ATS Score Tool"/"Send to Resume Master".
+Job description text is sent to Draft when you explicitly trigger a capture, click "Save
+Job", or click "ATS Score Tool"/"Send to Draft".
 
 Since v1.3.0 the extension can also fill an application form on a portal you have signed in to
-yourself. When you invoke it there, it fetches the details you saved in your Resume Master account —
+yourself. When you invoke it there, it fetches the details you saved in your Draft account —
 name, email, phone, postal address, work-authorization answers and your resume — and enters them
 into that employer's form. It shows you every answer and where it came from; you press submit. It
 never signs you in, never attempts a CAPTCHA, and never reads any portal's password or session
@@ -125,4 +125,4 @@ required — so the same employer's form is recognised for other candidates. Tha
 turn it on**, it stores the form's questions and never your answers, and it is enforced on the
 server rather than only here.
 
-See resumemaster.one/privacy for the full policy.
+See jobsviadraft.com/privacy for the full policy.

@@ -33,7 +33,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer-core';
 import { resolveBrowserExecutable } from '../services/browserLauncher.js';
-import { LEGACY_ORIGIN } from '../shared/brand.js';
+import { CANONICAL_ORIGIN } from '../shared/brand.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(os.tmpdir(), 'dx1-capture-diagnosis');
@@ -43,7 +43,7 @@ const API = `http://127.0.0.1:${API_PORT}`;
 const JOBS = `http://localhost:${JOBS_PORT}`;
 const DATA_DIR = path.join(OUT, 'data');
 const PASSWORD = 'Dx1-Harness-pass!9';
-const LEGACY_URL_DECL = `const RESUME_MASTER_URL = '${LEGACY_ORIGIN}';`;
+const APP_URL_DECL = `const RESUME_MASTER_URL = '${CANONICAL_ORIGIN}';`;
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const line = s => console.log(s);
@@ -104,8 +104,8 @@ function buildTestExtension(apiOrigin) {
   for (const f of ['background.js', 'config.js']) {
     const p = path.join(dst, f);
     const t = fs.readFileSync(p, 'utf8');
-    if (!t.includes(LEGACY_URL_DECL)) throw new Error(`${f}: URL constant not found — the rewrite would be a silent no-op`);
-    fs.writeFileSync(p, t.replace(LEGACY_URL_DECL, `const RESUME_MASTER_URL = '${apiOrigin}';`));
+    if (!t.includes(APP_URL_DECL)) throw new Error(`${f}: URL constant not found — the rewrite would be a silent no-op`);
+    fs.writeFileSync(p, t.replace(APP_URL_DECL, `const RESUME_MASTER_URL = '${apiOrigin}';`));
   }
   const mf = JSON.parse(fs.readFileSync(path.join(dst, 'manifest.json'), 'utf8'));
   mf.host_permissions = [...mf.host_permissions, `${apiOrigin}/*`];

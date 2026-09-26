@@ -1,7 +1,7 @@
 # Privacy reconciliation — manifest × code × policy × dashboard
 
 The 2026-08-01 Web Store rules are enforced by cross-checking three documents against each other:
-the **manifest**, the **privacy policy** at `https://resumemaster.one/privacy`, and the **Privacy
+the **manifest**, the **privacy policy** at `https://jobsviadraft.com/privacy`, and the **Privacy
 practices** tab in the developer dashboard. A contradiction between any two of the three is the
 rejection. So the check cannot be "does the policy sound right" — it has to be a join, and every
 row has to be complete in every column.
@@ -18,7 +18,7 @@ Enforced by `test/privacyReconciliation.test.js`, which fails if a row names a p
 manifest does not declare, or if the manifest declares one this file does not cover.
 
 Policy paragraph references are to section headings on
-`https://resumemaster.one/privacy` (source: `client/src/pages/marketing/PrivacyPage.jsx`).
+`https://jobsviadraft.com/privacy` (source: `client/src/pages/marketing/PrivacyPage.jsx`).
 
 **Code is cited by SYMBOL, not by line number.** This table originally carried `file:line`, and the
 line numbers were wrong twice within a day — once when capture moved to the service worker and again
@@ -35,7 +35,7 @@ from — so this table cannot drift the way the line numbers did.
 |---|---|---|---|
 | `activeTab` | `background.js` `captureActiveTab()`, `previewActiveTab()` and `handleGatedHandoff()`, each reached only from `chrome.commands.onCommand` or a popup message; `popup.js` `getCurrentTab()`. The grant IS the invocation. | *Browser Extension* — "reads nothing until you invoke it… only that one tab". *Filling an Application* — "It holds no standing permission for any employer or job-portal site". | Granted only on explicit invocation; used to read the job posting in view and to fill an application form the user opened. No host permission exists for any site the extension reads a job from, so this per-tab grant is the only access there is. |
 | `scripting` | `background.js` `captureActiveTab()` and `reportCapture()`, which inject the two functions in `extractor.js` — `extractJobPayload()` and `showCaptureToast()`; `gated-handoff.js` `probeFormShape()`, `applyPlan()`, `applyOverlayEdit()`; `review-overlay.js` `renderOverlay()`; `popup.js` ATS Score Tool. | *Browser Extension* — "If you click **ATS Score Tool** … it copies the visible text of that page". *Filling an Application* — "enters them into that employer's form". | Injects a one-off script into the invoked tab to read the posting, collect text for an ATS score, fill the form and render the review panel. Nothing is injected into any other tab, and nothing is registered to run persistently. |
-| `storage` | **Four keys, two areas.** `background.js` `reportCapture()` → `lastCapture` (`storage.local`); `background.js` `reportHandoff()` → `lastGatedHandoff` (`storage.session`); `gated-handoff.js` `savePacketForTab()`, `loadPacketForTab()`, `clearPacketForTab()`, `sweepExpiredPackets()` → `gate:{tabId}` (`storage.session`); `gated-handoff.js` `saveBatchForTab()`, `loadBatchForTab()`, `clearBatchForTab()` → `batch:{tabId}` (`storage.session`). `options.js` uses `storage.sync` only to DELETE a value the retired shortcut recorder left behind. | *What the Extension Stores in Your Browser* — **all four items**, each with the area it lives in and its real lifetime. ⚠ Only `gate:` gets the ten-minute expiry; the policy now says so rather than implying it covers everything. | Stores the result of the most recent capture so the popup can show the outcome of a hotkey capture it was not open for; the result of the most recent form fill, for the same reason; — during a handoff only — the prepared answers, in memory-backed session storage with a 10-minute expiry, cleared when the tab closes; and, when several applications are queued for one employer site, that site's origin and how many remain, so a batch can resume in the same tab. |
+| `storage` | **Six keys, two areas.** `background.js` `reportCapture()` → `lastCapture` (`storage.local`); `background.js` `reportHandoff()` → `lastGatedHandoff` (`storage.session`); `gated-handoff.js` `savePacketForTab()`, `loadPacketForTab()`, `clearPacketForTab()`, `sweepExpiredPackets()` → `gate:{tabId}` (`storage.session`); `gated-handoff.js` `saveBatchForTab()`, `loadBatchForTab()`, `clearBatchForTab()` → `batch:{tabId}` (`storage.session`); `auth.js` `storeToken()` → `authToken` and `getIdentity()` → `authIdentity`, both (`storage.local`), both removed by `clearStoredToken()`. `options.js` uses `storage.sync` only to DELETE a value the retired shortcut recorder left behind. | *What the Extension Stores in Your Browser* — **all six items**, each with the area it lives in and its real lifetime. ⚠ Only `gate:` gets the ten-minute expiry; the policy says so rather than implying it covers everything. ⚠ `authToken` is the ONE stored value that is transmitted, and the policy names it as such. | Six values. In `chrome.storage.local`: the result of the most recent capture, so the popup can show the outcome of a hotkey capture it was not open for; the account the extension is connected to, so the popup can name it; and the extension's own access token, which is sent with each request to our backend and to nowhere else. In `chrome.storage.session` (memory-backed, discarded on browser restart): the prepared answers for an application in progress, with a 10-minute expiry and cleared when the tab closes; the result of the most recent form fill; and, when several applications are queued for one employer site, that site's origin and how many remain. |
 
 ⚠ **The storage row was wrong until 2026-09-15, and this is how.** The policy said the extension
 keeps "two things" and enumerated `lastCapture` and the packet. It writes four.
@@ -65,11 +65,11 @@ extension needs no standing access to any site in order to capture from it — a
 
 | Manifest host | Code that requires it | Policy paragraph | Dashboard justification |
 |---|---|---|---|
-| `https://resumemaster.one/*` | `background.js` — `importCapturedJob()` posts `/api/import/job`, the `PROBE_AUTH` handler calls `/api/auth/me`, `recordGateReview()` posts `/api/apply/gate-review`, `advanceBatch()` calls `/api/apply/gate-packets`; `gated-handoff.js` `api()` and its resume fetch. All `credentials:'include'`, no embedded secret. | *Browser Extension* — "Data extracted by the extension is sent to resumemaster.one and associated with your logged-in account using a browser session cookie". | Our own backend. The extension fetches with the user's existing session cookie; it never reads the cookie's value. |
+| `https://jobsviadraft.com/*` | `auth.js` `authedFetch()` is the single network path, and `bootstrapToken()` is the single credentialed one. Through it: `background.js` `importCapturedJob()` posts `/api/import/job`, the `PROBE_AUTH` handler calls `/api/auth/me`, `recordGateReview()` posts `/api/apply/gate-review`, `advanceBatch()` calls `/api/apply/gate-packets`; `gated-handoff.js` `api()` and its resume fetch. Every one of them is `credentials:'omit'` and carries the extension's own bearer token; no secret is embedded in the package. | *Browser Extension* — "Data extracted by the extension is sent to … and associated with the account you connected the extension to … it sends the token and not the browser cookie". | Our own backend. The extension identifies itself with a token it obtained for itself, not with the browser's session cookie, so it acts only as the account the user connected it to. |
 
 **No content script is declared**, so there is no origin the extension runs on automatically. The
 policy's central claim — "reads nothing until you invoke it" — is true because of that absence, and
-`test/privacyReconciliation.test.js` fails if any non-`resumemaster.one` host is declared again,
+`test/privacyReconciliation.test.js` fails if any non-`jobsviadraft.com` host is declared again,
 because the claim would stop being true the moment one is.
 
 ## Data flows with no permission of their own
@@ -165,6 +165,6 @@ financial, personal communications, location.
 ## Before submitting
 
 - [ ] The policy is **deployed**, not just committed — `PrivacyPage.jsx` renders at
-      `https://resumemaster.one/privacy` and shows the current Effective date.
+      `https://jobsviadraft.com/privacy` and shows the current Effective date.
 - [ ] That URL returns **200 anonymously**, with no redirect and no sign-in.
 - [ ] `npm test` — `privacyReconciliation.test.js` and `manifestMinimumPermission.test.js` pass.

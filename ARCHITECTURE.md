@@ -416,7 +416,7 @@ never sweeps — that is what lets the extension survive a browser sign-out on p
 **The cookie is host-only.** No `domain` is set, so a session on `jobsviadraft.com` is not sent to
 `resumemaster.one`. Since `GOOGLE_CALLBACK_URL` already points at the new domain, a Google sign-in
 started on the old origin lands its cookie on the new one — a live hazard for the installed
-extension, which only knows the old origin (§10).
+extension, whose published build only knows the old origin (§10).
 
 **Admin gating.** `mayActAsAdmin()` in `shared/authPolicy.js` is the single predicate, consulted by
 all three `requireAdmin` definitions (`server.js`, `routes/admin.js`, `routes/adminDb.js`). Three
@@ -502,10 +502,12 @@ from the code.
 - **Railway allows two custom domains** and both slots are in use, so `www.jobsviadraft.com` is in
   DNS but not activated. ⛔ `host_permissions` is a match pattern — `https://jobsviadraft.com/*`
   does not match a `www` host, so any path that emits `www` breaks the extension's fetch.
-- **The published extension still points at `resumemaster.one`.** Both origins serve one app and
-  ⛔ **there must be no 301 on the old origin** while that build is live — its fetches are
-  credentialed and do not follow redirects, so a redirect fails silently rather than working. Safe
-  only once the updated extension is **live in the store**, not merely submitted.
+- **The extension package now points at `jobsviadraft.com`** (P4, 2026-09-26, v1.1.0) — but it is
+  BUILT, not uploaded, and the v1.0.0 item still in the Web Store review queue names the old
+  origin. Both origins serve one app, and ⛔ **there must be no 301 on the old origin.** A
+  credentialed `fetch` does not follow redirects, so a redirect fails silently rather than working
+  — and this is no longer a wait-it-out constraint: `resumemaster.one` is staying, so the
+  no-redirect rule is permanent rather than temporary.
 - **Two mailboxes may not exist:** `privacy@jobsviadraft.com` (published in the privacy policy a
   Web Store reviewer will read) and `noreply@jobsviadraft.com` (whose domain must be verified with
   Resend or password-reset sends fail).

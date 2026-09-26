@@ -207,7 +207,7 @@ export function renderOverlay(bands, meta) {
   const root = document.createElement('div');
   root.id = ID;
   root.setAttribute('role', 'complementary');
-  root.setAttribute('aria-label', 'Resume Master — review before you submit');
+  root.setAttribute('aria-label', 'draft — review before you submit');
   const style = document.createElement('style');
   style.textContent = css;
   root.appendChild(style);
@@ -250,7 +250,7 @@ export function renderOverlay(bands, meta) {
     <div class="rm-hd">
       <div class="rm-t">Review before you submit</div>
       <div class="rm-s">${meta.filledCount} field(s) filled${meta.resumeAttached ? ' · resume attached' : ''}.
-        Resume Master never submits for you.</div>
+        Draft never submits for you.</div>
     </div>
     ${meta.resolverBug ? `<div class="rm-bug"><b>Resolver bug.</b> An eligibility answer was matched by a
       guess: ${esc(meta.resolverBug.map(b => b.field).join(', '))}. This should be unreachable — do not

@@ -43,7 +43,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import JSZip from 'jszip';
 import { collectRequiredFiles, readTextNoBom, SRC_DIR } from './buildExtension.mjs';
-import { BRAND, LEGACY_BRAND } from '../shared/brand.js';
+import { WORDMARK } from '../shared/brand.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SUBMISSION_DIR = path.join(SRC_DIR, 'submission');
@@ -83,13 +83,11 @@ export function builtVersions(dir = SUBMISSION_DIR) {
  * is the specific failure this guards. See the header of that file.
  */
 export function listingVersion(text) {
-  // EITHER brand is accepted, on purpose, for exactly as long as the migration runs. What this
-  // function checks is the VERSION — whether anybody looked at the listing this release. The
-  // heading still reads the OLD name because extension/submission/STORE_LISTING.md is frozen
-  // under Web Store review and P4 rewrites it; pinning the old name here would make P4's rewrite
-  // silently return null, and pinning the new one would break the build today. Narrow this to
-  // BRAND alone once P4 has landed.
-  const names = [BRAND, LEGACY_BRAND].map(n => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+  // P4 HAS LANDED, so this is narrowed as the earlier note asked — but to WORDMARK, not to BRAND.
+  // The listing heading is the store TITLE, which is a wordmark surface and is therefore lowercase
+  // (`draft`), and this regex is case-sensitive. Accepting BRAND here would match nothing the
+  // rewritten listing actually says and return null on every release.
+  const names = [WORDMARK].map(n => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
   return new RegExp(`^#\\s+Chrome Web Store listing\\s+—\\s+(?:${names}) v(\\S+)`, "m")
     .exec(String(text))?.[1] ?? null;
 }

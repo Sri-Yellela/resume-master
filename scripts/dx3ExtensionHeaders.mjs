@@ -9,13 +9,13 @@ import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer-core';
 import { resolveBrowserExecutable } from '../services/browserLauncher.js';
-import { LEGACY_ORIGIN } from '../shared/brand.js';
+import { CANONICAL_ORIGIN } from '../shared/brand.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(os.tmpdir(), 'dx3-headers');
 const PORT = 4615;
 const API = `http://127.0.0.1:${PORT}`;
-const LEGACY_URL_DECL = `const RESUME_MASTER_URL = '${LEGACY_ORIGIN}';`;
+const APP_URL_DECL = `const RESUME_MASTER_URL = '${CANONICAL_ORIGIN}';`;
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const seen = [];
@@ -44,7 +44,7 @@ function buildExt(apiOrigin) {
   for (const f of ['background.js', 'config.js']) {
     const p = path.join(dst, f);
     fs.writeFileSync(p, fs.readFileSync(p, 'utf8')
-      .replace(LEGACY_URL_DECL, `const RESUME_MASTER_URL = '${apiOrigin}';`));
+      .replace(APP_URL_DECL, `const RESUME_MASTER_URL = '${apiOrigin}';`));
   }
   const mf = JSON.parse(fs.readFileSync(path.join(dst, 'manifest.json'), 'utf8'));
   mf.host_permissions = [...mf.host_permissions, `${apiOrigin}/*`];
