@@ -23,7 +23,19 @@ import { at } from "../test-support/sourceAnchors.js";
 
 const SRC = "extension";
 const manifest = JSON.parse(fs.readFileSync(path.join(SRC, "manifest.json"), "utf8"));
-const rationale = fs.readFileSync(path.join(SRC, "MANIFEST_RATIONALE.md"), "utf8");
+// ⛔ LINE ENDINGS NORMALISED ON READ, AND THIS IS NOT TIDINESS.
+//
+// `.gitattributes` declares `* text=auto`, so git stores LF and checks this file out as CRLF on
+// Windows. Everything below split on "\n" and matched `startsWith(heading + "\n")`, which is false
+// for "Permissions\r\n" — so on a CRLF working tree the section lookup finds nothing and FOUR
+// tests fail with "no ## Permissions section", pointing at the document rather than at the parser.
+//
+// It passed for months only because this particular file happened to be sitting LF in one
+// developer's working tree, never re-materialised since `.gitattributes` was added. Any fresh
+// clone on Windows would have hit it, and one did the moment a branch checkout round-tripped the
+// file through git. Parsing markdown must not care how the lines end.
+const rationale = fs.readFileSync(path.join(SRC, "MANIFEST_RATIONALE.md"), "utf8")
+  .replace(/\r\n/g, "\n");
 
 /** Rows of the "## Permissions" / "## Host permissions" tables, first column only. */
 function tableSubjects(heading) {
