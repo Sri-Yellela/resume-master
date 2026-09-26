@@ -19,18 +19,26 @@
  *
  * Requires a built client (`npm run build`), because it drives client/dist through server.js.
  *
+ * DX4_BASE points it at an ALREADY-RUNNING deployment instead of booting its own server. That is
+ * how this gets used against production, which is the only place the fix actually matters: the
+ * installed extension opens these two paths on the live site, not on a developer's machine. The
+ * assertions are identical either way, and it writes nothing, so it is safe against production.
+ *
  * Usage:  node scripts/dx4ToolRoutes.mjs
+ *         DX4_BASE=https://jobsviadraft.com node scripts/dx4ToolRoutes.mjs
  */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer-core';
 import { resolveBrowserExecutable } from '../services/browserLauncher.js';
 
-const ROOT = 'C:/Users/duggi/WebstormProjects/resume-master';
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = 4620;
-const BASE = `http://127.0.0.1:${PORT}`;
+const REMOTE = process.env.DX4_BASE || null;
+const BASE = REMOTE || `http://127.0.0.1:${PORT}`;
 const OUT = path.join(os.tmpdir(), 'verify-a');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 let fail = 0;
@@ -39,13 +47,14 @@ const check = (l, c, x = '') => { console.log(`${c ? 'PASS' : 'FAIL'}  ${l}${x ?
 fs.rmSync(OUT, { recursive: true, force: true });
 fs.mkdirSync(path.join(OUT, 'data'), { recursive: true });
 
-const server = spawn(process.execPath, [path.join(ROOT, 'server.js')], {
+console.log(REMOTE ? `target: ${BASE}  (remote — read-only)` : `target: ${BASE}  (local server.js)`);
+const server = REMOTE ? null : spawn(process.execPath, [path.join(ROOT, 'server.js')], {
   cwd: ROOT,
   env: { ...process.env, RM_DATA_DIR: path.join(OUT, 'data'), PORT: String(PORT),
          NODE_ENV: 'development', SESSION_SECRET: 'verify-a' },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
-server.stdout.on('data', () => {}); server.stderr.on('data', () => {});
+server?.stdout.on('data', () => {}); server?.stderr.on('data', () => {});
 for (let i = 0; i < 90; i++) {
   if (await fetch(`${BASE}/api/health`).then(r => r.ok).catch(() => false)) break;
   await sleep(1000);
@@ -107,7 +116,7 @@ try {
     !/tools\/(ats|generate)/.test(page.url()), page.url());
 } finally {
   await browser.close().catch(() => {});
-  server.kill();
+  server?.kill();
 }
 console.log(fail === 0 ? '\nALL PASS' : `\n${fail} FAILED`);
 process.exit(fail === 0 ? 0 : 1);
