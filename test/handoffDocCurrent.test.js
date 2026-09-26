@@ -19,7 +19,7 @@ import fs from "node:fs";
 //
 //   · The deployed commit. It changes on every push and the doc cannot lead it. HANDOFF tells the
 //     reader to run GET /api/version instead, which is the honest answer.
-//   · The exact test count (2648/2648/0 as of P4). There is no non-fragile way to know the suite's own
+//   · The exact test count (2654/2654/0). There is no non-fragile way to know the suite's own
 //     total from inside the suite — counting `test(` occurrences is an approximation that would
 //     drift from the real number and produce a guard that is wrong in both directions. Asserting
 //     an approximation would be defect shape 5: a test that pins something other than the truth.

@@ -133,6 +133,7 @@ import { deriveAutomationTier } from "./services/jobs/automationTier.js";
 import { backfillAutomationTier } from "./services/jobs/backfillAutomationTier.js";
 import { backfillRoleMap } from "./services/jobs/backfillRoleMap.js";
 import { deliverPipelineAlerts } from "./services/jobs/alertDelivery.js";
+import { recordPipelineRun } from "./services/jobs/pipelineRunLog.js";
 import { backfillCompanyLogos } from "./services/jobs/backfillCompanyLogos.js";
 import { deriveProfileFilters } from "./services/jobs/profileFilterBridge.js";
 import { suggest } from "./services/jobs/searchSuggestions.js";
@@ -3849,6 +3850,16 @@ try {
         ? " — NEVER COMPUTED; every score is unweighted until this is fixed"
         : ` — ${before.terms} terms over ${before.families.length} famil${before.families.length === 1 ? "y" : "ies"}, `
           + `${before.ageDays?.toFixed(1)}d old (refresh at ${REFRESH_WEIGHT_AGE_DAYS}d, refused at ${MAX_WEIGHT_AGE_DAYS}d)`));
+  // A failing refresh is silent by construction — it is never-fatal on purpose — so the streak is
+  // printed at boot rather than left for whoever thinks to curl /api/version. Nothing is printed
+  // in the healthy case: this line is the exception to the "speak even when fine" rule above,
+  // because "0 consecutive failures" on every boot forever is how a warning stops being read.
+  const health = termWeightRefreshHealth();
+  if (health.consecutiveFailures > 0) {
+    console.error(`[boot] ⛔ ats_term_weights REFRESH HAS FAILED ${health.consecutiveFailures}x IN A ROW`
+      + ` (${health.failuresBeforeCliff} reaches the ${MAX_WEIGHT_AGE_DAYS}d refusal, after which every`
+      + ` score is unweighted). Last error: ${health.lastRun?.error ?? "unknown"}`);
+  }
   // ⛔ DEFERRED ONE TICK, AND NOT FOR LATENCY. This block runs during module evaluation, ~2,200
   // lines before `_atsWeightCache` is declared — and `runTermWeightRefresh` clears that cache, so
   // calling it here throws "Cannot access '_atsWeightCache' before initialization". The
@@ -6094,19 +6105,84 @@ function invalidateAtsWeightCache() { _atsWeightCache.clear(); }
  * a boot that fails over a ranking refinement.
  */
 function runTermWeightRefresh(trigger) {
+  const startedAt = Math.floor(Date.now() / 1000);
   try {
     const r = maybeRecomputeTermWeights(db, { onInvalidate: invalidateAtsWeightCache });
     if (r.ran) {
       const fams = (r.result?.families || []).map(f => `${f.family}:${f.weighted}`).join(" ");
       console.log(`[ats-weights] (${trigger}) rebuilt — ${r.before.state} -> ${r.after.state}, `
         + `${r.after.terms} terms over ${r.result?.corpusSize ?? "?"} enriched postings [${fams}]`);
+      recordPipelineRun(db, {
+        runKind: "term_weights", source: trigger, status: "ok", startedAt,
+        written: r.after.terms,
+        details: { before: r.before.state, after: r.after.state, corpusSize: r.result?.corpusSize ?? null,
+                   families: r.after.families },
+      });
     } else if (r.reason.startsWith("refused") || r.reason.startsWith("failed")) {
       console.error(`[ats-weights] (${trigger}) NOT rebuilt — ${r.reason}`);
+      // 'no_results' for a refusal, 'failed' for a throw inside the recompute. A refusal is the
+      // thin-board guard doing its job and keeping a good table; a failure is the pass not working.
+      // Conflating them would make the consecutive-failure count below fire on a healthy refusal.
+      recordPipelineRun(db, {
+        runKind: "term_weights", source: trigger,
+        status: r.reason.startsWith("refused") ? "no_results" : "failed",
+        startedAt, errorText: r.reason, details: { before: r.before?.state ?? null },
+      });
     }
     return r;
   } catch (e) {
     console.error(`[ats-weights] (${trigger}) refresh threw: ${e.message}`);
+    recordPipelineRun(db, {
+      runKind: "term_weights", source: trigger, status: "failed", startedAt,
+      errorText: `threw: ${e.message}`,
+    });
     return null;
+  }
+}
+
+/**
+ * How many times in a row the weight refresh has failed, most recent first.
+ *
+ * ⛔ WHY THIS EXISTS. docs/ATS_TERM_WEIGHTS_SCHEDULE.md §7 left one thing open, and named it:
+ * "if the 45-day refusal is ever hit, that means the nightly pass has failed three times running,
+ * which is worth a louder signal than this task builds." The refresh is deliberately never-fatal —
+ * a scorer on 20-day-old weights beats a dead cron tick — but never-fatal plus console-only means
+ * a pass that fails EVERY night is indistinguishable from one that has never needed to run. The
+ * table stays fresh-looking until REFRESH (14d) is passed, then stays "stale" until someone reads
+ * a log line, and the scorer silently drops to unweighted at 45d.
+ *
+ * With REFRESH at 14 and REFUSAL at 45 there are two further nightly chances after the first miss,
+ * so THREE consecutive failures is the point at which the cliff becomes reachable. That is the
+ * number this reports against, and it is derived from the two thresholds rather than picked.
+ *
+ * A refusal ('no_results') is NOT a failure — it is the thin-board guard keeping a good table —
+ * so it neither increments nor resets the streak: it is not evidence either way about whether the
+ * pass works. Only 'ok' resets it.
+ */
+function termWeightRefreshHealth() {
+  try {
+    const rows = db.prepare(
+      `SELECT status, started_at, error_text FROM pipeline_runs
+        WHERE run_kind = 'term_weights' ORDER BY started_at DESC, id DESC LIMIT 20`
+    ).all();
+    let consecutiveFailures = 0;
+    for (const r of rows) {
+      if (r.status === "failed") consecutiveFailures++;
+      else if (r.status === "ok") break;
+      // 'no_results' (refused): skip without breaking — see the note above.
+    }
+    const last = rows[0] || null;
+    return {
+      consecutiveFailures,
+      // The threshold is DERIVED: after a missed refresh there are (MAX-REFRESH)/... nightly
+      // retries before the refusal is reachable. Stated as a number so /api/version can be read
+      // without knowing the arithmetic.
+      failuresBeforeCliff: 3,
+      lastRun: last ? { status: last.status, at: last.started_at, error: last.error_text ?? null } : null,
+    };
+  } catch {
+    // pipeline_runs missing (pre-migration-069) is not a reason to fail /api/version.
+    return { consecutiveFailures: 0, failuresBeforeCliff: 3, lastRun: null };
   }
 }
 /**
@@ -10371,6 +10447,11 @@ app.get("/api/version", (_req, res) => {
       corpusSize: w.corpusSize,
       refreshAtDays: REFRESH_WEIGHT_AGE_DAYS,
       refusedAtDays: MAX_WEIGHT_AGE_DAYS,
+      // ⛔ "fresh" answers whether the TABLE is usable, not whether the mechanism that keeps it
+      // that way still works. A refresh failing every night looks identical to one that has not
+      // been due, right up until the 45-day refusal drops the scorer to unweighted. This is the
+      // difference, and it is the last open item in docs/ATS_TERM_WEIGHTS_SCHEDULE.md §7.
+      refresh: termWeightRefreshHealth(),
     };
   } catch (e) { atsWeights = { state: "unknown", error: e.message }; }
 

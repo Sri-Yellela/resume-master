@@ -8,11 +8,15 @@
  * distinguish those cases after the fact — only a record written AT run time can, which is what
  * this table is for.
  *
- * Two grains, both keyed by `run_kind`:
- *   'source_sync' — one row per SOURCE per crawl (not one per crawl), so a single source going
- *                   quiet is visible even while the others succeed. Ashby stopped writing on
- *                   2026-08-07 while greenhouse kept going, and nothing surfaced it.
- *   'enrichment'  — one row per background enrichment pass.
+ * Three grains, all keyed by `run_kind`:
+ *   'source_sync'  — one row per SOURCE per crawl (not one per crawl), so a single source going
+ *                    quiet is visible even while the others succeed. Ashby stopped writing on
+ *                    2026-08-07 while greenhouse kept going, and nothing surfaced it.
+ *   'enrichment'   — one row per background enrichment pass.
+ *   'term_weights' — one row per ATS weight rebuild that DID something, or failed trying. The
+ *                    nightly no-op is deliberately NOT recorded: "not due yet" is the expected
+ *                    state on 13 nights out of 14, and a row per night would bury the failures
+ *                    this table exists to make findable. See runTermWeightRefresh in server.js.
  *
  * Deliberately fire-and-forget: observability must never be able to break ingestion, so a
  * failure to record (including the table not existing yet, pre-migration) is warned about and

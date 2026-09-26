@@ -205,10 +205,97 @@ test("both boot and the nightly cron run the refresh, through one function", () 
 });
 
 test("the refresh is invoked with the cache invalidator, not without it", () => {
+  // ⛔ The end anchor is the NEXT function, not a distant one. It used to be `atsClaims`, and
+  // `termWeightRefreshHealth` was later inserted between the two — which silently widened this
+  // slice to cover a function the assertion was never about. A source-anchored slice is only as
+  // precise as its narrower end.
   const fn = SERVER.slice(at(SERVER, "function runTermWeightRefresh(trigger)"),
-                          at(SERVER, "function atsClaims(profile)"));
+                          at(SERVER, "function termWeightRefreshHealth()"));
   assert.match(fn, /onInvalidate: invalidateAtsWeightCache/,
     "without this the rebuild is invisible until the next restart");
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════════
+// THE LAST OPEN ITEM — a refresh that fails EVERY night is still silent
+// ════════════════════════════════════════════════════════════════════════════════════════════
+//
+// docs/ATS_TERM_WEIGHTS_SCHEDULE.md §7 named this and did not build it: "if the 45-day refusal is
+// ever hit, that means the nightly pass has failed three times running, which is worth a louder
+// signal than this task builds."
+//
+// The refresh is never-fatal on purpose — a scorer on 20-day-old weights beats a dead cron tick —
+// but never-fatal plus console-only means a pass failing every single night is indistinguishable
+// from one that simply has not been due. The table reads "fresh" until 14 days, then "stale", and
+// at 45 days the scorer silently drops to unweighted. Nothing in between ever says "the thing that
+// prevents this has not worked in three weeks".
+
+test("a refresh that ran, refused, or failed is RECORDED — the nightly no-op is not", () => {
+  const fn = SERVER.slice(at(SERVER, "function runTermWeightRefresh(trigger)"),
+                          at(SERVER, "function termWeightRefreshHealth()"));
+  assert.match(fn, /runKind: "term_weights", source: trigger, status: "ok"/,
+    "a successful rebuild is recorded");
+  assert.match(fn, /status: r\.reason\.startsWith\("refused"\) \? "no_results" : "failed"/,
+    "a refusal and a failure are recorded as DIFFERENT statuses — conflating them would make the " +
+    "consecutive-failure count fire on the thin-board guard doing its job");
+  assert.match(fn, /status: "failed", startedAt,\s*\n?\s*errorText: `threw/,
+    "and a throw is recorded rather than only logged");
+
+  // ⛔ The skip is NOT recorded, and that is deliberate: "not due yet" is the expected state on 13
+  // nights out of 14. A row per night would bury the failures the table exists to surface.
+  const recordCalls = (fn.match(/recordPipelineRun\(/g) || []).length;
+  assert.equal(recordCalls, 3, "exactly three outcomes are recorded: ok, refused, failed");
+});
+
+test("⛔ consecutive failures are counted, and a REFUSAL neither increments nor resets", () => {
+  const fn = SERVER.slice(at(SERVER, "function termWeightRefreshHealth()"),
+                          at(SERVER, "function atsClaims(profile)"));
+  assert.match(fn, /if \(r\.status === "failed"\) consecutiveFailures\+\+/);
+  assert.match(fn, /else if \(r\.status === "ok"\) break/,
+    "only a success resets the streak");
+  assert.doesNotMatch(fn, /no_results".*(break|\+\+)/,
+    "a refusal is the thin-board guard keeping a good table — it is not evidence either way " +
+    "about whether the pass works, so it must neither break the loop nor count");
+});
+
+test("the streak reaches the cliff in THREE, and the number is derived from the thresholds", () => {
+  // Not a taste call. With REFRESH at 14 and REFUSAL at 45 there are two further nightly chances
+  // after the first miss, so three consecutive failures is when the refusal becomes reachable.
+  assert.ok(MAX_WEIGHT_AGE_DAYS - REFRESH_WEIGHT_AGE_DAYS >= 2 * 3,
+    "three nightly retries must fit between the refresh threshold and the refusal, or the " +
+    "reported number is describing a cliff that arrives sooner than it claims");
+  assert.match(SERVER, /failuresBeforeCliff: 3/);
+});
+
+test("a failing refresh is LOUD at boot, and silent when healthy", () => {
+  const boot = SERVER.slice(at(SERVER, "const before = atsWeightStatus(db);"),
+                            at(SERVER, 'setImmediate(() => runTermWeightRefresh("boot"))'));
+  assert.match(boot, /if \(health\.consecutiveFailures > 0\)/,
+    "nothing is printed in the healthy case — '0 consecutive failures' on every boot forever is " +
+    "how a warning stops being read");
+  assert.match(boot, /console\.error/, "and a failing streak goes to stderr, not stdout");
+  assert.match(boot, /REFRESH HAS FAILED/);
+});
+
+test("/api/version carries the refresh health, not only the table's freshness", () => {
+  const route = SERVER.slice(at(SERVER, 'app.get("/api/version"'),
+                             at(SERVER, "// ── Profile isolation diagnostic"));
+  assert.match(route, /refresh: termWeightRefreshHealth\(\)/,
+    "'fresh' answers whether the TABLE is usable; it says nothing about whether the mechanism " +
+    "that keeps it that way still works");
+});
+
+test("pipeline_runs needs no migration for the new grain, and the log says why", () => {
+  // The table is generic — run_kind is a bare TEXT column with no CHECK — so a third grain costs
+  // nothing. Asserting it here means a later CHECK constraint fails loudly rather than making
+  // every weight rebuild silently unrecorded.
+  const db = freshDb();
+  const sql = db.prepare("SELECT sql FROM sqlite_master WHERE name = 'pipeline_runs'").get()?.sql || "";
+  assert.ok(sql, "pipeline_runs must exist by migration 069");
+  assert.doesNotMatch(sql, /CHECK\s*\(\s*run_kind/i,
+    "a CHECK on run_kind would reject 'term_weights' and the refresh log would vanish silently");
+
+  const log = fs.readFileSync("services/jobs/pipelineRunLog.js", "utf8");
+  assert.match(log, /'term_weights'/, "the third grain is documented where the other two are");
 });
 
 test("/api/version answers 'is the scorer weighted?' without auth", () => {

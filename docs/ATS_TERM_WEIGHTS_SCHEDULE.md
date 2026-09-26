@@ -201,11 +201,59 @@ question.** Fixing it means either widening `roleFamilyForTitle` or bucketing we
 `job_role_map.role_key`, and either is a measurement task of its own — the weights change, so rho
 has to be re-measured against the graded corpus before and after. Not attempted here.
 
+## 7b · The louder signal — added 2026-09-26
+
+§7 below named one gap and left it: *"if the 45-day refusal is ever hit, that means the nightly
+pass has failed three times running, which is worth a louder signal than this task builds."* Built
+now, because it is the same defect shape as everything else on this page — **a degraded state that
+nothing says out loud.**
+
+⛔ **The refresh is never-fatal on purpose, and that is exactly what hides a broken one.** A scorer
+on 20-day-old weights beats a dead cron tick, so `runTermWeightRefresh` swallows everything and
+logs. But never-fatal plus console-only means **a pass that fails every single night is
+indistinguishable from one that simply has not been due.** The table reads `fresh` for 14 days,
+then `stale`, and at 45 the scorer drops to unweighted — and at no point does anything say "the
+mechanism that prevents this has not worked in three weeks".
+
+**No migration.** `pipeline_runs` (069) is generic — `run_kind` is a bare `TEXT` column — and it
+already exists to record "a pass that did nothing". `term_weights` joins `source_sync` and
+`enrichment` as a third grain. A test asserts there is no `CHECK` on `run_kind`, so a later
+constraint fails loudly instead of making every rebuild silently unrecorded.
+
+**What is recorded, and what deliberately is not:**
+
+| outcome | status | why |
+|---|---|---|
+| rebuilt | `ok` | resets the streak |
+| refused (thin board) | `no_results` | ⛔ neither counts NOR resets — the guard doing its job is not evidence either way about whether the pass works |
+| failed / threw | `failed` | increments the streak |
+| not due yet | **not recorded** | the expected state on 13 nights in 14; a row per night would bury the failures |
+
+**Three is the number, and it is derived rather than chosen.** With refresh at 14 and refusal at
+45 there are two further nightly chances after the first miss, so three consecutive failures is
+where the cliff becomes reachable. A test asserts the arithmetic still holds, so moving either
+threshold fails rather than quietly making the reported number a lie.
+
+**Reported in two places:** `/api/version` gains `atsWeights.refresh`, and a **stderr** line at
+boot — but only when the streak is non-zero. That is a deliberate exception to §3's "print even
+when healthy" rule: a boot line reading *"0 consecutive failures"* forever is how a warning stops
+being read.
+
+```json
+"refresh": { "consecutiveFailures": 0, "failuresBeforeCliff": 3, "lastRun": null }
+```
+
+⚠ **Verified by driving the counter over a synthetic history**, not by reading it: success → 0,
+one failure → 1, **a refusal in the middle → still 1**, two more failures → 3, then a success → 0.
+The refusal case is the one worth checking, because counting it would make the alarm fire on the
+thin-board guard working correctly.
+
+---
+
 ## 7 · Not done
 
-- **The 45-day refusal is unchanged.** With a 14-day schedule it should now be unreachable; if it
-  is ever hit, that means the nightly pass has failed three times running, which is worth a
-  louder signal than this task builds.
+- **The 45-day refusal is unchanged.** With a 14-day schedule it should be unreachable. ✅ The
+  "louder signal" this bullet asked for is built — see §7b.
 - **No alert.** Everything here is a log line or a field. Nothing pages anybody, and nothing
   watches `/api/version` on a timer — deliberately: that is monitoring, not scoring.
 - **Per-family weights on production** — see §6b. Global-only weighting works and is the designed

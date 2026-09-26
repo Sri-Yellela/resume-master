@@ -11,7 +11,7 @@ something you read elsewhere in `docs/`, re-measure before you believe either.
 | deployed commit | **read it from `/api/version`** — any value written here is stale by the next push, which is why the doc guard deliberately does not assert one |
 | contract | `1.1.1` (source and production agree) |
 | migration high-water | `109_restore_stripped_seniority_titles`, in **both** runners and production |
-| test baseline | **2648 tests, 2648 pass, 0 fail** — no deliberate failures since P4; see `CLAUDE.md` |
+| test baseline | **2654 tests, 2654 pass, 0 fail** — no deliberate failures since P4; see `CLAUDE.md` |
 | monetisation | **disabled** — the product presents as free and untiered |
 | Anthropic balance | **exhausted.** Model-backed paths return 502 — except capture, which degrades (see below) |
 
@@ -61,7 +61,7 @@ on their behalf without a gate.**
   ⛔ **A 200 is not evidence.** The SPA catch-all answers 200 with `index.html` for any unknown
   path. That has produced a false finding four times, most recently `/api/admin/stats` "returning
   200" for a route that does not exist. Judge by **response body and content-type**, always.
-- **Local:** `npm test`. Expect 2648 / 2648 / 0. ⛔ A red is now a REAL failure — the two deliberate
+- **Local:** `npm test`. Expect 2654 / 2654 / 0. ⛔ A red is now a REAL failure — the two deliberate
   ones cleared at P4 on 2026-09-26. Check `CLAUDE.md` before assuming otherwise.
 - **Real behaviour:** `npm run verify:harness` (needs the app on `:3001`). A green node suite is
   **not** evidence about anything a browser does — see the note in `package.json`.
