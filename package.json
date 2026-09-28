@@ -1,0 +1,20 @@
+{
+  "name": "resume-master",
+  "version": "0.1.0",
+  "description": "Stateless résumé tools: generation, formatting, parsing, ATS scoring. No database.",
+  "private": true,
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@draft/ats-scorer": "file:vendor/ats-scorer",
+    "express": "^4.21.0"
+  }
+}

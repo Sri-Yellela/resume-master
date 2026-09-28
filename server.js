@@ -1,0 +1,25 @@
+// Resume Master — stateless résumé tools. See README.md and docs/API.md.
+import fs from "node:fs";
+import Anthropic from "@anthropic-ai/sdk";
+import { createApp } from "./src/http/app.js";
+import { loadAllPrompts } from "./src/generation/promptAssembler.js";
+
+loadAllPrompts();
+
+const pkg = JSON.parse(fs.readFileSync(new URL("./package.json", import.meta.url), "utf8"));
+const scorer = JSON.parse(fs.readFileSync(new URL("./vendor/ats-scorer/package.json", import.meta.url), "utf8"));
+const version = {
+  version: pkg.version,
+  commit: process.env.RAILWAY_GIT_COMMIT_SHA || null,
+  scorer: `${scorer.name}@${scorer.version}`,
+  llmFormat: process.env.RESUME_MASTER_LLM_FORMAT === "1",
+};
+
+// No key is a supported state: the deterministic routes still serve, and model routes answer
+// 503 model_unconfigured with retryable:false rather than pretending to be flaky.
+const anthropic = process.env.ANTHROPIC_API_KEY ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }) : null;
+
+const port = Number(process.env.PORT) || 3100;
+createApp({ anthropic, version }).listen(port, () => {
+  console.log(JSON.stringify({ t: new Date().toISOString(), boot: "listening", port, model: !!anthropic }));
+});

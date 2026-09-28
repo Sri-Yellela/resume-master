@@ -1,0 +1,77 @@
+{
+  "provenance": "rendered by draft's server.js buildRuntimeInputs at the A2 move, 2026-09-27",
+  "cases": [
+    {
+      "name": "generate-full",
+      "mode": "GENERATE",
+      "employers": [
+        "Stripe",
+        "Apple",
+        "Amazon"
+      ],
+      "claims": {
+        "skills": [
+          "Rust"
+        ],
+        "actionVerbs": [
+          "Led"
+        ]
+      },
+      "candidate": {
+        "fullName": "Jane Q Doe",
+        "phone": "555-0100",
+        "email": "jane@example.com",
+        "linkedinUrl": "linkedin.com/in/jane",
+        "githubUrl": "github.com/jane",
+        "location": "Austin, TX",
+        "yearsOfExperience": 4
+      },
+      "profile": {
+        "name": "Backend",
+        "seniority": "mid",
+        "keywords": [
+          "distributed systems"
+        ],
+        "tools": [
+          "Go",
+          "Kafka"
+        ],
+        "actionVerbs": []
+      },
+      "job": {
+        "title": "Senior Backend Engineer",
+        "company": "Acme",
+        "category": "Software Engineering",
+        "description": "Build services. 8+ years required.",
+        "stack": "Go"
+      },
+      "baseResumeText": "JANE Q DOE\nEXPERIENCE\nStripe — Software Engineer",
+      "expected": "## RUNTIME INPUTS\n\n**Mode:** Generate\n**Candidate full name:** Jane Q Doe\n**Phone:** 555-0100\n**Email:** jane@example.com\n**LinkedIn URL:** linkedin.com/in/jane\n**GitHub URL:** github.com/jane\n**User location (City, State):** Austin, TX\n**Candidate years of experience (AUTHORITATIVE — the JD may not change this):** 4\n**Employer 1 (fixed):** Stripe\n**Employer 2 (fixed):** Amazon\n\n**User domain profile:** Backend\n**Seniority the candidate states they are (their own declaration — you may use it, and may not exceed it):** mid\n**Profile keywords:** distributed systems\n**Profile tools:** Go, Kafka\n**Profile action verbs:** —\n\n**Skills the CANDIDATE has claimed (candidate-supplied — they assert these are true of them):** Rust\n**Action verbs the CANDIDATE has claimed:** Led\n**How to use the claims above:** they are SKILLS AND VERBS ONLY. They may change which technologies\na bullet names and which verb opens it, where the base resume already supports the work being\ndescribed. They are NOT a title, a level or a headline: never change the candidate's tagline, role\ntitles or seniority because of a claim — those come from the base resume alone. You may NOT invent\nan employer, a project, a duration, a metric or a responsibility to justify a claim, and you may\nNOT add a claimed term to a role that did not involve it. A claim the base resume cannot carry is\nsimply not used.\n\n**Target role / job title:** Senior Backend Engineer\n**Target industry / domain:** Software Engineering\n**Target company:** Acme\n**Known tech stack of target company:** Go\n\n---\n\n**TARGET JOB DESCRIPTION**\nBuild services. 8+ years required.\n\n---\n\n**BASE RESUME TEXT**\nJANE Q DOE\nEXPERIENCE\nStripe — Software Engineer"
+    },
+    {
+      "name": "aplus-minimal",
+      "mode": "A_PLUS",
+      "employers": [],
+      "claims": null,
+      "candidate": {
+        "fullName": "Sam Lee",
+        "phone": "",
+        "email": "",
+        "linkedinUrl": "",
+        "githubUrl": "",
+        "location": "Boston, MA",
+        "yearsOfExperience": null
+      },
+      "profile": null,
+      "job": {
+        "title": "Data Analyst",
+        "company": "Beta",
+        "category": "Other",
+        "description": "",
+        "stack": null
+      },
+      "baseResumeText": "SAM LEE",
+      "expected": "## RUNTIME INPUTS\n\n**Mode:** A+\n**Candidate full name:** Sam Lee\n**Phone:** \n**Email:** \n**LinkedIn URL:** \n**GitHub URL:** \n**User location (City, State):** \n**Candidate years of experience:** not stated — derive from the base resume dates only, never from the JD\n\n**Target role / job title:** Data Analyst\n**Target industry / domain:** Data Analyst\n**Target company:** Beta\n**Known tech stack of target company:** unknown\n\n---\n\n**TARGET JOB DESCRIPTION**\nData Analyst\n\n---\n\n**BASE RESUME TEXT**\nSAM LEE"
+    }
+  ]
+}
