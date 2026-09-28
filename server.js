@@ -3,6 +3,7 @@ import fs from "node:fs";
 import Anthropic from "@anthropic-ai/sdk";
 import { createApp } from "./src/http/app.js";
 import { loadAllPrompts } from "./src/generation/promptAssembler.js";
+import { parseClientTokens } from "./src/http/auth.js";
 
 loadAllPrompts();
 
@@ -19,7 +20,13 @@ const version = {
 // 503 model_unconfigured with retryable:false rather than pretending to be flaky.
 const anthropic = process.env.ANTHROPIC_API_KEY ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }) : null;
 
+// Throws on a malformed entry: a typo that silently dropped a client would read, from the caller's
+// side, exactly like a revoked token. Zero clients is allowed and FAILS CLOSED (503 auth_unconfigured).
+const clients = parseClientTokens(process.env.RESUME_MASTER_CLIENT_TOKENS);
+
 const port = Number(process.env.PORT) || 3100;
-createApp({ anthropic, version }).listen(port, () => {
-  console.log(JSON.stringify({ t: new Date().toISOString(), boot: "listening", port, model: !!anthropic }));
+createApp({ anthropic, version, clients }).listen(port, () => {
+  // Client IDS only — never a hash, never a token.
+  console.log(JSON.stringify({ t: new Date().toISOString(), boot: "listening", port, model: !!anthropic,
+    clients: [...clients.keys()] }));
 });

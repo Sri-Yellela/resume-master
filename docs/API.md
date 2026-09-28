@@ -4,10 +4,40 @@ Stateless résumé tools: generation, deterministic formatting, PDF text extract
 **No database. Nothing a caller sends is stored.** Every response is JSON, including errors and
 "not found".
 
-> ⚠ This document describes the service as built in Phase A2. The request/response schema will be
-> **generated** from the implementation in A3, with an envelope harness that checks declared shapes
-> against real responses; where the generated contract and this prose disagree, the contract wins
-> and this file is corrected. Authentication (a per-client service token) also lands in A3.
+> ⚠ The request/response schema will be **generated** from the implementation in A3, with an
+> envelope harness that checks declared shapes against real responses; where the generated
+> contract and this prose disagree, the contract wins and this file is corrected.
+
+---
+
+## Authentication — one service token per client
+
+Every `/v1` route except `/v1/version` requires `Authorization: Bearer rmk_<clientId>.<secret>`.
+`/health` is open. A missing, malformed, unknown or revoked token is `401 unauthenticated`, and it
+is checked **before** the body is parsed.
+
+- **Every caller is a third party**, draft included: no shared cookie, no shared session secret, no
+  shared environment. That is what keeps two products two products, and what makes draft's traffic
+  a real test of the API.
+- **The service stores only `sha256(token)`**, in `RESUME_MASTER_CLIENT_TOKENS`
+  (`draft:<sha256hex>,acme:<sha256hex>`). A leaked environment yields no usable token.
+- **Mint:** `node scripts/mintClientToken.mjs <clientId>` prints the token once (it goes into the
+  caller's environment — draft: `RESUME_MASTER_TOKEN`) and the entry to append here.
+- **Revoke:** delete the client's entry and restart. **Rotate:** add the new entry beside the old one
+  (a client may hold several), move the caller, delete the old one — no window without a valid token.
+- **No clients configured fails closed** (`503 auth_unconfigured`), and a malformed entry refuses
+  to boot rather than silently dropping a client.
+
+## Per-client accounting — built, limits OFF
+
+Each model-backed request emits one metering line: `{ metering, client, route, calls, failed_calls,
+input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens }` — counts, never
+content. Failed calls are metered too; they can still have spent. With no database, that log line
+is the ledger, and the caller also receives the per-call usage records in the response.
+
+A limit hook runs on every model route **before any spend**. It allows everything: limits are off by
+decision. Enabling them means giving the hook a policy; no call site changes. A refusal will be
+`429 limit_exceeded`.
 
 ---
 
@@ -111,6 +141,9 @@ bands are each product's presentation decision, calibrated against its own users
 | status | `error` | `retryable` |
 |---|---|---|
 | 400 | `invalid_request`, `invalid_json` | — |
+| 401 | `unauthenticated` | false |
+| 429 | `limit_exceeded` (limits are currently off) | true |
+| 503 | `auth_unconfigured` | false |
 | 404 | `not_found` | — |
 | 413 | `payload_too_large` | — |
 | 422 | `resume_claim_violation` (+ `violations`, no document) | true — generation is stochastic |
@@ -126,6 +159,7 @@ Model-backed errors include `usage` for whatever was spent before the failure.
 
 | env | default | |
 |---|---|---|
+| `RESUME_MASTER_CLIENT_TOKENS` | unset | `clientId:sha256hex,…` — unset fails closed (503 `auth_unconfigured`) |
 | `ANTHROPIC_API_KEY` | unset | unset is supported: deterministic routes serve, model routes answer 503 |
 | `RESUME_MASTER_LLM_FORMAT` | off | `1` adds a Haiku reformatting pass, instructed with the renderer's own stylesheet |
 | `PORT` | 3100 | |

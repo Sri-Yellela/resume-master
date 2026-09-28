@@ -13,6 +13,8 @@ import { enhanceResume } from "../generation/enhance.js";
 import { parsePdf } from "../parsing/parsePdf.js";
 import { normalizeResumeHtml } from "../formatting/resumeFormatter.js";
 import { scoreAtsLocally, buildRuntimeAtsBasis } from "@draft/ats-scorer";
+import { requireClient } from "./auth.js";
+import { createMetering } from "./metering.js";
 
 export const SERVICE = "resume-master";
 
@@ -25,9 +27,31 @@ function mapFromPairs(v, name) {
   return new Map(v);
 }
 
-export function createApp({ anthropic = null, version = {}, log = defaultLog, env = process.env } = {}) {
+/**
+ * @param clients  Map<clientId, sha256 Buffer[]> from parseClientTokens. Null or empty FAILS CLOSED:
+ *                 every /v1 route but /v1/version answers 503 auth_unconfigured.
+ */
+export function createApp({ anthropic = null, version = {}, log = defaultLog, env = process.env,
+                            clients = null, metering = createMetering({ log }) } = {}) {
   const app = express();
   app.disable("x-powered-by");
+  const client = requireClient(clients);
+
+  // A model-backed route: the limit hook runs before any spend, and the usage — success OR failure,
+  // because a failed call can still have spent — is recorded against the client afterwards.
+  const metered = (route, fn) => async (req, res, next) => {
+    if (!metering.allow(req.client.id, route)) {
+      return res.status(429).json({ error: "limit_exceeded", retryable: true });
+    }
+    try {
+      const out = await fn(req);
+      metering.record(req.client.id, route, out.usage);
+      res.json(out);
+    } catch (e) {
+      metering.record(req.client.id, route, e.usageSoFar || (e.usage ? [e.usage] : []));
+      next(e);
+    }
+  };
 
   app.use((req, res, next) => {
     const started = Date.now();
@@ -37,13 +61,15 @@ export function createApp({ anthropic = null, version = {}, log = defaultLog, en
     }));
     next();
   });
-  app.use(express.json({ limit: "15mb" }));
+  // Parsed only AFTER authentication: an unauthenticated caller cannot make this service read a
+  // 15 MB body before being refused.
+  const json = express.json({ limit: "15mb" });
 
   app.get("/health", (_req, res) => res.json({ ok: true, service: SERVICE }));
   app.get("/v1/version", (_req, res) => res.json({ service: SERVICE, ...version }));
 
-  // ── deterministic: no model, no cost ──────────────────────────────────────────────────────────
-  app.post("/v1/resumes/format", (req, res, next) => {
+  // ── deterministic: no model, no cost — still authenticated, so every caller is identified ───────
+  app.post("/v1/resumes/format", client, json, (req, res, next) => {
     try {
       const { html } = req.body || {};
       if (typeof html !== "string" || !html.trim()) throw new InvalidRequestError("html is required");
@@ -51,7 +77,7 @@ export function createApp({ anthropic = null, version = {}, log = defaultLog, en
     } catch (e) { next(e); }
   });
 
-  app.post("/v1/ats/score", (req, res, next) => {
+  app.post("/v1/ats/score", client, json, (req, res, next) => {
     try {
       const { job, resumeText, signalProfile = {}, domainProfile = {}, claims = null } = req.body || {};
       if (!job || typeof job !== "object") throw new InvalidRequestError("job is required");
@@ -67,15 +93,9 @@ export function createApp({ anthropic = null, version = {}, log = defaultLog, en
   });
 
   // ── model-backed ─────────────────────────────────────────────────────────────────────────────
-  app.post("/v1/resumes/generate", async (req, res, next) => {
-    try { res.json(await generateResume(anthropic, req.body || {}, { env })); } catch (e) { next(e); }
-  });
-  app.post("/v1/resumes/enhance", async (req, res, next) => {
-    try { res.json(await enhanceResume(anthropic, req.body || {})); } catch (e) { next(e); }
-  });
-  app.post("/v1/resumes/parse-pdf", async (req, res, next) => {
-    try { res.json(await parsePdf(anthropic, req.body || {})); } catch (e) { next(e); }
-  });
+  app.post("/v1/resumes/generate", client, json, metered("resumes.generate", req => generateResume(anthropic, req.body || {}, { env })));
+  app.post("/v1/resumes/enhance", client, json, metered("resumes.enhance", req => enhanceResume(anthropic, req.body || {})));
+  app.post("/v1/resumes/parse-pdf", client, json, metered("resumes.parse-pdf", req => parsePdf(anthropic, req.body || {})));
 
   app.use((_req, res) => res.status(404).json({ error: "not_found" }));
 

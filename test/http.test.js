@@ -5,6 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createApp } from "../src/http/app.js";
 import { loadAllPrompts } from "../src/generation/promptAssembler.js";
+import { mintToken, parseClientTokens } from "../src/http/auth.js";
 
 loadAllPrompts();
 
@@ -38,12 +39,14 @@ function fake(respond) {
 
 async function serve(anthropic) {
   const logs = [];
-  const app = createApp({ anthropic, version: { version: "0.1.0-test" }, log: e => logs.push(JSON.stringify(e)) });
+  const { token, entry } = mintToken("draft");
+  const app = createApp({ anthropic, version: { version: "0.1.0-test" }, log: e => logs.push(JSON.stringify(e)),
+    clients: parseClientTokens(entry) });
   const server = await new Promise(r => { const s = app.listen(0, () => r(s)); });
   const base = `http://127.0.0.1:${server.address().port}`;
   const post = (path, payload, raw) => fetch(base + path, { method: "POST",
-    headers: { "content-type": "application/json" }, body: raw ?? JSON.stringify(payload) });
-  return { base, post, logs, close: () => new Promise(r => server.close(r)) };
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}` }, body: raw ?? JSON.stringify(payload) });
+  return { base, post, logs, token, close: () => new Promise(r => server.close(r)) };
 }
 
 test("/v1/version answers JSON with the service name — assert the KEY, never a 200", async () => {
@@ -152,6 +155,7 @@ test("⛔ NO PAYLOAD IS LOGGED — on success, refusal, failure, malformed JSON 
     await s.post("/v1/resumes/format", null, JSON.stringify({ html: STREET + "x".repeat(16 * 1024 * 1024) })); // 413
     assert.ok(s.logs.length >= 7, `expected a log line per request, got ${s.logs.length}`);
     for (const line of s.logs) {
+      assert.ok(!line.includes(s.token.split(".")[1]), "a log line contains the client's token");
       for (const secret of SENTINELS) {
         assert.ok(!line.includes(secret), `a log line retained candidate content: ${line.slice(0, 200)}`);
       }
