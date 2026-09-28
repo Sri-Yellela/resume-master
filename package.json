@@ -7,7 +7,10 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "contract": "node scripts/generateContract.mjs",
+    "contract:check": "node scripts/generateContract.mjs --check",
+    "verify:live": "node scripts/verifyContract.mjs"
   },
   "engines": {
     "node": ">=20"

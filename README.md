@@ -28,6 +28,7 @@ npm start         # PORT (default 3100); ANTHROPIC_API_KEY optional
 | `scripts/mintClientToken.mjs` | mint a client token |
 | `prompts/` | the three prompt layers |
 | `vendor/ats-scorer/` | `@draft/ats-scorer`, vendored |
+| `src/contract/`, `contract/` | the API contract: derived + declared shapes, the envelope harness, and the generated OpenAPI/TypeScript |
 
 ## ⛔ The vendored scorer is not edited here
 

@@ -36,8 +36,13 @@ test("a valid token authenticates as its OWN client, and only that one", () => {
   assert.equal(authenticate(clients, `Bearer ${acme.token}`), "acme");
   // A token whose client-id prefix is edited does not become the other client.
   assert.equal(authenticate(clients, `Bearer ${draft.token.replace("rmk_draft.", "rmk_acme.")}`), null);
+  // The tampered token must DIFFER: replacing the last character with a fixed "A" was a no-op for
+  // the 1-in-64 tokens already ending in "A", and this test failed intermittently until it said so.
+  const last = draft.token.slice(-1);
+  const tampered = draft.token.slice(0, -1) + (last === "A" ? "B" : "A");
+  assert.notEqual(tampered, draft.token);
   for (const bad of [undefined, "", "Bearer", `Basic ${draft.token}`, `Bearer ${draft.token}x`, `bearer ${draft.token}`,
-                     `Bearer ${draft.token.slice(0, -1)}A`]) {
+                     `Bearer ${tampered}`]) {
     assert.equal(authenticate(clients, bad), null, String(bad));
   }
 });
