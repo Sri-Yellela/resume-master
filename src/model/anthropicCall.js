@@ -96,9 +96,17 @@ const PERMANENT_SIGNATURES = [
  * ⛔ A 429 is NOT permanent. Rate limiting is the case retrying exists for, and it carries billing
  * words often enough ("quota") that it has to be excluded before the signature scan, not after.
  */
+// ⛔ AND A REJECTED REQUEST IS PERMANENT. Found in Phase B's first live run: a PDF the provider called
+// "not valid" came back 400 invalid_request_error, and this reported it retryable — so a caller was
+// told to retry a document that fails identically every time. The status codes that mean "this
+// request, as sent, can never succeed" are the ones draft's failureAttribution already treats as
+// permanent; only the provider-wording scan used to run here.
+const PERMANENT_STATUS = new Set([400, 401, 403, 404, 413, 422]);
+
 export function isPermanentModelFailure(err) {
   const status = err?.status ?? err?.statusCode ?? null;
   if (status === 429) return false;
+  if (PERMANENT_STATUS.has(status)) return true;
   const text = `${err?.message ?? ""} ${err?.error?.message ?? ""}`;
   return PERMANENT_SIGNATURES.some(re => re.test(text));
 }

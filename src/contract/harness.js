@@ -25,8 +25,32 @@ const honestHtml = (years = 4) => `<html><body><div class="header"><div class="n
   `<div class="section-title">SUMMARY</div><p>Software Engineer with ${years} years building distributed systems.</p>` +
   `<div class="section-title">EXPERIENCE</div><div class="entry"><div class="entry-org">Stripe</div>` +
   `<div class="entry-role">Software Engineer</div><ul class="bullets"><li>Built payment services</li></ul></div></body></html>`;
-// The smallest well-formed PDF a parser accepts. Only its header matters to this service.
-export const TINY_PDF_BASE64 = Buffer.from("%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[]/Count 0>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n").toString("base64");
+// A REAL one-page PDF with a line of text. ⛔ This replaced a zero-page stub whose comment called it
+// "well-formed": it passed this service's own header check and every in-process test, and the model
+// provider rejected it as "not valid" on the first live run (Phase B). The xref offsets are COMPUTED,
+// not hand-written, because a wrong offset is exactly the invalidity a strict parser rejects.
+function buildOnePagePdf(text) {
+  const content = `BT /F1 12 Tf 72 720 Td (${text}) Tj ET`;
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  ];
+  let pdf = "%PDF-1.4\n";
+  const offsets = [];
+  objects.forEach((body, i) => { offsets.push(pdf.length); pdf += `${i + 1} 0 obj\n${body}\nendobj\n`; });
+  const xref = pdf.length;
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n` +
+    offsets.map(o => `${String(o).padStart(10, "0")} 00000 n \n`).join("") +
+    `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(pdf, "latin1").toString("base64");
+}
+export const TINY_PDF_BASE64 = buildOnePagePdf("JANE DOE - Software Engineer - Built payment services");
+// A document the provider rejects: a PDF header and nothing a parser can use. Its failure must be
+// PERMANENT — retrying an invalid document fails identically every time.
+export const INVALID_PDF_BASE64 = Buffer.from("%PDF-1.4\nnot a document\n%%EOF\n").toString("base64");
 
 const GENERATE = {
   mode: "GENERATE", domainModuleKey: "engineering", baseResumeText: BASE_RESUME,
@@ -40,6 +64,9 @@ const OVERSIZE = "x".repeat(16 * 1024 * 1024);
 
 const permanent = () => Object.assign(new Error("400 Your credit balance is too low to access the Anthropic API."), { status: 400 });
 const transient = () => Object.assign(new Error("overloaded_error"), { status: 529 });
+// The provider's real answer to an invalid PDF, captured in Phase B's first live run.
+const rejectedDocument = () => Object.assign(new Error('400 {"type":"error","error":{"type":"invalid_request_error",' +
+  '"message":"messages.0.content.0.pdf.source.base64.data: The PDF specified was not valid."}}'), { status: 400 });
 
 /**
  * One scenario = one real request. Fields:
@@ -125,6 +152,9 @@ export const SCENARIOS = [
   { name: "parse-pdf: oversize", route: "POST /v1/resumes/parse-pdf", raw: JSON.stringify({ pdfBase64: OVERSIZE }), status: 413 },
   { name: "parse-pdf: limit refused", route: "POST /v1/resumes/parse-pdf", service: "refuse-limits", body: { pdfBase64: TINY_PDF_BASE64 }, status: 429 },
   { name: "parse-pdf: upstream failure", route: "POST /v1/resumes/parse-pdf", body: { pdfBase64: TINY_PDF_BASE64 }, model: transient, status: 502 },
+  { name: "parse-pdf: a document the provider rejects is PERMANENT", route: "POST /v1/resumes/parse-pdf",
+    body: { pdfBase64: INVALID_PDF_BASE64 }, model: rejectedDocument, status: 502,
+    expect: b => (b.permanent === true && b.retryable === false) || "an invalid document must never be reported retryable" },
   { name: "parse-pdf: no model key", route: "POST /v1/resumes/parse-pdf", body: { pdfBase64: TINY_PDF_BASE64 }, model: "none", status: 503 },
 ];
 
