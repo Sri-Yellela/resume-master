@@ -95,10 +95,22 @@ The generation prompt (`prompts/layer1_global_rules.md`, §7 truthfulness) instr
 to invent employers, projects, durations, metrics, credentials, clearances or seniority, and never
 to "correct" an implausible base-résumé claim into a plausible one. Candidate-supplied `claims`
 may change which skills and verbs a bullet names where the base résumé supports the work — they are
-never a title, a level or a headline. The claim guard (promise 2) is the enforced floor under it.
+never a title, a level or a headline.
 
-*Enforced by:* `test/resumeClaimGuard.test.js` (behaviour and the prompt rules themselves),
+⛔ **What is ENFORCED is narrower than what is instructed, and a caller must know which is which.**
+The claim guard (promise 2) enforces **years and seniority** — mechanically, on every document. The
+rest of this promise — no invented responsibilities, skills or bullets — is an **instruction to the
+model, not a check**, and the model does not always follow it. Measured on the first real
+generations (Phase B, 2026-09-28, a deliberately thin two-bullet base résumé against a JD naming
+more): **2 of 2 documents contained material the candidate never stated** — one listed a skill taken
+from the JD (Kafka), the other added two bullets describing responsibilities with no source and a
+skill ("event-driven architecture") with none. Both passed the claim guard, correctly by its
+definition. Until an unsupported-content check exists, **a generated document must be reviewed by
+the candidate before it is sent anywhere.**
+
+*Enforced by:* `test/resumeClaimGuard.test.js` (years and seniority, and the prompt rules' text),
 `test/generate.test.js` (the kernel withholds, cannot be told to skip, refuses an unread document).
+*Not enforced:* invented responsibilities, skills or bullets — see above.
 
 ### 4. A failure says whether retrying can help
 
