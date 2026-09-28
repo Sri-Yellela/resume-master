@@ -1,0 +1,33 @@
+{
+  "name": "@draft/ats-scorer",
+  "version": "1.0.0",
+  "description": "Deterministic local ATS scorer: no database, no network, no model call. Weights and synonyms are arguments.",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src/",
+    "data/",
+    "test/",
+    "scripts/",
+    "index.d.ts",
+    "README.md",
+    "CHECKSUMS.json"
+  ],
+  "scripts": {
+    "test": "node --test",
+    "checksums": "node scripts/checksums.mjs --write"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {}
+}
