@@ -28,6 +28,21 @@ test("a bad or missing key is permanent — no retry can fix it either", () => {
   }
 });
 
+test("⛔ a request the provider REJECTED is permanent — retrying the same input fails identically", () => {
+  // Found in Phase B's first live run: a PDF the provider called "not valid" came back as a 400
+  // invalid_request_error and was reported RETRYABLE. The wording scan had no signature for it.
+  const invalidPdf = Object.assign(new Error(
+    '400 {"type":"error","error":{"type":"invalid_request_error","message":' +
+    '"messages.0.content.0.pdf.source.base64.data: The PDF specified was not valid."}}'), { status: 400 });
+  assert.equal(isPermanentModelFailure(invalidPdf), true);
+  for (const status of [401, 403, 404, 413, 422]) {
+    assert.equal(isPermanentModelFailure(Object.assign(new Error("x"), { status })), true, String(status));
+  }
+  for (const status of [408, 409, 500, 502, 503, 529]) {
+    assert.equal(isPermanentModelFailure(Object.assign(new Error("x"), { status })), false, String(status));
+  }
+});
+
 test("⛔ a 429 is NOT permanent, even when it talks about quota", () => {
   // Rate limiting is the single case retrying exists for. It also carries billing vocabulary often
   // enough to trip a naive signature scan, which is why status is checked BEFORE the text.
