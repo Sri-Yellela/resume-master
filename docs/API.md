@@ -59,6 +59,8 @@ to every candidate whose résumé passes through.
 
 ### 1. Processes, does not retain
 
+The full statement for anyone whose data passes through is [`docs/PRIVACY.md`](PRIVACY.md).
+
 - A request is processed and answered. **No request body, prompt, résumé, generated document or
   model response is written to disk, to a database, or to a log.** There is no database.
 - The only thing logged per request is: method, path, status, duration, calling client. On an

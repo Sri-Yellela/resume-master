@@ -51,3 +51,15 @@ test("the measurement is recorded where the decision is made", () => {
 // The two pricing-arithmetic tests that followed here in draft check draft's pricing table
 // (shared/anthropicModels.js), which costs usage_events. This service has no pricing table: it
 // returns token counts and the caller prices them. Those tests stay in draft.
+
+test("⛔ nothing here sets a 1-hour cache TTL — the caller prices these writes at the 5-minute rate", () => {
+  // draft costs every cache write this service reports from `cache_creation_input_tokens` at the
+  // 5-MINUTE rate (1.25x base). A 1-hour write is 2x, so setting ttl:"1h" here would make every
+  // caller under-report those writes by 37.5% SILENTLY — the usage record carries the aggregate
+  // count, not which TTL wrote it. Moved from draft with the breakpoints (A4). If a 1h TTL is ever
+  // wanted, the usage record must split the two first, and this test changes with it.
+  const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap(e => e.isDirectory() ? walk(`${d}/${e.name}`) : [`${d}/${e.name}`]);
+  for (const f of [...walk("src"), "server.js"].filter(f => f.endsWith(".js"))) {
+    assert.ok(!/ttl:\s*["']1h["']/.test(fs.readFileSync(f, "utf8")), `${f} sets a 1-hour cache TTL`);
+  }
+});
