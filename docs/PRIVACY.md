@@ -16,6 +16,7 @@ Only what a calling client sends in a request, and only for the endpoint called:
 | `POST /v1/resumes/parse-pdf` | a résumé PDF |
 | `POST /v1/resumes/format` | a résumé as HTML |
 | `POST /v1/ats/score` | a résumé's text and a job posting |
+| `POST /mcp` | the same as the HTTP route behind the tool called: `score_ats_fit` as `/v1/ats/score`, `format_resume_print_html` as `/v1/resumes/format`. Stateless — no session is created |
 
 A résumé routinely contains a home address, a phone number and an employment history. It is treated
 that way.
@@ -25,8 +26,8 @@ that way.
 - **No database.** There is no store of any kind. Requests are processed in memory and the result is
   returned.
 - **No content is logged.** Each request produces one log line: method, path, status, duration and
-  the calling client's id. Each model-backed request produces one metering line: the client, the
-  route, and token counts. Never a request body, a prompt, a résumé, a generated document or a model
+  the calling client's id. Each model-backed request, and each MCP tool call, produces one metering
+  line: the client, the route, and token counts. Never a request body, a prompt, a résumé, a generated document or a model
   response — enforced by `test/http.test.js`, which sends sentinel PII down every path (success,
   refusal, upstream failure, malformed JSON, an oversized body) and fails if any appears in a log
   line, and by `test/stateless.test.js`.

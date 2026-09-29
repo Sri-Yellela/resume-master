@@ -12,7 +12,7 @@ import { createMetering } from "../src/http/metering.js";
 import { loadAllPrompts } from "../src/generation/promptAssembler.js";
 import { buildOpenApi } from "../src/contract/build.js";
 import { ENDPOINTS, CONTRACT_VERSION } from "../src/contract/endpoints.js";
-import { SCENARIOS, checkResponse, uncovered, requestFor } from "../src/contract/harness.js";
+import { SCENARIOS, checkResponse, uncovered, requestFor, headersFor } from "../src/contract/harness.js";
 import { staleFiles } from "../scripts/generateContract.mjs";
 
 loadAllPrompts();
@@ -36,10 +36,7 @@ async function run(scenario) {
   const server = await new Promise(r => { const s = app.listen(0, () => r(s)); });
   try {
     const { method, path, body } = requestFor(scenario);
-    const auth = scenario.auth ?? "valid";
-    const headers = { "content-type": "application/json",
-      ...(auth === "valid" ? { authorization: `Bearer ${token}` } : {}),
-      ...(auth === "wrong" ? { authorization: `Bearer rmk_draft.${"A".repeat(43)}` } : {}) };
+    const headers = headersFor(scenario, token);
     const res = await fetch(`http://127.0.0.1:${server.address().port}${path}`, { method, headers, body });
     const text = await res.text();
     let parsed; try { parsed = JSON.parse(text); } catch { parsed = text; }

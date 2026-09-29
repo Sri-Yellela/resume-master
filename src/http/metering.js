@@ -8,7 +8,9 @@
 //   · record()  emits ONE structured line per request: client, route, calls, and summed token
 //               counts. Counts, never content — the same rule as the request log. With no database
 //               this log line IS the ledger (Railway retains it); the caller also receives the
-//               per-call records in its response and meters them itself.
+//               per-call records in its response and meters them itself. MCP tool calls (E1) emit
+//               one line each too — calls: 0, because none of them calls a model — since MCP is the
+//               first caller that can loop, and a line per call is what a future limit would count.
 //   · allow()   the limit hook, called before any model spend. It returns true unconditionally while
 //               limits are off, which is the decided state. Turning limits on means giving it a
 //               policy — nothing at the call sites changes.
@@ -19,9 +21,12 @@ export function createMetering({ log, limitsEnabled = false } = {}) {
     allow(_clientId, _route) {
       return true;                                   // ⛔ limits are OFF by decision, not by omission
     },
-    record(clientId, route, usage = []) {
+    // `extra` carries content-free labels only — the MCP path passes { via: "mcp", result } so a tool
+    // call is accounted for even though it spends nothing (calls: 0 — no model was called).
+    record(clientId, route, usage = [], extra = {}) {
       const sum = (k) => usage.reduce((n, u) => n + (Number(u?.[k]) || 0), 0);
       log({
+        ...extra,
         metering: true, client: clientId, route,
         calls: usage.length,
         failed_calls: usage.filter(u => u && u.success === false).length,

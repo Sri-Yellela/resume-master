@@ -11,21 +11,12 @@ import express from "express";
 import { generateResume, InvalidRequestError } from "../generation/generate.js";
 import { enhanceResume } from "../generation/enhance.js";
 import { parsePdf } from "../parsing/parsePdf.js";
-import { normalizeResumeHtml } from "../formatting/resumeFormatter.js";
-import { scoreAtsLocally, buildRuntimeAtsBasis } from "@draft/ats-scorer";
+import { scoreAts, formatResume } from "../tools/deterministic.js";
 import { requireClient } from "./auth.js";
 import { createMetering } from "./metering.js";
+import { mcpHandlers } from "../mcp/server.js";
 
 export const SERVICE = "resume-master";
-
-/** JSON has no Map. Weights and synonyms arrive as [key, value] pairs and become Maps explicitly. */
-function mapFromPairs(v, name) {
-  if (v == null) return null;
-  if (!Array.isArray(v) || !v.every(p => Array.isArray(p) && p.length === 2 && typeof p[0] === "string")) {
-    throw new InvalidRequestError(`${name} must be an array of [string, value] pairs`);
-  }
-  return new Map(v);
-}
 
 /**
  * @param clients  Map<clientId, sha256 Buffer[]> from parseClientTokens. Null or empty FAILS CLOSED:
@@ -69,28 +60,22 @@ export function createApp({ anthropic = null, version = {}, log = defaultLog, en
   app.get("/v1/version", (_req, res) => res.json({ service: SERVICE, ...version }));
 
   // ── deterministic: no model, no cost — still authenticated, so every caller is identified ───────
+  // One implementation each, in src/tools/deterministic.js — the MCP tools below call the same ones.
   app.post("/v1/resumes/format", client, json, (req, res, next) => {
-    try {
-      const { html } = req.body || {};
-      if (typeof html !== "string" || !html.trim()) throw new InvalidRequestError("html is required");
-      res.json({ html: normalizeResumeHtml(html) });
-    } catch (e) { next(e); }
+    try { res.json(formatResume(req.body)); } catch (e) { next(e); }
   });
 
   app.post("/v1/ats/score", client, json, (req, res, next) => {
-    try {
-      const { job, resumeText, signalProfile = {}, domainProfile = {}, claims = null } = req.body || {};
-      if (!job || typeof job !== "object") throw new InvalidRequestError("job is required");
-      if (typeof resumeText !== "string") throw new InvalidRequestError("resumeText is required");
-      const runtimeBasis = buildRuntimeAtsBasis({ resumeText, signalProfile, domainProfile, claims });
-      const report = scoreAtsLocally({
-        job, runtimeBasis,
-        termWeights: mapFromPairs(req.body.termWeights, "termWeights"),
-        synonyms: mapFromPairs(req.body.synonyms, "synonyms"),
-      });
-      res.json({ report });
-    } catch (e) { next(e); }
+    try { res.json(scoreAts(req.body)); } catch (e) { next(e); }
   });
+
+  // ── MCP (E1): the deterministic tools as LLM tools, in the same service ─────────────────────────
+  // The SAME auth middleware, and it runs FIRST: an unauthenticated or unconfigured request is
+  // refused before the body is read, exactly as on /v1. See src/mcp/server.js.
+  const mcp = mcpHandlers({ metering, log, version });
+  app.post("/mcp", client, json, mcp.post, mcp.errors);
+  app.get("/mcp", client, mcp.methodNotAllowed);
+  app.delete("/mcp", client, mcp.methodNotAllowed);
 
   // ── model-backed ─────────────────────────────────────────────────────────────────────────────
   app.post("/v1/resumes/generate", client, json, metered("resumes.generate", req => generateResume(anthropic, req.body || {}, { env })));

@@ -7,7 +7,9 @@
 // value type a real response carries against what is declared here.
 import { str, num, bool, arr, obj, ref, nullable, enumOf } from "./schema.js";
 
-export const CONTRACT_VERSION = "1.0.0";
+// 1.1.0 (E1): additive — the /mcp routes, the JSON-RPC envelopes, the MCP tool result shapes and
+// the generated tool table (`x-mcp`). No 1.0.0 shape changed.
+export const CONTRACT_VERSION = "1.1.0";
 
 const usage = arr(ref("UsageRecord"));
 
@@ -54,6 +56,28 @@ export const DECLARED_SCHEMAS = {
       description: "termWeights/synonyms are arrays of [key, value] pairs — JSON has no Map. Any other shape is a 400, never a silent unweighted score." }),
   AtsScoreResponse: obj({ report: ref("AtsReport") }),
 
+  // ── MCP (E1) ────────────────────────────────────────────────────────────────────────────────────
+  // A tool result's structuredContent. It WRAPS the HTTP shape (`report` is the same AtsReport,
+  // `html` the same renderer's output) and never restates it — the tool table below points each
+  // tool at its HTTP endpoint, and the generator derives the tool's inputSchema from that
+  // endpoint's request schema. See src/contract/build.js buildMcpTools.
+  McpAtsScoreResult: obj({
+    outcome: enumOf("scored", "not_enough_signal"),
+    score: nullable(num),
+    meaning: str,
+    report: ref("AtsReport"),
+  }, { description: "`outcome` is the scorer's STATE, and `not_enough_signal` is its own state: the scorer declined " +
+    "for want of signal, `score` is null, and it is NOT a low score. `meaning` says so in words, for a caller that " +
+    "paraphrases. `scored` only when report.scorable is true and report.score is a number." }),
+  McpFormatResult: obj({ html: str, contentType: enumOf("text/html"), howToGetPdf: str },
+    { description: "Print-ready HTML, not a PDF — there is no server-side PDF. The browser prints it." }),
+
+  // JSON-RPC 2.0 as the MCP Streamable HTTP transport answers it (stateless, JSON responses, no SSE).
+  JsonRpcErrorObject: obj({ code: num, message: str, data: {} }, { optional: ["data"] }),
+  JsonRpcResponse: obj({ jsonrpc: enumOf("2.0"), id: { type: ["number", "string", "null"] },
+    result: { type: "object" }, error: ref("JsonRpcErrorObject") }, { optional: ["result", "error"],
+    description: "Exactly one of result / error. A transport-level refusal (bad JSON, missing Accept) carries id null." }),
+
   Error: obj({
     error: enumOf("invalid_request", "invalid_json", "unauthenticated", "not_found", "payload_too_large",
       "resume_claim_violation", "resume_claim_not_inspected", "upstream_model_failure", "model_unconfigured",
@@ -66,6 +90,7 @@ export const DECLARED_SCHEMAS = {
 };
 
 const E = ref("Error");
+const RPC = ref("JsonRpcResponse");
 const authErrors = { 401: E, 503: E };
 const modelErrors = { 400: E, ...authErrors, 413: E, 429: E, 502: E };
 
@@ -83,6 +108,81 @@ export const ENDPOINTS = [
     responses: { 200: ref("EnhanceResponse"), ...modelErrors } },
   { method: "post", path: "/v1/resumes/parse-pdf", auth: true, cost: "metered", request: ref("ParsePdfRequest"),
     responses: { 200: ref("ParsePdfResponse"), ...modelErrors } },
+
+  // MCP (E1). Auth errors are this service's Error shape — they are refused before the MCP layer
+  // runs, by the same middleware as /v1. Everything past auth answers JSON-RPC. 202 is the one
+  // body-less answer in the contract, and the protocol requires it: a POST carrying only
+  // notifications MUST be answered 202 with no body. `null` declares exactly that.
+  { method: "post", path: "/mcp", auth: true, cost: "free", request: { type: ["object", "array"] },
+    responses: { 200: { anyOf: [RPC, arr(RPC)] }, 202: null, 400: RPC, 406: RPC, 413: RPC, 415: RPC, ...authErrors } },
+  { method: "get", path: "/mcp", auth: true, responses: { 405: RPC, ...authErrors } },
+  { method: "delete", path: "/mcp", auth: true, responses: { 405: RPC, ...authErrors } },
+];
+
+// ── The MCP tool table — the ONE place a tool is declared ───────────────────────────────────────
+//
+// ⛔ A TOOL'S SCHEMAS ARE NOT WRITTEN HERE. `endpoint` names the HTTP route whose request schema
+// becomes the tool's inputSchema; `result` names the declared result shape above. The generator
+// resolves both into self-contained JSON Schema and writes them to the contract (`x-mcp`), and the
+// MCP server serves that generated table verbatim. test/mcp.test.js fails if what /mcp serves
+// differs from the contract, or if a tool's inputSchema differs from its endpoint's request schema.
+//
+// Descriptions are what a model chooses tools by, so each says what the tool does, what it refuses
+// and what a refusal MEANS. They are prose: the shape hash ignores them, so rewording is not a version.
+//
+// ⛔ DELIBERATELY ABSENT (see docs/API.md, MCP):
+//   · generation — an LLM calling an API to call an LLM; its value would be the integrity layer, and
+//     it costs money a tool loop can spend repeatedly. Not in the first pass.
+//   · PDF parsing — the only implementation here is a model call (Sonnet reads the PDF). There is
+//     no deterministic extraction path to expose, and the calling assistant already has the file.
+export const MCP_TOOLS = [
+  {
+    name: "score_ats_fit",
+    title: "ATS fit score (deterministic)",
+    endpoint: "POST /v1/ats/score",
+    result: "McpAtsScoreResult",
+    cost: "free",
+    description: [
+      "Scores how well a résumé's text matches one job posting, using Resume Master's deterministic ATS scorer " +
+      "(@draft/ats-scorer — the same code as POST /v1/ats/score). Local and free: NO model call, no network call, " +
+      "nothing stored or logged; the same input always gives the same output.",
+      "Returns `outcome`, `score` (0-100, or null) and the full `report`: required terms matched and missing " +
+      "(tier1_matched / tier1_missing), competencies, action verbs, the years-of-experience comparison, hard-constraint " +
+      "misses (e.g. a clearance), and whether a seniority cap applied.",
+      "⛔ IT DECLINES RATHER THAN GUESSES. When the posting or résumé carries too few scorable terms, `outcome` is " +
+      "\"not_enough_signal\", `score` is null and report.decline_reasons says why. A declined result is NOT a low " +
+      "score and NOT a poor fit — it means fit could not be measured from what was given. Never present it as a " +
+      "score, a percentage, a band or a verdict: say it could not be scored and why, and ask for the full job " +
+      "description or fuller résumé text.",
+      "No band is returned: what counts as a strong score is the calling product's decision — do not invent one.",
+      "Refused (isError, error \"invalid_request\"): a missing `job` or `resumeText`, or termWeights / synonyms not " +
+      "given as arrays of [key, value] pairs — never silently scored unweighted. A refusal means the input was " +
+      "malformed, not that the résumé is weak.",
+      "Scope: a job posting (a company and a role) and the candidate's own résumé. It does not research, look up or " +
+      "profile any individual — companies and roles only.",
+      "Only `job` (title and description at least) and `resumeText` are needed; omit the other fields unless you " +
+      "already hold them.",
+    ].join("\n\n"),
+  },
+  {
+    name: "format_resume_print_html",
+    title: "Print-ready résumé HTML (deterministic)",
+    endpoint: "POST /v1/resumes/format",
+    result: "McpFormatResult",
+    cost: "free",
+    description: [
+      "Renders résumé text or HTML into Resume Master's print-ready résumé HTML (the deterministic renderer behind " +
+      "POST /v1/resumes/format). NO model call, nothing stored or logged; the same input always gives the same output.",
+      "⛔ Returns HTML, NOT a PDF. There is no server-side PDF: open the HTML in a browser and print to PDF.",
+      "It lays out; it does not write. It adds no content, and it neither checks nor improves what the résumé " +
+      "claims — the claim guard (a résumé may not claim more years or seniority than the candidate's profile " +
+      "states) applies to generation, which this server does not offer. Known sections are re-ordered and " +
+      "re-labelled to a standard order (e.g. SKILLS becomes TECHNICAL SKILLS); a heading it does not recognise is " +
+      "not dropped but folded into the preceding section as body text, and lines within an entry may be regrouped. " +
+      "Review the rendered page before it is sent anywhere.",
+      "Refused (isError, error \"invalid_request\"): missing or empty `html`. A refusal means there was nothing to render.",
+    ].join("\n\n"),
+  },
 ];
 
 /** Any path not in the table. */

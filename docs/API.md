@@ -1,6 +1,7 @@
-# Resume Master API — v1
+# Resume Master API — v1 (contract 1.1.0)
 
-Stateless résumé tools: generation, deterministic formatting, PDF text extraction, ATS scoring.
+Stateless résumé tools: generation, deterministic formatting, PDF text extraction, ATS scoring — over
+HTTP, and the deterministic ones also as MCP tools at `/mcp` (see [MCP](#mcp--the-deterministic-tools-as-llm-tools-e1)).
 **No database. Nothing a caller sends is stored.** Every response is JSON, including errors and
 "not found".
 
@@ -23,7 +24,7 @@ Stateless résumé tools: generation, deterministic formatting, PDF text extract
 
 ## Authentication — one service token per client
 
-Every `/v1` route except `/v1/version` requires `Authorization: Bearer rmk_<clientId>.<secret>`.
+Every `/v1` route except `/v1/version`, and `/mcp`, requires `Authorization: Bearer rmk_<clientId>.<secret>`.
 `/health` is open. A missing, malformed, unknown or revoked token is `401 unauthenticated`, and it
 is checked **before** the body is parsed.
 
@@ -46,7 +47,11 @@ input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_token
 content. Failed calls are metered too; they can still have spent. With no database, that log line
 is the ledger, and the caller also receives the per-call usage records in the response.
 
-A limit hook runs on every model route **before any spend**. It allows everything: limits are off by
+Each **MCP tool call** emits one line too, with `via: "mcp"`, `route: "mcp.<tool>"` and `result`
+(`ok` | `invalid_request` | `limit_exceeded` | `internal_error`) — and every count 0, because no MCP tool
+calls a model. MCP is the first caller that can loop, so the line exists per call even when it costs nothing.
+
+A limit hook runs on every model route and every MCP tool call **before any spend or work**. It allows everything: limits are off by
 decision. Enabling them means giving the hook a policy; no call site changes. A refusal will be
 `429 limit_exceeded`.
 
@@ -131,6 +136,8 @@ message that can never be true. A 429 is always retryable.
 | `POST /v1/resumes/generate` | see below → `{ html, domainModuleKey, claimCheck, usage[] }` | yes | metered |
 | `POST /v1/resumes/enhance` | `{ resumeText, profile: { name, roleFamily, domain }, selectedAdditions[] }` → `{ text, usage[] }` | yes | metered |
 | `POST /v1/resumes/parse-pdf` | `{ pdfBase64 }` (≤ 10 MB) → `{ text, chars, usage[] }` | yes | metered |
+| `POST /mcp` | JSON-RPC 2.0 — MCP Streamable HTTP, stateless; tools below | no | free |
+| `GET` / `DELETE /mcp` | `405` — no SSE stream, no session | no | free |
 
 ### `POST /v1/resumes/generate`
 
@@ -177,6 +184,102 @@ bands are each product's presentation decision, calibrated against its own users
 | 503 | `model_unconfigured` | false |
 
 Model-backed errors include `usage` for whatever was spent before the failure.
+
+---
+
+## MCP — the deterministic tools as LLM tools (E1)
+
+**One MCP server, inside this service** — not a second service. The same tools the HTTP API
+exposes, called through the same functions (`src/tools/deterministic.js`), in the Model Context
+Protocol's envelope. Built on the official `@modelcontextprotocol/sdk`.
+
+```
+POST https://resumemaster.one/mcp
+Authorization: Bearer rmk_<clientId>.<secret>
+Accept: application/json, text/event-stream
+Content-Type: application/json
+```
+
+- **Transport:** Streamable HTTP, **stateless** — no `Mcp-Session-Id` is issued, a fresh server
+  answers each request, and a `tools/call` needs no prior `initialize`. Responses are plain JSON, never
+  an SSE stream. `GET` and `DELETE /mcp` answer `405`: there is no stream to open and no session to end.
+  A POST carrying only notifications is answered `202` with no body — the protocol requires it, and it
+  is the one body-less answer the contract declares.
+- **Auth:** the same client token as `/v1`, checked by the same middleware **before the body is read**
+  — `401 unauthenticated`, or `503 auth_unconfigured` with no clients configured. Those two are this
+  service's `Error` shape; everything past auth answers JSON-RPC (`400` bad JSON, `406` missing
+  Accept, `413` oversize, `415` not JSON).
+- **Schemas are generated, not written.** `src/contract/endpoints.js` `MCP_TOOLS` names each tool's
+  HTTP endpoint and result shape; `npm run contract` resolves the endpoint's **request schema** into
+  the tool's `inputSchema` and the result shape into its `outputSchema`, and writes the table to
+  `contract/resume-master-api.v1.json` under `x-mcp`. The server serves that generated table verbatim.
+
+### Tools
+
+| tool | HTTP twin | model call | result (`structuredContent`) |
+|---|---|---|---|
+| `score_ats_fit` | `POST /v1/ats/score` | **none** | `McpAtsScoreResult` — `{ outcome, score, meaning, report }` |
+| `format_resume_print_html` | `POST /v1/resumes/format` | **none** | `McpFormatResult` — `{ html, contentType: "text/html", howToGetPdf }` |
+
+⛔ **`outcome: "not_enough_signal"` is its own state.** When the scorer declines for want of signal,
+`score` is `null`, `report.decline_reasons` says why, `meaning` says in words that this is **not a low
+score**, and the text content *leads* with that sentence. An MCP client may present a tool's output as
+its own conclusion; "score: null" paraphrased is "your fit is low", which turns a refusal into a
+fabrication in a layer this service cannot see. The state is therefore in the shape, in the text, and
+in the tool's description. `outcome` is `"scored"` **only** when `report.scorable` is true and
+`report.score` is a number; anything else is `not_enough_signal`.
+
+`format_resume_print_html` returns **HTML, not a PDF** — there is no server-side PDF; the browser
+prints it. It lays out and does not write: known sections are re-ordered and re-labelled to the
+standard order, and a heading it does not recognise is **folded into the preceding section** as body
+text (measured: no words dropped on the inputs tried, but order and grouping change). Review the page.
+
+A refusal is a tool error (`isError: true`) carrying `{ error, message, retryable }` and a sentence
+saying it is not a result: `invalid_request` (malformed input — never "the résumé is weak"),
+`limit_exceeded` (limits are off), `internal_error`. An unknown tool name is a JSON-RPC `-32602`.
+
+### Not exposed, deliberately
+
+| | why |
+|---|---|
+| **Generation** (`/v1/resumes/generate`, `/enhance`) | Deferred by design (E1). An LLM calling an API to call an LLM: the caller can already write prose; what it lacks is the constraints, so the tool's value would be the claim guard, not the writing. It also costs ~$0.04 a call and a tool loop can repeat it. It needs metering limits and a description built around the integrity layer before it ships. |
+| **PDF parsing** (`/v1/resumes/parse-pdf`) | **There is no deterministic path.** The only implementation is a model call — Sonnet reads the PDF. Exposing it would put a metered model call behind a "deterministic tools" server, and the calling assistant already has the file. A local extractor (e.g. pdf.js) would be a new capability, not this one. |
+
+### ⛔ ENFORCED vs INSTRUCTED — over MCP
+
+**Enforced** — mechanically, and each guard was seen to fail by injecting the violation it names
+(`test/mcp.test.js`, plus the `/mcp` scenarios in `test/contractEnvelope.test.js`):
+
+- **Zero model calls.** At runtime (a live, counting model client is handed to the app; three tool
+  calls leave it at 0) and statically (nothing in the MCP server's import graph imports `src/model`,
+  `src/generation` or `src/parsing`, or mentions `messages.create` / `callAnthropic`). This extends the
+  scorer package's own source check to the path in front of it.
+- **The declined state survives:** `not_enough_signal`, `score: null`, reasons present, text leads
+  with the meaning; the report is identical (deep-equal) to the HTTP route's for the same input.
+- **Auth before the body**, `401` for no/wrong token, `503` fail-closed with no clients.
+- **Stateless:** no session id issued; a cold `tools/call` is answered.
+- **No content logged:** sentinel PII down every tool path and the transport's refusal paths reaches
+  no log line and no console output; the MCP error handlers log an error's name, never its message.
+- **One metering line per tool call**, keyed by client and tool; the limit hook runs before each call.
+- **No drift:** `tools/list` equals the contract's `x-mcp` table; each `inputSchema` equals its HTTP
+  endpoint's request schema; the ATS result's `report` equals the HTTP `AtsReport`; the server source
+  contains no schema literal; the official client validates every result against its `outputSchema`.
+
+**Instructed** — in the tool descriptions and server instructions, which a calling model reads and
+**may not follow**. This service cannot see or check what the caller does with a result:
+
+- that a `not_enough_signal` result is reported as "could not be scored", never as a poor fit;
+- that no band is invented for a score (none is returned — bands are each product's decision);
+- that a formatted page is reviewed before it is sent;
+- **companies and roles only.** The tools do no lookup of their own (no network call — enforced), so
+  they cannot research anyone; but nothing stops a caller passing text about a person as `resumeText`.
+  That the input is a posting and the candidate's own résumé is stated, not checkable.
+
+The generation promises (the claim guard, flag-don't-fabricate) do **not** apply to these tools and are
+not claimed for them: neither tool writes content. The format tool's description says so, so that a
+caller does not read "Resume Master formatted it" as "Resume Master checked it".
+
+`npm run verify:live` runs the free `/mcp` scenarios against a deployment too.
 
 ---
 
