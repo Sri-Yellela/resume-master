@@ -1,7 +1,7 @@
 // Renders the contract — OpenAPI 3.1 JSON and TypeScript declarations — from the derived and
 // declared halves. Deterministic: same source, same bytes, so --check can compare.
 import crypto from "node:crypto";
-import { DECLARED_SCHEMAS, ENDPOINTS, NOT_FOUND, CONTRACT_VERSION } from "./endpoints.js";
+import { DECLARED_SCHEMAS, ENDPOINTS, NOT_FOUND, CONTRACT_VERSION, MCP_TOOLS } from "./endpoints.js";
 import { deriveSchemas, unknownItemPaths } from "./derived.js";
 
 export const normaliseForHash = (text) => String(text).replace(/\r\n/g, "\n");
@@ -25,8 +25,11 @@ export async function buildOpenApi() {
       summary: `${e.cost === "metered" ? "[metered] " : e.cost === "free" ? "[free] " : ""}${e.method.toUpperCase()} ${e.path}`,
       ...(e.auth ? { security: [{ clientToken: [] }] } : { security: [] }),
       ...(e.request ? { requestBody: { required: true, content: { "application/json": { schema: e.request } } } } : {}),
+      // A null schema is a declared body-less answer (MCP's 202) — no content, and the harness
+      // checks that the real answer has none.
       responses: Object.fromEntries(Object.entries(e.responses).map(([status, schema]) =>
-        [status, { description: String(status), content: { "application/json": { schema } } }])),
+        [status, schema === null ? { description: `${status} — no body` }
+          : { description: String(status), content: { "application/json": { schema } } }])),
     };
     (paths[e.path] ??= {})[e.method] = op;
   }
@@ -47,7 +50,50 @@ export async function buildOpenApi() {
       schemas,
     },
     paths,
+    "x-mcp": {
+      description: "MCP (Model Context Protocol) server at POST /mcp — Streamable HTTP, stateless (no session), JSON " +
+        "responses. Same client token as /v1. Tools are GENERATED here from the HTTP contract and served verbatim.",
+      path: "/mcp",
+      tools: buildMcpTools(schemas),
+    },
   };
+}
+
+// ── MCP tools: GENERATED from the HTTP contract ─────────────────────────────────────────────────
+//
+// An MCP tool schema must be self-contained JSON Schema — no #/components to point into — so every
+// $ref is resolved in place. inputSchema IS the tool's HTTP endpoint's request schema, resolved;
+// outputSchema IS its declared result shape, resolved. Nothing about a tool's shape is written twice.
+export function inlineRefs(schema, components, seen = []) {
+  if (Array.isArray(schema)) return schema.map(s => inlineRefs(s, components, seen));
+  if (!schema || typeof schema !== "object") return schema;
+  if (schema.$ref) {
+    const name = schema.$ref.split("/").pop();
+    if (!components[name]) throw new Error(`$ref to undeclared schema ${name}`);
+    if (seen.includes(name)) throw new Error(`recursive schema ${[...seen, name].join(" -> ")} cannot be inlined`);
+    return inlineRefs(components[name], components, [...seen, name]);
+  }
+  return Object.fromEntries(Object.entries(schema).map(([k, v]) => [k, inlineRefs(v, components, seen)]));
+}
+
+export function buildMcpTools(components) {
+  return MCP_TOOLS.map(t => {
+    const endpoint = ENDPOINTS.find(e => `${e.method.toUpperCase()} ${e.path}` === t.endpoint);
+    if (!endpoint?.request) throw new Error(`MCP tool ${t.name}: endpoint ${t.endpoint} has no request schema`);
+    if (endpoint.cost !== "free") throw new Error(`MCP tool ${t.name}: ${t.endpoint} is ${endpoint.cost} — only free, deterministic tools ship in E1`);
+    if (!components[t.result]) throw new Error(`MCP tool ${t.name}: result schema ${t.result} is not declared`);
+    const inputSchema = inlineRefs(endpoint.request, components);
+    const outputSchema = inlineRefs(components[t.result], components);
+    for (const [k, s] of [["inputSchema", inputSchema], ["outputSchema", outputSchema]]) {
+      if (s.type !== "object") throw new Error(`MCP tool ${t.name}: ${k} must be an object schema`);
+    }
+    return {
+      name: t.name, title: t.title, description: t.description,
+      inputSchema, outputSchema,
+      annotations: { title: t.title, readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      "x-endpoint": t.endpoint, "x-result": t.result, "x-cost": t.cost,
+    };
+  });
 }
 
 export const renderJson = (doc) => JSON.stringify(doc, null, 2) + "\n";

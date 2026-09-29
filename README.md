@@ -24,6 +24,8 @@ npm start         # PORT (default 3100); ANTHROPIC_API_KEY optional
 | `src/parsing/` | PDF → text |
 | `src/model/anthropicCall.js` | the one model path: returns usage records, logs no content, knows what is retryable |
 | `src/http/app.js` | routes; every answer is JSON, including 404 |
+| `src/tools/deterministic.js` | ATS scoring and formatting — the one implementation both `/v1` and `/mcp` call |
+| `src/mcp/server.js` | the MCP server (E1): stateless Streamable HTTP at `/mcp`, serving the tool table generated into `contract/` |
 | `src/http/auth.js`, `metering.js` | per-client service tokens (hash-only storage) and per-client accounting, limits off |
 | `scripts/mintClientToken.mjs` | mint a client token |
 | `prompts/` | the three prompt layers |

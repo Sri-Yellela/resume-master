@@ -16,7 +16,7 @@
  *
  * The token is read from the environment and never printed.
  */
-import { SCENARIOS, checkResponse, requestFor } from "../src/contract/harness.js";
+import { SCENARIOS, checkResponse, requestFor, headersFor } from "../src/contract/harness.js";
 import { buildOpenApi } from "../src/contract/build.js";
 
 const args = process.argv.slice(2);
@@ -31,10 +31,7 @@ const run = SCENARIOS.filter(s => s.live && (metered || !s.metered));
 let failed = 0;
 for (const s of run) {
   const { method, path, body } = requestFor(s);
-  const auth = s.auth ?? "valid";
-  const headers = { "content-type": "application/json",
-    ...(auth === "valid" ? { authorization: `Bearer ${token}` } : {}),
-    ...(auth === "wrong" ? { authorization: `Bearer rmk_draft.${"A".repeat(43)}` } : {}) };
+  const headers = headersFor(s, token);
   let response;
   try {
     const res = await fetch(base + path, { method, headers, body });

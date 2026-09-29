@@ -23,9 +23,9 @@ import { FORMATTING_SYSTEM } from "../formatting/formattingSystem.js";
 import { assertResumeClaims } from "../integrity/resumeClaimGuard.js";
 import { callAnthropic, textOf, MODEL_SONNET, MODEL_HAIKU } from "../model/anthropicCall.js";
 
-export class InvalidRequestError extends Error {
-  constructor(message) { super(message); this.name = "InvalidRequestError"; this.code = "invalid_request"; }
-}
+import { InvalidRequestError } from "../errors.js";
+// Re-exported: the class moved to src/errors.js (see there); existing importers keep working.
+export { InvalidRequestError };
 
 function requireString(v, name) {
   if (typeof v !== "string" || !v.trim()) throw new InvalidRequestError(`${name} is required`);

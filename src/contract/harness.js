@@ -61,6 +61,9 @@ const GENERATE = {
 const ATS_JOB = { title: "Backend Engineer", company: "Acme", description: "Python, Kubernetes, Kafka, Terraform and AWS.",
   skills_json: JSON.stringify(["Python", "Kubernetes", "Kafka", "Terraform", "AWS"].map(skill => ({ skill, type: "hard" }))) };
 const OVERSIZE = "x".repeat(16 * 1024 * 1024);
+// The Streamable HTTP transport refuses (406) a POST whose Accept does not name both.
+const MCP_ACCEPT = { accept: "application/json, text/event-stream" };
+const rpc = (method, params, id = 1) => ({ jsonrpc: "2.0", id, method, ...(params === undefined ? {} : { params }) });
 
 const permanent = () => Object.assign(new Error("400 Your credit balance is too low to access the Anthropic API."), { status: 400 });
 const transient = () => Object.assign(new Error("overloaded_error"), { status: 529 });
@@ -74,6 +77,7 @@ const rejectedDocument = () => Object.assign(new Error('400 {"type":"error","err
  *   status   the status the scenario must produce
  *   body | raw   the request body (raw = a literal string, for malformed JSON / oversize)
  *   auth     "valid" (default on authed routes) | "none" | "wrong"
+ *   headers  extra request headers (MCP needs Accept: application/json, text/event-stream)
  *   model    in-process only: text the fake model returns, or an Error to throw, or "none" = no client
  *   service  in-process only: "no-clients" | "refuse-limits"
  *   expect   extra assertions on the parsed body
@@ -156,6 +160,36 @@ export const SCENARIOS = [
     body: { pdfBase64: INVALID_PDF_BASE64 }, model: rejectedDocument, status: 502,
     expect: b => (b.permanent === true && b.retryable === false) || "an invalid document must never be reported retryable" },
   { name: "parse-pdf: no model key", route: "POST /v1/resumes/parse-pdf", body: { pdfBase64: TINY_PDF_BASE64 }, model: "none", status: 503 },
+
+  // /mcp — free. The transport answers JSON-RPC; auth refusals are this service's Error shape.
+  { name: "mcp: initialize names the server", route: "POST /mcp", headers: MCP_ACCEPT, status: 200, live: true,
+    body: rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "harness", version: "1" } }),
+    expect: b => (b.result?.serverInfo?.name === "resume-master" && !!b.result?.capabilities?.tools) || "initialize did not name resume-master with tools" },
+  { name: "mcp: tools/list serves the generated table", route: "POST /mcp", headers: MCP_ACCEPT, status: 200, live: true,
+    body: rpc("tools/list"),
+    expect: b => (b.result?.tools?.map(t => t.name).sort().join() === "format_resume_print_html,score_ats_fit") || "unexpected tool list" },
+  { name: "mcp: score_ats_fit declined is its own state", route: "POST /mcp", headers: MCP_ACCEPT, status: 200, live: true,
+    body: rpc("tools/call", { name: "score_ats_fit", arguments: { job: { title: "Role", description: "Join us." }, resumeText: "Python" } }),
+    expect: b => (b.result?.structuredContent?.outcome === "not_enough_signal" && b.result.structuredContent.score === null) || "declined did not survive as not_enough_signal" },
+  { name: "mcp: a batch answers an array", route: "POST /mcp", headers: MCP_ACCEPT, status: 200,
+    body: [rpc("tools/list", undefined, 1), rpc("ping", undefined, 2)],
+    expect: b => (Array.isArray(b) && b.length === 2) || "a batch must answer an array" },
+  { name: "mcp: a notification is 202 with no body", route: "POST /mcp", headers: MCP_ACCEPT, status: 202, live: true,
+    body: { jsonrpc: "2.0", method: "notifications/initialized" } },
+  { name: "mcp: malformed JSON", route: "POST /mcp", headers: MCP_ACCEPT, raw: "{\"jsonrpc\":", status: 400, live: true },
+  { name: "mcp: without Accept for both JSON and SSE", route: "POST /mcp", headers: { accept: "application/json" }, body: rpc("tools/list"), status: 406, live: true },
+  { name: "mcp: not JSON", route: "POST /mcp", headers: { ...MCP_ACCEPT, "content-type": "text/plain" }, raw: "hello", status: 415, live: true },
+  { name: "mcp: oversize", route: "POST /mcp", headers: MCP_ACCEPT, raw: JSON.stringify({ html: OVERSIZE }), status: 413 },
+  { name: "mcp: no token", route: "POST /mcp", auth: "none", headers: MCP_ACCEPT, body: rpc("tools/list"), status: 401, live: true },
+  { name: "mcp: wrong token", route: "POST /mcp", auth: "wrong", headers: MCP_ACCEPT, body: rpc("tools/list"), status: 401, live: true },
+  { name: "mcp: no clients configured fails closed", route: "POST /mcp", service: "no-clients", headers: MCP_ACCEPT, body: rpc("tools/list"), status: 503,
+    expect: b => (b.error === "auth_unconfigured" && b.retryable === false) || "expected auth_unconfigured, retryable false" },
+  { name: "mcp: GET — no SSE stream in a stateless server", route: "GET /mcp", headers: MCP_ACCEPT, status: 405, live: true },
+  { name: "mcp: GET no token", route: "GET /mcp", auth: "none", status: 401, live: true },
+  { name: "mcp: GET no clients", route: "GET /mcp", service: "no-clients", status: 503 },
+  { name: "mcp: DELETE — no session to end", route: "DELETE /mcp", status: 405, live: true },
+  { name: "mcp: DELETE no token", route: "DELETE /mcp", auth: "none", status: 401, live: true },
+  { name: "mcp: DELETE no clients", route: "DELETE /mcp", service: "no-clients", status: 503 },
 ];
 
 const endpointFor = (route) => ENDPOINTS.find(e => `${e.method.toUpperCase()} ${e.path}` === route);
@@ -165,6 +199,13 @@ const endpointFor = (route) => ENDPOINTS.find(e => `${e.method.toUpperCase()} ${
  */
 export function checkResponse(scenario, response, components) {
   const problems = [];
+  const declaredHere = scenario.route ? endpointFor(scenario.route)?.responses : NOT_FOUND;
+  // A status declared `null` is a declared BODY-LESS answer (MCP's 202) — it must carry nothing.
+  if (declaredHere && declaredHere[response.status] === null) {
+    if (response.status !== scenario.status) problems.push(`status ${response.status}, scenario expects ${scenario.status}`);
+    if (response.body !== "" && response.body != null) problems.push(`status ${response.status} is declared body-less, and carried a body`);
+    return problems;
+  }
   if (!/^application\/json\b/.test(response.contentType || "")) {
     return [`answered ${response.status} with ${response.contentType || "no content-type"} — not JSON`];
   }
@@ -191,6 +232,15 @@ export function uncovered(scenarios) {
   }
   for (const status of Object.keys(NOT_FOUND)) if (!hit.has(`UNKNOWN ${status}`)) missing.push(`UNKNOWN ${status}`);
   return missing;
+}
+
+/** The request headers for a scenario — one function, so npm test and the live verifier send the same. */
+export function headersFor(scenario, token) {
+  const auth = scenario.auth ?? "valid";
+  return { "content-type": "application/json",
+    ...(auth === "valid" ? { authorization: `Bearer ${token}` } : {}),
+    ...(auth === "wrong" ? { authorization: `Bearer rmk_draft.${"A".repeat(43)}` } : {}),
+    ...(scenario.headers || {}) };
 }
 
 export function requestFor(scenario) {
