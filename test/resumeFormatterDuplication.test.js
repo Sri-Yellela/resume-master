@@ -179,3 +179,82 @@ test("AG4: prose that is not an echo is kept as prose", () => {
   assert.match(html, /Delivered a migration plan adopted by three teams/);
   assert.deepEqual(duplicatedLinesPerEntry(html), []);
 });
+
+// ── G3 — the shape the MODEL writes, not the shape the renderer writes ─────────────────────────
+//
+// WHY EVERY TEST ABOVE STAYED GREEN WHILE THIS SHIPPED
+// Two reasons, and both are in this file rather than in the code under test:
+//  1. Every fixture above is written in renderEntry's OWN vocabulary — entry-date as a div,
+//     entry-role as a sibling of the header, entry-meta inside it. The prompt names the classes and
+//     never the structure, and the model does not write that structure. The fixtures exercised a
+//     parser reading its own output.
+//  2. duplicatedLinesPerEntry only counts lines that are IDENTICAL. "Stripe | Software Development
+//     Engineer" and "Software Development Engineer" are different lines, so a role printed in the
+//     header and again beneath it reads as clean. And nothing asserted that content was KEPT, so a
+//     date dropped outright was invisible to a duplication check by construction.
+// So these assert the behaviour itself — every field of the source shows exactly ONCE — against
+// entries copied from real generations captured 09-30 through the live prompt.
+
+/** The visible text of the first entry, as one string. */
+function entryText(html) {
+  const entry = String(html).split('<div class="entry">')[1] || "";
+  return entry.split('<div class="section-title">')[0].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+}
+
+function occurrences(haystack, needle) {
+  return haystack.split(needle).length - 1;
+}
+
+/** Each field of the source entry renders exactly once — neither lost nor repeated. */
+function assertEachFieldOnce(html, fields) {
+  const text = entryText(html);
+  for (const field of fields) {
+    assert.equal(occurrences(text, field), 1, `"${field}" should render once; rendered ${occurrences(text, field)} times in: ${text.slice(0, 200)}`);
+  }
+}
+
+test("G3: a role nested INSIDE entry-org is read as the role, not printed in the header too", () => {
+  // Captured verbatim (bullets trimmed) from a real generation on the owner's résumé, 09-30.
+  const html = normalizeResumeHtml(wrapEntry(`
+<div class="entry-header">
+<span class="entry-org">Stripe <span class="sep">|</span> <span class="entry-role">Software Development Engineer</span></span>
+<span class="entry-date">Aug 2022 - Dec 2023</span>
+</div>
+<div class="entry-meta">Payments Infrastructure, Bangalore</div>
+<ul class="bullets">
+<li>Built scalable <b>microservices</b> for real-time payment processing handling <b>1M+ daily transactions</b></li>
+</ul>`));
+  assertEachFieldOnce(html, ["Stripe", "Software Development Engineer", "Aug 2022 - Dec 2023", "Payments Infrastructure, Bangalore"]);
+  assert.match(html, /<span class="entry-org">Stripe<\/span>/, "the org is the org alone");
+  assert.equal(normalizeResumeHtml(html), html, "and the result is a fixed point");
+});
+
+test("G3: a date written as a <span class=entry-date> is kept — it was dropped from every entry", () => {
+  // Captured from a real generation on a synthetic résumé, 09-30. Every date in BOTH captured
+  // documents was lost (10 of 10, 3 of 3) because the date was only ever looked for in a div.
+  const html = normalizeResumeHtml(wrapEntry(`
+<div class="entry-header">
+<span class="entry-org">Stripe</span>
+<span class="entry-date">2021 - 2025</span>
+</div>
+<div class="entry-meta">Austin, TX</div>
+<div class="entry-role">Software Engineer</div>
+<ul class="bullets"><li>Built payment services in Go handling 2k requests/second</li></ul>`));
+  assertEachFieldOnce(html, ["Stripe", "Software Engineer", "2021 - 2025", "Austin, TX"]);
+  assert.match(html, /<div class="entry-date">2021 - 2025<\/div>/);
+});
+
+test("G3: a field outside the header is read once, and a SECOND one of the same class is kept", () => {
+  // The date as a sibling AFTER the header must be read as the date, not left as body copy. And a
+  // second entry-meta, which no field holds, must survive: removing every element of a field's class
+  // would trade a duplication for a loss.
+  const html = normalizeResumeHtml(wrapEntry(`
+<div class="entry-header"><span class="entry-org">Amazon <span class="entry-meta">Supply Chain</span></span></div>
+<span class="entry-date">Jan 2021 - Jul 2022</span>
+<div class="entry-meta">Supply Chain &amp; Internal Developer Tools, Hyderabad</div>
+<div class="entry-role">Software Development Engineer</div>
+<ul class="bullets"><li>Built and operated cloud-native microservices on AWS.</li></ul>`));
+  assertEachFieldOnce(html, ["Amazon", "Jan 2021 - Jul 2022", "Software Development Engineer", "Internal Developer Tools, Hyderabad"]);
+  assert.match(html, /<span class="entry-org">Amazon<\/span>/, "a meta nested in the org is not part of the org");
+  assert.match(html, /<div class="entry-date">Jan 2021 - Jul 2022<\/div>/, "the date is the date, not body copy");
+});

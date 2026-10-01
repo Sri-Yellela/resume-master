@@ -299,7 +299,7 @@ function extractClassBlock(html, className) {
  * with everything inside it, however deeply that nests.
  *
  * @param {string} html
- * @param {(tagName: string, classes: string[]) => boolean} shouldRemove
+ * @param {(tagName: string, classes: string[], innerHtml: string) => boolean} shouldRemove
  */
 function removeElements(html, shouldRemove) {
   let source = String(html || "");
@@ -315,20 +315,20 @@ function removeElements(html, shouldRemove) {
       const classes = String(attrs.match(/class=(["'])(.*?)\1/i)?.[2] || "")
         .split(/\s+/)
         .filter(Boolean);
-      if (!shouldRemove(tagName, classes)) continue;
-
       const start = match.index;
       const tagPattern = new RegExp(`</?${tagName}\\b[^>]*>`, "gi");
       tagPattern.lastIndex = openPattern.lastIndex;
       let depth = 1;
       let end = -1;
+      let innerEnd = source.length;
       let token;
       while ((token = tagPattern.exec(source))) {
         const text = token[0];
         if (/\/>$/.test(text)) continue;
         depth += text.startsWith("</") ? -1 : 1;
-        if (depth === 0) { end = tagPattern.lastIndex; break; }
+        if (depth === 0) { end = tagPattern.lastIndex; innerEnd = token.index; break; }
       }
+      if (!shouldRemove(tagName, classes, source.slice(openPattern.lastIndex, innerEnd))) continue;
       // An unclosed tag owns the rest of the block, which is what a browser would render too.
       source = `${source.slice(0, start)} ${source.slice(end === -1 ? source.length : end)}`;
       removedOne = true;
@@ -343,6 +343,50 @@ function removeElements(html, shouldRemove) {
 function isAlreadyReadBlock(tagName, classes) {
   if (tagName === "ul" || tagName === "ol" || tagName === "li") return true;
   return classes.includes("entry-header") || classes.includes("entry-role") || classes.includes("tech-line");
+}
+
+/**
+ * The classes that each name ONE field of an entry (G3).
+ *
+ * WHY THE FIELDS ARE READ WITH THEIR NESTED SIBLINGS REMOVED
+ * The model does not write the shape renderEntry writes. Captured from a real generation on 09-30,
+ * against the owner's own résumé, through the live prompt:
+ *
+ *   <span class="entry-org">Stripe <span class="sep">|</span> <span class="entry-role">Software
+ *     Development Engineer</span></span>
+ *   <span class="entry-date">Aug 2022 - Dec 2023</span>
+ *   …
+ *   <div class="entry-meta">Payments Infrastructure, Bangalore</div>
+ *
+ * The role is INSIDE the org. Reading entry-org as text gave "Stripe | Software Development
+ * Engineer", entry-role was read as well, and the role rendered twice — in the header, then again in
+ * italics beneath it. The date is a SPAN, and the date reader only looked for a div, so every date
+ * in the document was dropped. A field is the text of its element minus any other field nested
+ * inside it, and an element is found by its class whatever its tag.
+ */
+const ENTRY_FIELD_CLASSES = new Set(["entry-org", "entry-meta", "entry-date", "entry-role"]);
+
+/**
+ * True when an element IS a field already read — the same class and the same text (G3).
+ *
+ * A field written outside the header (the model's `<div class="entry-meta">` after it) must leave the
+ * leftover text, or it renders a second time as body copy. But only the element that WAS read: a
+ * second, different entry-meta was never read into anything, and removing it would trade a
+ * duplication for a loss. It stays in the leftover, where classifyLeftover keeps it as prose.
+ */
+function isReadField(classes, innerHtml, fields) {
+  return classes.some(c => ENTRY_FIELD_CLASSES.has(c) && fields[c]
+    && readEntryField(`<div class="${c}">${innerHtml}</div>`, c) === fields[c]);
+}
+
+function readEntryField(entryHtml, className) {
+  const inner = removeElements(
+    extractClassBlock(entryHtml, className),
+    (_tag, classes) => classes.includes("sep") || classes.some(c => c !== className && ENTRY_FIELD_CLASSES.has(c)),
+  );
+  // A separator typed as text rather than as a sep span is styling just the same, and once a nested
+  // field is taken out it is left dangling at the end ("Stripe |").
+  return stripTagsToText(inner).replace(/^[\s|]+|[\s|]+$/g, "") || "";
 }
 
 function extractElementsByClass(html, tagName, className) {
@@ -374,14 +418,6 @@ function extractElementsByClass(html, tagName, className) {
     }
   }
   return matches;
-}
-
-function extractLeafClassText(html, tagName, className) {
-  const pattern = new RegExp(
-    `<${tagName}[^>]*${classAttrPattern(className)}[^>]*>([\\s\\S]*?)<\\/${tagName}>`,
-    "i"
-  );
-  return stripTagsToText((String(html || "").match(pattern) || [])[1] || "");
 }
 
 function normalizeSectionName(raw) {
@@ -476,15 +512,15 @@ function parseSkillsRows(contentHtml) {
 }
 
 function parseEntryBlockFromHtml(entryHtml) {
-  const org = stripTagsToText(extractClassBlock(entryHtml, "entry-org")) || "";
   // The separator span is STYLING, not content. renderEntry writes the "|" itself, so reading it
   // back as part of the meta made every re-format add another one — "| | Technical Assistant".
-  const meta = stripTagsToText(
-    removeElements(extractClassBlock(entryHtml, "entry-meta"), (_tag, classes) => classes.includes("sep")),
-  ).replace(/^[\s|]+/, "") || "";
-  const date = extractLeafClassText(entryHtml, "div", "entry-date") || "";
-  const role = stripTagsToText(extractClassBlock(entryHtml, "entry-role")) || "";
+  // Each field is read without the fields nested inside it — see readEntryField (G3).
+  const org = readEntryField(entryHtml, "entry-org");
+  const meta = readEntryField(entryHtml, "entry-meta");
+  const date = readEntryField(entryHtml, "entry-date");
+  const role = readEntryField(entryHtml, "entry-role");
   const tech = stripTagsToText(extractClassBlock(entryHtml, "tech-line")) || "";
+  const fields = { "entry-org": org, "entry-meta": meta, "entry-date": date, "entry-role": role };
   const bullets = [...String(entryHtml || "").matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi)]
     .map(match => stripTagsToText(match[1]))
     .filter(Boolean);
@@ -493,7 +529,9 @@ function parseEntryBlockFromHtml(entryHtml) {
   // class="bullets": the <li> scan above reads bullets out of ANY list, so any list left behind
   // here would be a second copy of them.
   const leftover = collapseWhitespace(
-    stripTagsToText(removeElements(entryHtml, isAlreadyReadBlock)),
+    stripTagsToText(removeElements(entryHtml, (tag, classes, inner) => (
+      isAlreadyReadBlock(tag, classes) || isReadField(classes, inner, fields)
+    ))),
   );
   const draft = { company: org, meta, date, role, tech, bullets, text: "" };
   const { paragraphs, extraBullets } = classifyLeftover(leftover, draft);
