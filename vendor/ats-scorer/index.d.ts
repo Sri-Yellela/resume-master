@@ -85,6 +85,8 @@ export interface ScoreArgs extends BuildBasisArgs {
 }
 
 export const LOCAL_ATS_SOURCE: string;
+/** What a cached report must match to be served — changes when the buckets do, not only the score. */
+export const ATS_REPORT_CACHE_KEY: string;
 export const SKILL_POINTS: number;
 export const VERB_POINTS: number;
 export const EXPERIENCE_POINTS: number;
