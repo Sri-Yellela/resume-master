@@ -52,6 +52,21 @@ import { actionVerbVocabularyTerms, companyStackTerms, skillVocabularyTerms } fr
 export const LOCAL_ATS_SOURCE = "local_ats_v4";
 
 /**
+ * What a CACHED report must have been built under to be served again (G6).
+ *
+ * Two different things change, and they were one constant. LOCAL_ATS_SOURCE is what the NUMBER
+ * means — scores are compared across it (applicationResponseOutcome groups by it), so it moves only
+ * when a score would. The REPORT also has buckets — which terms are a gap, which are generic
+ * language — and those can change while every score stays put. G6 did exactly that: Defined and
+ * Created moved from Verbs Missing to Generic Language, and the graded rho is unchanged. Bumping the
+ * source for it would split one scorer into two in the outcome analysis; not bumping anything would
+ * leave every cached report showing the old gaps, which is how AG1's fix once "worked" and did not.
+ *
+ * ⛔ Bump the suffix whenever what a report SAYS changes without what it SCORES changing.
+ */
+export const ATS_REPORT_CACHE_KEY = `${LOCAL_ATS_SOURCE}/buckets-2`;
+
+/**
  * The 100 points, and why they moved in AK1.
  *
  * Measured on the live board under the v3 split (skill 50 / verb 15 / experience 25 / hard 10):
@@ -133,6 +148,19 @@ const ACTION_VERB_HINTS = [
 const GENERIC_ACTION_VERB_WORDS = [
   "coordinate", "deliver", "drive", "execute", "grow", "manage", "oversee", "own",
   "partner", "report", "secure", "track",
+  // G6 (09-30). The same criterion, applied to what the panel was still calling a gap. Measured on
+  // the owner's real résumé against all 2,079 scorable local postings, these were reported MISSING
+  // on: Created 55% · Improved 39% · Planned 37% · Defined 33% · Increased 28% · Influenced 20% ·
+  // Surfaced 14% · Structured 14% · Prioritised 11% · Iterated 11% · Facilitated 8%. Each names an
+  // outcome or a stance anyone can assert ("Improved", "Defined"), not an act a reader can check —
+  // and several are not even the posting asking: "increase" is Stripe's mission statement ("increase
+  // the GDP of the internet"), "surface" is mostly the noun ("API surfaces"), "plan" the noun
+  // ("account plans"). Precision over recall: an empty gap list beats one implying a deficiency that
+  // is not real. Kept as gaps on purpose: Led, Scaled, Shipped, Deployed, Launched, Architected,
+  // Prototyped, Researched, Recruited, Administered — each is a checkable thing a résumé either
+  // shows or does not, and for some roles it is THE thing.
+  "create", "define", "facilitate", "improve", "increase", "influence", "iterate", "plan",
+  "prioritize", "structure", "surface",
 ];
 // STEMMED through the same function the index is keyed by, never spelled as raw infinitives.
 // Written out by hand, the first version of this set matched only "deliver": the stemmer turns
@@ -743,6 +771,40 @@ function hasTerm(index, term, synonyms = null) {
   return equivalents.some(alt => hasTermDirect(index, alt));
 }
 
+/**
+ * A competency the résumé SHOWS as a verb (G6).
+ *
+ * "Collaborated with cross-functional teams" is in the owner's résumé, and the panel listed
+ * "collaboration" — and "cross-functional collaboration" — as MISSING competencies. The matcher is
+ * lexical and "collaborated" is not "collaboration", so the report told a candidate who had written
+ * the quality down that they lacked it. That is the confidently-wrong direction, the costly one.
+ *
+ * The noun is swapped for its verb forms and the phrase re-checked with the same adjacency window
+ * as any other term, so "cross-functional collaboration" is satisfied by "collaborated with
+ * cross-functional teams" and not by the two words a page apart. The map is short and explicit on
+ * purpose: a general noun-to-verb stemmer would credit "strategy" to "strategic" and "culture" to
+ * "cultured". Each entry is a quality whose verb is unambiguous evidence of it.
+ */
+const COMPETENCY_VERB_FORMS = new Map([
+  ["collaboration", ["collaborated", "collaborate", "collaborating", "collaboratively"]],
+  ["communication", ["communicated", "communicating"]],
+  ["leadership", ["led", "leading"]],
+  ["mentoring", ["mentored"]],
+  ["mentorship", ["mentored", "mentoring"]],
+  ["coaching", ["coached"]],
+  ["partnership", ["partnered"]],
+]);
+
+function hasCompetencyAsVerb(index, term) {
+  const words = normaliseAtsTerm(term).split(" ").filter(Boolean);
+  return words.some((word, i) => (COMPETENCY_VERB_FORMS.get(word) || []).some(form => {
+    const variant = [...words.slice(0, i), form, ...words.slice(i + 1)];
+    // The verb usually comes FIRST in a sentence ("collaborated with cross-functional teams")
+    // where the noun comes last in the term, so both orders are tried.
+    return hasTermDirect(index, variant.join(" ")) || hasTermDirect(index, [form, ...words.filter((_, j) => j !== i)].join(" "));
+  }));
+}
+
 function hasTermDirect(index, term) {
   const key = normaliseAtsTerm(term);
   if (!key) return false;
@@ -1067,6 +1129,14 @@ export function scoreAtsLocally({ job = {}, resumeText = "", runtimeBasis = null
   const missingSkills = jobTerms.filter(term => !hasTerm(matchIndex, term, synonyms));
   const matchedCompetencies = jobCompetencies.filter(term => hasTerm(matchIndex, term, synonyms));
   const missingCompetencies = jobCompetencies.filter(term => !hasTerm(matchIndex, term, synonyms));
+  // G6 — REPORT ONLY. A competency the résumé shows as a verb is not reported missing. The SCORE
+  // still uses the lexical sets above: by AH3's rule a change to how the report reads must not
+  // re-weight what the number means, and the bands are calibrated on this scorer. Applying it to
+  // the score was measured 09-30 — rho 0.746 -> 0.761 on the graded 30 — and is a separate
+  // decision, because it moves every band cutpoint with it.
+  const verbEvidenced = missingCompetencies.filter(term => hasCompetencyAsVerb(matchIndex, term));
+  const reportedMatchedCompetencies = [...matchedCompetencies, ...verbEvidenced];
+  const reportedMissingCompetencies = missingCompetencies.filter(term => !verbEvidenced.includes(term));
 
   // CC4 · which matches rested on a claim rather than on résumé evidence. Computed from the two
   // indexes rather than by re-deriving the claim list, so it cannot disagree with what was scored.
@@ -1192,8 +1262,8 @@ export function scoreAtsLocally({ job = {}, resumeText = "", runtimeBasis = null
     tier1_missing: compactUnique(missingSkills, 40),
     // AH3's third bucket. Competencies are real and wanted, but they are qualities, not skills —
     // "problem decomposition" belongs beside "intellectual curiosity", not beside typescript.
-    competencies_matched: compactUnique(matchedCompetencies, 12),
-    competencies_missing: compactUnique(missingCompetencies, 12),
+    competencies_matched: compactUnique(reportedMatchedCompetencies, 12),
+    competencies_missing: compactUnique(reportedMissingCompetencies, 12),
     action_verbs_matched: compactUnique(matchedVerbs, 24),
     action_verbs_missing: compactUnique(missingVerbs, 24),
     // Verbs the posting uses that almost any candidate could claim. Shown as language, never as a
