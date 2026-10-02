@@ -67,7 +67,11 @@ export function requireClient(clients) {
         message: "no client tokens are configured on this service" });
     }
     const id = authenticate(clients, req.headers.authorization);
-    if (!id) return res.status(401).json({ error: "unauthenticated", retryable: false });
+    // A55: a stranger must be able to act on this. It says what to send and how a token is got —
+    // never which part of a presented token was wrong.
+    if (!id) return res.status(401).json({ error: "unauthenticated", retryable: false,
+      message: "Send Authorization: Bearer rmk_<client>.<secret>. API tokens are issued by the operator on request — " +
+        "there is no self-serve API sign-up yet. The free tools (ATS check, formatting) need no token on the site, resumemaster.one." });
     req.client = { id };
     next();
   };

@@ -184,7 +184,7 @@ bands are each product's presentation decision, calibrated against its own users
 |---|---|---|
 | 400 | `invalid_request`, `invalid_json` | — |
 | 401 | `unauthenticated` | false |
-| 429 | `limit_exceeded` (limits are currently off) | true |
+| 429 | `limit_exceeded` (off unless `RM_LIMITS_PER_DAY` is set — A55) | true |
 | 503 | `auth_unconfigured` | false |
 | 404 | `not_found` | — |
 | 413 | `payload_too_large` | — |
@@ -193,7 +193,8 @@ bands are each product's presentation decision, calibrated against its own users
 | 502 | `resume_claim_not_inspected` | true |
 | 503 | `model_unconfigured` | false |
 
-Model-backed errors include `usage` for whatever was spent before the failure.
+Model-backed errors include `usage` for whatever was spent before the failure. Every error a
+stranger can hit carries a `message` saying what to do (A55, `docs/OUTSIDER_WALK.md`).
 
 ---
 

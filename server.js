@@ -4,6 +4,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { createApp } from "./src/http/app.js";
 import { loadAllPrompts } from "./src/generation/promptAssembler.js";
 import { parseClientTokens } from "./src/http/auth.js";
+import { createMetering, parseLimits } from "./src/http/metering.js";
 import { openStore } from "./src/store/db.js";
 import { purgeExpired } from "./src/accounts/artifacts.js";
 
@@ -36,8 +37,11 @@ if (store) {
 }
 
 const port = Number(process.env.PORT) || 3100;
-createApp({ anthropic, version, clients, store }).listen(port, () => {
+// A55: per-client daily limits on model-backed calls — OFF unless RM_LIMITS_PER_DAY is set.
+const limits = parseLimits(process.env.RM_LIMITS_PER_DAY);
+const metering = createMetering({ log: (e) => console.log(JSON.stringify({ t: new Date().toISOString(), ...e })), limits });
+createApp({ anthropic, version, clients, store, metering }).listen(port, () => {
   // Client IDS only — never a hash, never a token.
   console.log(JSON.stringify({ t: new Date().toISOString(), boot: "listening", port, model: !!anthropic,
-    clients: [...clients.keys()], accounts: !!store }));
+    clients: [...clients.keys()], accounts: !!store, limits: metering.limitsEnabled ? Object.fromEntries(limits) : "off" }));
 });

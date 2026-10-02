@@ -68,7 +68,9 @@ test("⛔ an unknown path is a JSON 404, never a 200 page", async () => {
     for (const path of ["/api/config", "/v1/nope", "/nope.html", "/admin"]) {
       const r = await fetch(s.base + path);
       assert.equal(r.status, 404, path);
-      assert.deepEqual(await r.json(), { error: "not_found" });
+      const nf = await r.json();
+      assert.equal(nf.error, "not_found");
+      assert.match(nf.message, /No such route/, "A55: a stranger is told what it is, not just a code");
     }
   } finally { await s.close(); }
 });

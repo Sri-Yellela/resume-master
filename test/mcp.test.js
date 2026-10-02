@@ -18,6 +18,9 @@ import { loadAllPrompts } from "../src/generation/promptAssembler.js";
 import { buildOpenApi, inlineRefs } from "../src/contract/build.js";
 import { loadMcpContract, servedTool } from "../src/mcp/server.js";
 import { atsOutcome } from "../src/tools/deterministic.js";
+// A55: the 401 says what to send and how a token is got (never what was wrong with the one presented).
+const UNAUTH_MESSAGE = "Send Authorization: Bearer rmk_<client>.<secret>. API tokens are issued by the operator on request — " +
+  "there is no self-serve API sign-up yet. The free tools (ATS check, formatting) need no token on the site, resumemaster.one.";
 
 loadAllPrompts();
 
@@ -247,7 +250,7 @@ test("⛔ MCP auth: no token and a wrong token are 401; the official client cann
     const r = await fetch(s.url, { method: "POST", headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }) });
     assert.equal(r.status, 401);
-    assert.deepEqual(await r.json(), { error: "unauthenticated", retryable: false });
+    assert.deepEqual(await r.json(), { error: "unauthenticated", retryable: false, message: UNAUTH_MESSAGE });
     assert.ok(!s.logs.some(l => l.metering), "an unauthenticated request was metered — it reached a tool");
   } finally { await s.close(); }
 });
