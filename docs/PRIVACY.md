@@ -45,7 +45,7 @@ Using the free tools on the site (ATS scoring, formatting) needs no account and 
 | Your email address and a password hash (scrypt — the password itself is never stored) | to sign you in | until you delete the account | **Delete account** removes it at once |
 | A session record — only a hash of the cookie's value | to keep you signed in | 30 days, or until you sign out | signing out, or a password reset, ends it |
 | Your credit ledger — grants, and for each tool you used: which tool, when, and how many model tokens it took | credits are granted free each month; the ledger is how a balance is kept honest | until you delete the account | deleted with the account |
-| **Documents you choose to save** — the OUTPUT of a tool (a generated or formatted résumé, text read from a PDF, an ATS report), and only when you tick "Save to my account" for that run | so you can come back to it | **90 days**, then deleted automatically — or sooner, when you delete it | **Delete** on the document removes it; the store zeroes the freed space |
+| **Documents you choose to save** — the OUTPUT of a tool (a generated or formatted résumé, text read from a PDF, an ATS report), and only when you tick "Save to my account" for that run | so you can come back to it | **90 days**, then deleted automatically — or sooner, when you delete it. A document you **pin** is kept until you unpin it (its 90 days then start again) or delete it; up to 20 can be pinned | **Delete** on the document removes it; the store zeroes the freed space |
 | A one-time password-reset token (a hash of it) | to reset a forgotten password | 30 minutes, used once | expires |
 
 **Never kept, account or not:** the résumé, job description or PDF you send in. A document is kept
@@ -56,7 +56,14 @@ removes the account, its sessions, its ledger and every saved document.
 
 ⚠ A résumé can contain a home address, a phone number and sometimes sensitive details (veteran or
 disability status). If you save one, it is kept as above. Do not save a document you do not want
-held for up to 90 days.
+held for up to 90 days — or, if you pin it, until you unpin it.
+
+**Backups.** So that an account and its credits survive a failed disk, the whole store is copied
+once a day to a backup on the same private volume. Backups are rotated, not kept forever: the
+newest are kept within a fixed share of the volume (at most 30 copies), and older ones are deleted.
+⚠ This means a document or an account you delete is gone from the live store at once, but **can
+remain inside a backup copy until that copy rotates out**. Backups are never shared, never read
+except to restore the service after a failure, and a restore is a deliberate act by the operator.
 
 ## Who it is shared with
 

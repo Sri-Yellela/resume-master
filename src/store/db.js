@@ -88,7 +88,27 @@ export const STORE_MIGRATIONS = Object.freeze([
       CREATE INDEX IF NOT EXISTS idx_artifacts_user ON artifacts(user_id, created_at);
     `,
   },
+  {
+    // A65 (owner's note under WORKLOG A57): "stored artifacts expire unless the user pins them".
+    // A pinned document is kept until it is unpinned or deleted; the 90-day expiry skips it.
+    id: "004_artifact_pins",
+    sql: `
+      ALTER TABLE artifacts ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ]);
+
+/**
+ * WHERE the store lives (A65). RM_DB_PATH wins when set (tests, a deliberate override); otherwise the
+ * Railway volume — RAILWAY_VOLUME_MOUNT_PATH is set by Railway when a volume is attached, so the path
+ * is never hard-coded. No volume and no override: null, and the service runs without accounts.
+ */
+export const STORE_FILE = "resume-master.db";
+export function resolveStorePath(env = process.env) {
+  if (env.RM_DB_PATH) return env.RM_DB_PATH;
+  if (env.RAILWAY_VOLUME_MOUNT_PATH) return path.join(env.RAILWAY_VOLUME_MOUNT_PATH, STORE_FILE);
+  return null;
+}
 
 /** Open (and migrate) the store. Each migration and its record commit in one transaction. */
 export function openStore(file) {
@@ -97,13 +117,13 @@ export function openStore(file) {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.pragma("secure_delete = ON");
-  db.exec("CREATE TABLE IF NOT EXISTS store_migrations (id TEXT PRIMARY KEY, applied_at INTEGER NOT NULL DEFAULT (unixepoch()))");
-  const done = new Set(db.prepare("SELECT id FROM store_migrations").pluck().all());
+  db.exec("CREATE TABLE IF NOT EXISTS schema_migrations (id TEXT PRIMARY KEY, applied_at INTEGER NOT NULL DEFAULT (unixepoch()))");
+  const done = new Set(db.prepare("SELECT id FROM schema_migrations").pluck().all());
   for (const m of STORE_MIGRATIONS) {
     if (done.has(m.id)) continue;
     db.transaction(() => {
       db.exec(m.sql);
-      db.prepare("INSERT INTO store_migrations (id) VALUES (?)").run(m.id);
+      db.prepare("INSERT INTO schema_migrations (id) VALUES (?)").run(m.id);
     })();
   }
   return db;

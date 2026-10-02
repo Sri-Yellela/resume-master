@@ -91,9 +91,19 @@ $("#ats-form").addEventListener("submit", async (e) => {
         ${rep.experience?.summary ? `<p class="note">Experience: ${esc(rep.experience.summary)}</p>` : ""}
         <p class="note">Only add a skill you actually have. Matching is about evidence, not keywords.</p>`
       : `<p class="note">Why: ${esc((rep.decline_reasons || []).join("; ") || "too few scorable terms")}. Paste the FULL job description, or a fuller résumé.</p>`}
-      ${r.saved?.stored ? '<p class="msg good">Saved to your account.</p>' : ""}`;
+      ${savedNote(r.saved)}`;
   } catch (err) { out.innerHTML = `<p class="msg bad">${esc(err.message)}</p>`; }
 });
+
+// A save that was asked for and refused says why (A65: a full volume refuses rather than fails).
+const SAVE_REFUSED = {
+  storage_full: "Not saved — storage is full right now. Download it instead.",
+  too_many: "Not saved — you have the most saved documents allowed. Delete one first.",
+  too_large: "Not saved — the document is too large to keep.",
+  signed_out: "Not saved — sign in to keep results.",
+};
+const savedNote = (saved) => saved?.stored ? '<p class="msg good">Saved to your account.</p>'
+  : saved?.reason ? `<p class="msg bad">${esc(SAVE_REFUSED[saved.reason] || "Not saved.")}</p>` : "";
 
 // ── Format ──────────────────────────────────────────────────────────────────────────────────────
 const toHtml = (text) => /<[a-z][\s\S]*>/i.test(text) ? text
@@ -116,7 +126,7 @@ $("#format-form").addEventListener("submit", async (e) => {
   try {
     const r = await call("POST", "/tools/format", { html: toHtml(f.html.value), store: f.store?.checked === true, title: "Formatted résumé" });
     documentResult(out, r.html, "resume");
-    if (r.saved?.stored) out.insertAdjacentHTML("beforeend", '<p class="msg good">Saved to your account.</p>');
+    out.insertAdjacentHTML("beforeend", savedNote(r.saved));
   } catch (err) { out.innerHTML = `<p class="msg bad">${esc(err.message)}</p>`; }
 });
 
@@ -136,7 +146,7 @@ $("#generate-form").addEventListener("submit", async (e) => {
     });
     documentResult(out, r.html, `resume-${(f.company.value || "tailored").replace(/\W+/g, "-")}`);
     out.insertAdjacentHTML("afterbegin", `<p class="msg good">Done — ${r.credits.charged} credit used, ${r.credits.balance} left.
-      Read every line before you send it.${r.saved?.stored ? " Saved to your account." : ""}</p>`);
+      Read every line before you send it.</p>${savedNote(r.saved)}`);
     refreshConfig();
   } catch (err) {
     const v = err.body?.violations;
@@ -207,17 +217,22 @@ async function loadAccount() {
   try {
     const a = await call("GET", "/account");
     $("#account-lede").textContent = `${a.user.email} · ${a.balance} credit${a.balance === 1 ? "" : "s"} · ` +
-      `${a.monthlyGrant} granted free each month · saved documents are kept ${a.retentionDays} days, then deleted.`;
+      `${a.monthlyGrant} granted free each month · saved documents are kept ${a.retentionDays} days, then deleted — unless you pin them.`;
     $("#ledger").innerHTML = "<tr><th>When</th><th>What</th><th>Credits</th><th>Tokens</th></tr>" + a.ledger.map(l =>
       `<tr><td>${new Date(l.at).toLocaleString()}</td><td>${esc(l.reason === "debit" ? l.route : l.reason.replace("_", " "))}</td>` +
       `<td>${l.delta > 0 ? "+" : ""}${l.delta}</td><td>${l.inputTokens != null ? `${l.inputTokens} in / ${l.outputTokens} out` : ""}</td></tr>`).join("");
     const d = await call("GET", "/documents");
     $("#docs").innerHTML = d.documents.length ? d.documents.map(doc =>
-      `<li><span>${esc(doc.title || doc.kind)} <span class="note">· ${esc(doc.kind.replace("_", " "))} · deleted ${new Date(doc.expiresAt).toLocaleDateString()}</span></span>
-        <span><button class="btn" data-doc-open="${doc.id}">Open</button> <button class="btn" data-doc-del="${doc.id}">Delete</button></span></li>`).join("")
+      `<li><span>${esc(doc.title || doc.kind)} <span class="note">· ${esc(doc.kind.replace("_", " "))} · ${doc.pinned ? "pinned — kept until you unpin or delete it" : `deleted ${new Date(doc.expiresAt).toLocaleDateString()}`}</span></span>
+        <span><button class="btn" data-doc-open="${doc.id}">Open</button> <button class="btn" data-doc-pin="${doc.id}" data-pinned="${doc.pinned ? 1 : 0}">${doc.pinned ? "Unpin" : "Pin"}</button> <button class="btn" data-doc-del="${doc.id}">Delete</button></span></li>`).join("")
       : '<li class="note">Nothing saved. Tick "Save to my account" on a tool to keep its result.</li>';
     $$("[data-doc-del]").forEach(b => b.addEventListener("click", async () => {
       await call("DELETE", `/documents/${b.dataset.docDel}`).catch(err => say($("#account-msg"), err.message, "bad"));
+      loadAccount();
+    }));
+    $$("[data-doc-pin]").forEach(b => b.addEventListener("click", async () => {
+      await call("POST", `/documents/${b.dataset.docPin}/pin`, { pinned: b.dataset.pinned !== "1" })
+        .catch(err => say($("#account-msg"), err.message, "bad"));
       loadAccount();
     }));
     $$("[data-doc-open]").forEach(b => b.addEventListener("click", async () => {

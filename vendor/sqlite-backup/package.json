@@ -1,0 +1,16 @@
+{
+  "name": "@draft/sqlite-backup",
+  "version": "1.0.0",
+  "description": "The SQLite backup policy draft runs in production: checkpoint before copy, a byte budget from the volume, refuse before the copy, label-protected retention, safe restore.",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": { ".": "./src/index.js", "./package.json": "./package.json" },
+  "files": ["src/", "test/", "scripts/", "README.md", "CHECKSUMS.json"],
+  "scripts": {
+    "test": "node --test",
+    "checksums": "node scripts/checksums.mjs --write"
+  },
+  "engines": { "node": ">=20" },
+  "peerDependencies": { "better-sqlite3": ">=11" }
+}
