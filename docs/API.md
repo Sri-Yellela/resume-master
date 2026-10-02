@@ -254,7 +254,7 @@ saying it is not a result: `invalid_request` (malformed input — never "the ré
 | | why |
 |---|---|
 | **Generation** (`/v1/resumes/generate`, `/enhance`) | Deferred by design (E1). An LLM calling an API to call an LLM: the caller can already write prose; what it lacks is the constraints, so the tool's value would be the claim guard, not the writing. It also costs ~$0.04 a call and a tool loop can repeat it. It needs metering limits and a description built around the integrity layer before it ships. |
-| **PDF parsing** (`/v1/resumes/parse-pdf`) | **There is no deterministic path.** The only implementation is a model call — Sonnet reads the PDF. Exposing it would put a metered model call behind a "deterministic tools" server, and the calling assistant already has the file. A local extractor (e.g. pdf.js) would be a new capability, not this one. |
+| **PDF parsing** (`/v1/resumes/parse-pdf`) | ⚠ **10-02 (A70): a deterministic path now exists** — `src/parsing/pdfText.js` reads the PDF's own text layer (pdf.js), zero model calls, and serves the site's free PDF → text. It cannot read scans. The TOKEN endpoint still uses the model (draft's résumé upload depends on it; moving it is O16e). Was: **There is no deterministic path.** The only implementation is a model call — Sonnet reads the PDF. Exposing it would put a metered model call behind a "deterministic tools" server, and the calling assistant already has the file. A local extractor (e.g. pdf.js) would be a new capability, not this one. |
 
 ### ⛔ ENFORCED vs INSTRUCTED — over MCP
 

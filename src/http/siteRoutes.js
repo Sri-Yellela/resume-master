@@ -9,7 +9,16 @@
 //   ATS score, format          free, unlimited, ANONYMOUS — zero model calls (owner: ATS stays free,
 //                              unlimited and ungated). Bounded only against abuse: a per-IP rate and
 //                              a 2 MB body.
-//   generate, enhance, PDF→text  signed in, one credit each, DEBITED ON SUCCESS (src/accounts/credits.js).
+//   PDF → text                 free, ANONYMOUS — A70 (owner, 10-02). It used to send the PDF to Sonnet
+//                              and cost a credit; it now reads the PDF's own text layer
+//                              (src/parsing/pdfText.js), zero model calls, so there is nothing to meter.
+//                              Bounded: the per-IP rate, a 15 MB body, and a per-IP DAILY ceiling
+//                              (RM_PDF_TEXT_PER_DAY, default 100) — free is not unbounded. A scan (no text
+//                              layer) is answered needsOcr, never charged and never sent to a model.
+//                              ⛔ test/pdfTextA70.test.js fails if this route is put back behind paid().
+//                              The TOKEN API's /v1/resumes/parse-pdf is unchanged (model-backed) — draft's
+//                              résumé upload uses it; moving it is the owner's call (O16e).
+//   generate, enhance          signed in, one credit each, DEBITED ON SUCCESS (src/accounts/credits.js).
 //
 // ⛔ Cross-site writes are refused: every state-changing request must carry X-RM-Client: web, which a
 // form on another site cannot send without a CORS preflight this service never grants.
@@ -30,7 +39,7 @@ import { listBackups, runBackup } from "../store/backups.js";
 import { sendResetEmail, emailConfigured } from "../accounts/email.js";
 import { generateResume } from "../generation/generate.js";
 import { enhanceResume } from "../generation/enhance.js";
-import { parsePdf } from "../parsing/parsePdf.js";
+import { extractPdfText } from "../parsing/extractPdfText.js";
 import { scoreAts, formatResume, atsOutcome } from "../tools/deterministic.js";
 
 const COOKIE = "rm_session";
@@ -42,6 +51,18 @@ function readCookie(req, name) {
     if (i > 0 && part.slice(0, i).trim() === name) return decodeURIComponent(part.slice(i + 1).trim());
   }
   return null;
+}
+
+/** Per-key count per UTC day, in memory (one process) — the free PDF reader's ceiling (A70). */
+export function createDailyLimiter({ perDay = 100, now = () => Date.now() } = {}) {
+  const hits = new Map();
+  return (key) => {
+    const d = Math.floor(now() / 86400000);
+    const e = hits.get(key);
+    if (!e || e.d !== d) { hits.set(key, { d, n: 1 }); if (hits.size > 10000) hits.clear(); return perDay > 0; }
+    e.n++;
+    return e.n <= perDay;
+  };
 }
 
 /** A small per-key fixed-window limiter, in memory (one process). */
@@ -58,6 +79,8 @@ export function createRateLimiter({ perMinute = 30, now = () => Date.now() } = {
 
 export function siteRoutes({ store, anthropic = null, env = process.env, metering, sendEmail = sendResetEmail,
                              publicLimiter = createRateLimiter({ perMinute: Number(env.RM_PUBLIC_RATE_PER_MIN) || 30 }),
+                             pdfDailyLimiter = createDailyLimiter({ perDay: env.RM_PDF_TEXT_PER_DAY != null && env.RM_PDF_TEXT_PER_DAY !== ""
+                               ? Number(env.RM_PDF_TEXT_PER_DAY) : 100 }),
                              backups = null }) {
   const r = express.Router();
   const small = express.json({ limit: "2mb" });
@@ -240,8 +263,21 @@ export function siteRoutes({ store, anthropic = null, env = process.env, meterin
     "generated_resume", out => out.html, req => req.body?.job?.title));
   r.post("/tools/enhance", ...paid("resumes.enhance", req => enhanceResume(anthropic, req.body || {}),
     "generated_resume", out => out.text, () => "Enhanced résumé"));
-  r.post("/tools/parse-pdf", ...paid("resumes.parse-pdf", req => parsePdf(anthropic, req.body || {}),
-    "pdf_text", out => out.text, req => req.body?.title || "Text from a PDF"));
+  // A70: free and anonymous — see the header. ⛔ Not paid(): nothing here calls a model.
+  const pdfDaily = (req, res, next) => (pdfDailyLimiter(req.ip) ? next()
+    : fail(res, 429, "daily_limit", "This address has read its PDFs for today — the reader is free, with a daily ceiling. Try again tomorrow.",
+           { retryable: false }));
+  r.post("/tools/parse-pdf", limited, pdfDaily, writeGuard, big, async (req, res, next) => {
+    try {
+      const out = await extractPdfText(req.body || {});
+      metering?.record(req.user ? "site-user" : "site-anon", "resumes.pdf-text", [], { via: "site" });
+      if (out.needsOcr) {
+        return res.json({ ...out, message: "This PDF has no text to read — it looks like a scan or a picture of a résumé. "
+          + "Reading scans (OCR) is not offered. Export the résumé from Word, Google Docs or your editor as a PDF and try that." });
+      }
+      res.json({ ...out, saved: keep(req, "pdf_text", req.body?.title || "Text from a PDF", out.text) });
+    } catch (e) { next(e); }
+  });
 
   return r;
 }

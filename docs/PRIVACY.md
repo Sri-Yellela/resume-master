@@ -69,7 +69,7 @@ except to restore the service after a failure, and a restore is a deliberate act
 
 | Recipient | What | Why |
 |---|---|---|
-| **Anthropic** | the prompt for a model-backed request, which contains the material above | the model step of generation, enhancement and PDF reading. Anthropic does not use API inputs to train models |
+| **Anthropic** | the prompt for a model-backed request, which contains the material above | the model step of generation and enhancement, and of PDF reading through the token API. **The site's PDF → text sends nothing to Anthropic** — it reads the text the PDF already carries, here, with no model (since 10-02). Anthropic does not use API inputs to train models |
 | **Railway** | hosting — the running service handles every request | infrastructure |
 
 Nothing else. The ATS scorer and the formatter run locally with no network call.
