@@ -44,7 +44,8 @@ export function createApp({ anthropic = null, version = {}, log = defaultLog, en
   // because a failed call can still have spent — is recorded against the client afterwards.
   const metered = (route, fn) => async (req, res, next) => {
     if (!metering.allow(req.client.id, route)) {
-      return res.status(429).json({ error: "limit_exceeded", retryable: true });
+      return res.status(429).json({ error: "limit_exceeded", retryable: true,
+        message: "This client has reached its limit for this route. Try again later." });
     }
     try {
       const out = await fn(req);
@@ -99,14 +100,17 @@ export function createApp({ anthropic = null, version = {}, log = defaultLog, en
   app.use(express.static(PUBLIC_DIR, { index: "index.html", extensions: false, fallthrough: true }));
 
   // Everything else is still JSON, including "not found" — only the site's own files are pages.
-  app.use((_req, res) => res.status(404).json({ error: "not_found" }));
+  app.use((_req, res) => res.status(404).json({ error: "not_found",
+    message: "No such route. The API's routes are listed in its published contract; the site is at /." }));
 
   // eslint-disable-next-line no-unused-vars
   app.use((err, _req, res, _next) => {
     const usage = err.usageSoFar || (err.usage ? [err.usage] : []);
     log({ error: err.code || err.name || "error", status: err.status ?? null });
-    if (err.type === "entity.parse.failed") return res.status(400).json({ error: "invalid_json" });
-    if (err.type === "entity.too.large") return res.status(413).json({ error: "payload_too_large" });
+    if (err.type === "entity.parse.failed") return res.status(400).json({ error: "invalid_json",
+      message: "The request body is not valid JSON." });
+    if (err.type === "entity.too.large") return res.status(413).json({ error: "payload_too_large",
+      message: "The request body is larger than this route accepts (15 MB for the API)." });
     if (err instanceof InvalidRequestError) return res.status(400).json({ error: "invalid_request", message: err.message });
     if (err instanceof TypeError && /termWeights|synonyms/.test(err.message)) {
       return res.status(400).json({ error: "invalid_request", message: err.message });

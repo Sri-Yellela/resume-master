@@ -6,6 +6,9 @@ import { createApp } from "../src/http/app.js";
 import { mintToken, parseClientTokens, authenticate, hashToken } from "../src/http/auth.js";
 import { createMetering } from "../src/http/metering.js";
 import { loadAllPrompts } from "../src/generation/promptAssembler.js";
+// A55: the 401 says what to send and how a token is got (never what was wrong with the one presented).
+const UNAUTH_MESSAGE = "Send Authorization: Bearer rmk_<client>.<secret>. API tokens are issued by the operator on request — " +
+  "there is no self-serve API sign-up yet. The free tools (ATS check, formatting) need no token on the site, resumemaster.one.";
 
 loadAllPrompts();
 
@@ -53,7 +56,7 @@ test("⛔ unauthenticated requests are refused before the body is even parsed", 
   try {
     const none = await s.post(...FORMAT);
     assert.equal(none.status, 401);
-    assert.deepEqual(await none.json(), { error: "unauthenticated", retryable: false });
+    assert.deepEqual(await none.json(), { error: "unauthenticated", retryable: false, message: UNAUTH_MESSAGE });
     // A malformed AND oversized body still gets 401, not 400/413 — auth runs first.
     const r = await fetch(s.base + "/v1/resumes/generate", { method: "POST",
       headers: { "content-type": "application/json" }, body: "{" + "x".repeat(16 * 1024 * 1024) });
@@ -161,4 +164,20 @@ test("the mint script's output format matches what the parser accepts", () => {
   assert.match(src, /mintToken\(clientId\)/);
   const { entry } = mintToken("draft");
   assert.equal(parseClientTokens(entry).size, 1);
+});
+
+// A55: the policy is ready to turn on, and is still off unless configured.
+test("A55: RM_LIMITS_PER_DAY caps a client's model-backed calls per UTC day; unnamed clients and the default stay unlimited", async () => {
+  const { parseLimits } = await import("../src/http/metering.js");
+  assert.equal(createMetering({ log: () => {}, limits: parseLimits("") }).limitsEnabled, false, "unset = off");
+  assert.throws(() => parseLimits("acme=lots"), /malformed/);
+  let t = Date.parse("2026-10-02T12:00:00Z");
+  const m = createMetering({ log: () => {}, limits: parseLimits("acme=2,*=3"), now: () => t });
+  assert.equal(m.limitsEnabled, true);
+  assert.deepEqual([m.allow("acme", "r"), m.allow("acme", "r"), m.allow("acme", "r")], [true, true, false]);
+  assert.deepEqual([1, 2, 3, 4].map(() => m.allow("stranger", "r")), [true, true, true, false], "* is the default cap");
+  t += 86400000;
+  assert.equal(m.allow("acme", "r"), true, "a new UTC day");
+  const named = createMetering({ log: () => {}, limits: parseLimits("acme=1") });
+  for (let i = 0; i < 50; i++) assert.equal(named.allow("draft", "r"), true, "draft is unlimited unless named");
 });
