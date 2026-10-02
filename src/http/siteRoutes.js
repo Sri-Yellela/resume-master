@@ -25,7 +25,8 @@ import {
 import {
   balance, ensureMonthlyGrant, checkCanAfford, debitOnSuccess, grant, refund, ledgerFor, creditConfig,
 } from "../accounts/credits.js";
-import { saveArtifact, listArtifacts, getArtifact, deleteArtifact, retentionDays } from "../accounts/artifacts.js";
+import { saveArtifact, listArtifacts, getArtifact, deleteArtifact, setPinned, retentionDays, MAX_PINNED_PER_USER } from "../accounts/artifacts.js";
+import { listBackups, runBackup } from "../store/backups.js";
 import { sendResetEmail, emailConfigured } from "../accounts/email.js";
 import { generateResume } from "../generation/generate.js";
 import { enhanceResume } from "../generation/enhance.js";
@@ -56,7 +57,8 @@ export function createRateLimiter({ perMinute = 30, now = () => Date.now() } = {
 }
 
 export function siteRoutes({ store, anthropic = null, env = process.env, metering, sendEmail = sendResetEmail,
-                             publicLimiter = createRateLimiter({ perMinute: Number(env.RM_PUBLIC_RATE_PER_MIN) || 30 }) }) {
+                             publicLimiter = createRateLimiter({ perMinute: Number(env.RM_PUBLIC_RATE_PER_MIN) || 30 }),
+                             backups = null }) {
   const r = express.Router();
   const small = express.json({ limit: "2mb" });
   const big = express.json({ limit: "15mb" });
@@ -146,15 +148,22 @@ export function siteRoutes({ store, anthropic = null, env = process.env, meterin
   }));
 
   // ── saved documents (opt-in) ──────────────────────────────────────────────────────────────────
-  r.get("/documents", needStore, requireUser, (req, res) => res.json({ documents: listArtifacts(store, req.user.id), retentionDays: retentionDays(env) }));
+  r.get("/documents", needStore, requireUser, (req, res) => res.json({ documents: listArtifacts(store, req.user.id), retentionDays: retentionDays(env), maxPinned: MAX_PINNED_PER_USER }));
   r.get("/documents/:id", needStore, requireUser, (req, res) => {
     const a = getArtifact(store, req.user.id, req.params.id);
     if (!a) return fail(res, 404, "not_found", "No such document.");
-    res.json({ id: a.id, kind: a.kind, title: a.title, content: a.content, createdAt: a.created_at * 1000, expiresAt: a.expires_at * 1000 });
+    res.json({ id: a.id, kind: a.kind, title: a.title, content: a.content, pinned: !!a.pinned, createdAt: a.created_at * 1000, expiresAt: a.pinned ? null : a.expires_at * 1000 });
   });
   r.delete("/documents/:id", needStore, writeGuard, requireUser, (req, res) => {
     if (!deleteArtifact(store, req.user.id, req.params.id)) return fail(res, 404, "not_found", "No such document.");
     res.json({ ok: true, message: "Deleted." });
+  });
+  // A65: a pinned document is kept until it is unpinned or deleted; unpinning restarts its clock.
+  r.post("/documents/:id/pin", needStore, writeGuard, requireUser, small, (req, res) => {
+    const out = setPinned(store, req.user.id, req.params.id, req.body?.pinned !== false, env);
+    if (out.code === "not_found") return fail(res, 404, "not_found", "No such document.");
+    if (out.code === "too_many_pinned") return fail(res, 409, "too_many_pinned", `You can keep up to ${MAX_PINNED_PER_USER} documents pinned. Unpin one first.`);
+    res.json(out);
   });
 
   // ── admin: grant and refund (granted credits only — no purchase path exists) ──────────────────
@@ -171,6 +180,15 @@ export function siteRoutes({ store, anthropic = null, env = process.env, meterin
     const out = refund(store, Number(req.body?.ledgerId), req.body?.note || `refunded by ${req.user.email}`);
     if (!out.ok) return fail(res, 409, out.code, out.code === "already_refunded" ? "That debit was already refunded." : "That is not a debit.");
     res.json(out);
+  });
+  // A65: backups of the store — draft's policy. `backups` is set only when the store is on a volume.
+  const needBackups = (req, res, next) => (backups ? next()
+    : fail(res, 503, "backups_unconfigured", "Backups run only when the store is on a volume."));
+  r.get("/admin/backups", needStore, requireAdmin, needBackups, (req, res) => res.json(listBackups()));
+  r.post("/admin/backups", needStore, writeGuard, requireAdmin, needBackups, (req, res) => {
+    const out = runBackup("admin");
+    if (!out) return fail(res, 507, "backup_refused", "The backup was refused — the volume has no room. See the logs.");
+    res.json({ ok: true, backup: { filename: out.filename, created: out.created } });
   });
 
   // ── the tools ─────────────────────────────────────────────────────────────────────────────────

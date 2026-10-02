@@ -1,0 +1,13 @@
+{
+  "name": "@draft/sqlite-backup",
+  "version": "1.0.0",
+  "normalisation": "LF",
+  "algorithm": "sha256",
+  "files": {
+    "README.md": "8068a334baffb95c9b2dceb40cd762281e54ec558fbf101efb000e4cfc48c4d9",
+    "package.json": "ad7dd58c30c1be12ac005d27d09cf0eb8c356d80ca5b1cb9b45425f990cc6e8e",
+    "scripts/checksums.mjs": "8581103849343b74f232f435be7cb58bf0135bc81045f89b875130769a35dda5",
+    "src/index.js": "276eb113ec178a852767475271cf149c61c5fec01ffd482077bf1c644677bb9c",
+    "test/checksums.test.js": "a29e3f3ac5c269f0a77c3728c50fb91e6cf0d7a2b94030d272e39a560f67059f"
+  }
+}
