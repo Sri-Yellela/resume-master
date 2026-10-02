@@ -1,4 +1,7 @@
-// The HTTP surface. Stateless: no database, no session, no file written.
+// The HTTP surface. The service-token API (/v1/…, /mcp) is stateless: no database, no session, no
+// file written. A57 (10-02) added a SECOND surface for people on resumemaster.one — /v1/site/…,
+// with accounts, credits and opt-in storage (src/http/siteRoutes.js) — and A54 a front door: the
+// site itself, served from public/ at "/". ⛔ Neither changes the token API; see siteRoutes.js.
 //
 // ⛔ EVERY ANSWER IS JSON, INCLUDING "NOT FOUND". draft's SPA catch-all answered 200 with index.html
 // for any unknown path and produced a false finding five times; a verification here asserts a JSON
@@ -15,6 +18,11 @@ import { scoreAts, formatResume } from "../tools/deterministic.js";
 import { requireClient } from "./auth.js";
 import { createMetering } from "./metering.js";
 import { mcpHandlers } from "../mcp/server.js";
+import { siteRoutes } from "./siteRoutes.js";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const PUBLIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "public");
 
 export const SERVICE = "resume-master";
 
@@ -23,9 +31,13 @@ export const SERVICE = "resume-master";
  *                 every /v1 route but /v1/version answers 503 auth_unconfigured.
  */
 export function createApp({ anthropic = null, version = {}, log = defaultLog, env = process.env,
-                            clients = null, metering = createMetering({ log }) } = {}) {
+                            clients = null, metering = createMetering({ log }), store = null,
+                            siteOptions = {} } = {}) {
   const app = express();
   app.disable("x-powered-by");
+  // Railway terminates TLS in front of the service: req.secure (the session cookie's Secure flag)
+  // and req.ip (the anonymous tools' rate key) must come from the one proxy hop.
+  app.set("trust proxy", 1);
   const client = requireClient(clients);
 
   // A model-backed route: the limit hook runs before any spend, and the usage — success OR failure,
@@ -82,6 +94,11 @@ export function createApp({ anthropic = null, version = {}, log = defaultLog, en
   app.post("/v1/resumes/enhance", client, json, metered("resumes.enhance", req => enhanceResume(anthropic, req.body || {})));
   app.post("/v1/resumes/parse-pdf", client, json, metered("resumes.parse-pdf", req => parsePdf(anthropic, req.body || {})));
 
+  // ── the site (A54) and a person's routes (A57) ──────────────────────────────────────────────
+  app.use("/v1/site", siteRoutes({ store, anthropic, env, metering, ...siteOptions }));
+  app.use(express.static(PUBLIC_DIR, { index: "index.html", extensions: false, fallthrough: true }));
+
+  // Everything else is still JSON, including "not found" — only the site's own files are pages.
   app.use((_req, res) => res.status(404).json({ error: "not_found" }));
 
   // eslint-disable-next-line no-unused-vars
