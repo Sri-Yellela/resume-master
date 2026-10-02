@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Resume Master — résumé tools that show their work</title>
+  <meta name="description" content="Free ATS check and résumé formatting for anyone. Tailored résumés with an account. Nothing you send is kept unless you ask.">
+  <link rel="stylesheet" href="/site.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2300283f'/%3E%3Ctext x='16' y='22' font-size='17' text-anchor='middle' fill='%23f5c35b' font-family='serif' font-style='italic'%3ERM%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <a class="wordmark" href="/">Resume <em>Master</em></a>
+      <nav class="top" aria-label="Account">
+        <span id="acct-signed-out"><button class="btn" data-open="signin">Sign in</button> <button class="btn primary" data-open="signup">Create an account</button></span>
+        <span id="acct-signed-in" class="account-bar" hidden>
+          <span id="acct-email"></span> · <span class="balance" id="acct-balance"></span>
+          <button class="btn" data-open="account">Account</button>
+          <button class="btn" id="signout">Sign out</button>
+        </span>
+      </nav>
+    </header>
+
+    <section class="hero">
+      <h1>Résumé tools that <em>show their work.</em></h1>
+      <p>Check a résumé against a job and see exactly which terms matched — free, with no account. Format it,
+        tailor it, or read a PDF with an account. Nothing you send is kept unless you ask, per document.</p>
+    </section>
+
+    <div class="tabs" role="tablist" aria-label="Tools">
+      <button class="tab" role="tab" aria-selected="true" data-tab="ats">ATS check <span class="tag">free</span></button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="format">Format <span class="tag">free</span></button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="generate">Tailor a résumé <span class="tag">1 credit</span></button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="pdf">PDF → text <span class="tag">1 credit</span></button>
+    </div>
+
+    <!-- ── ATS ───────────────────────────────────────────────────────────── -->
+    <section class="panel glass" data-panel="ats">
+      <h2>ATS check</h2>
+      <p class="lede">Scores your résumé against one posting with the same deterministic scorer draft uses — zero model calls,
+        so it is free and unlimited. You get a band and the evidence behind it, never a bare number.</p>
+      <form id="ats-form">
+        <div class="grid2">
+          <label class="f">Your résumé (plain text)<textarea name="resumeText" required placeholder="Paste your résumé…"></textarea></label>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <label class="f">Job title<input type="text" name="title" required placeholder="e.g. Backend Engineer"></label>
+            <label class="f">Job description<textarea name="description" required placeholder="Paste the full posting…"></textarea></label>
+          </div>
+        </div>
+        <div class="row">
+          <button class="btn primary" type="submit">Check the fit</button>
+          <label class="note keep" hidden><input type="checkbox" name="store"> Save the report to my account</label>
+        </div>
+      </form>
+      <div id="ats-out" class="result glass" hidden></div>
+    </section>
+
+    <!-- ── Format ────────────────────────────────────────────────────────── -->
+    <section class="panel glass" data-panel="format" hidden>
+      <h2>Format</h2>
+      <p class="lede">Turns a résumé into a clean, print-ready page with a fixed layout — deterministic, no model. Paste HTML,
+        or plain text with one line per heading, role or bullet.</p>
+      <form id="format-form">
+        <label class="f">Résumé<textarea name="html" required placeholder="Paste HTML or plain text…"></textarea></label>
+        <div class="row">
+          <button class="btn primary" type="submit">Format it</button>
+          <label class="note keep" hidden><input type="checkbox" name="store"> Save to my account</label>
+        </div>
+      </form>
+      <div id="format-out" class="result glass" hidden></div>
+    </section>
+
+    <!-- ── Generate ──────────────────────────────────────────────────────── -->
+    <section class="panel glass" data-panel="generate" hidden>
+      <h2>Tailor a résumé</h2>
+      <p class="lede">Rewrites your résumé for one posting. ⛔ It is checked before you see it: a draft that claims more
+        years or seniority than you stated is withheld, not shown. It can still word things you did not —
+        read every line before you send it. One credit, charged only if a résumé comes back.</p>
+      <p class="msg" id="generate-gate"></p>
+      <form id="generate-form">
+        <div class="grid2">
+          <label class="f">Your résumé (plain text)<textarea name="baseResumeText" required></textarea></label>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <label class="f">Your name<input type="text" name="fullName" required></label>
+            <label class="f">Years of experience<input type="number" name="years" min="0" max="60" step="0.5"></label>
+            <label class="f">Job title<input type="text" name="title" required></label>
+            <label class="f">Company<input type="text" name="company"></label>
+          </div>
+        </div>
+        <label class="f" style="margin-top:10px">Job description<textarea name="description" required></textarea></label>
+        <div class="row">
+          <button class="btn primary" type="submit">Tailor it (1 credit)</button>
+          <label class="note"><input type="checkbox" name="includeSummary"> Include a summary paragraph</label>
+          <label class="note keep" hidden><input type="checkbox" name="store"> Save to my account</label>
+        </div>
+      </form>
+      <div id="generate-out" class="result glass" hidden></div>
+    </section>
+
+    <!-- ── PDF ───────────────────────────────────────────────────────────── -->
+    <section class="panel glass" data-panel="pdf" hidden>
+      <h2>PDF → text</h2>
+      <p class="lede">Reads the text out of a résumé PDF (up to 10 MB) so you can check or tailor it. One credit.</p>
+      <p class="msg" id="pdf-gate"></p>
+      <form id="pdf-form">
+        <label class="f">Résumé PDF<input type="file" name="file" accept="application/pdf" required></label>
+        <div class="row">
+          <button class="btn primary" type="submit">Read it (1 credit)</button>
+          <label class="note keep" hidden><input type="checkbox" name="store"> Save the text to my account</label>
+        </div>
+      </form>
+      <div id="pdf-out" class="result glass" hidden></div>
+    </section>
+
+    <!-- ── Account dialogs ───────────────────────────────────────────────── -->
+    <section class="panel glass" data-dialog="signin" hidden>
+      <h2>Sign in</h2>
+      <form id="signin-form" class="grid2">
+        <label class="f">Email<input type="email" name="email" required autocomplete="email"></label>
+        <label class="f">Password<input type="password" name="password" required autocomplete="current-password"></label>
+        <div class="row"><button class="btn primary" type="submit">Sign in</button>
+          <button class="btn" type="button" data-open="reset" id="forgot">Forgot your password?</button></div>
+      </form>
+      <p class="msg" id="signin-msg"></p>
+    </section>
+    <section class="panel glass" data-dialog="signup" hidden>
+      <h2>Create an account</h2>
+      <p class="lede">An account gets free credits every month for the model-backed tools, and a place to keep the
+        documents you choose to save. It is separate from any draft account.</p>
+      <form id="signup-form" class="grid2">
+        <label class="f">Email<input type="email" name="email" required autocomplete="email"></label>
+        <label class="f">Password (10+ characters)<input type="password" name="password" required minlength="10" autocomplete="new-password"></label>
+        <div class="row"><button class="btn primary" type="submit">Create account</button></div>
+      </form>
+      <p class="msg" id="signup-msg"></p>
+    </section>
+    <section class="panel glass" data-dialog="reset" hidden>
+      <h2>Reset your password</h2>
+      <form id="reset-form" class="grid2">
+        <label class="f">Email<input type="email" name="email" required></label>
+        <div class="row"><button class="btn primary" type="submit">Email me a link</button></div>
+      </form>
+      <form id="reset-confirm-form" class="grid2" hidden>
+        <label class="f">New password (10+ characters)<input type="password" name="password" required minlength="10"></label>
+        <div class="row"><button class="btn primary" type="submit">Set the new password</button></div>
+      </form>
+      <p class="msg" id="reset-msg"></p>
+    </section>
+    <section class="panel glass" data-dialog="account" hidden>
+      <h2>Your account</h2>
+      <p class="lede" id="account-lede"></p>
+      <h3>Saved documents</h3>
+      <ul class="docs" id="docs"></ul>
+      <h3>Credits</h3>
+      <table class="ledger" id="ledger"></table>
+      <div class="row">
+        <a class="btn" href="/v1/site/account/export" download>Export everything (JSON)</a>
+        <button class="btn" id="delete-account">Delete my account…</button>
+      </div>
+      <p class="msg" id="account-msg"></p>
+    </section>
+
+    <footer>
+      <p>Resume Master — a sibling of <a href="https://jobsviadraft.com">draft</a>. Bands are calibrated on draft's
+        human-graded postings; they are coarse by design. <a href="/privacy.html">Privacy — what is kept, and for how long</a>.
+        For developers: the API is documented in the contract the service publishes.</p>
+    </footer>
+  </div>
+  <script src="/site.js" defer></script>
+</body>
+</html>

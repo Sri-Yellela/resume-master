@@ -88,7 +88,8 @@ export const SCENARIOS = [
   { name: "version names the service", route: "GET /v1/version", status: 200, live: true,
     expect: b => b.service === "resume-master" || "service is not resume-master" },
   { name: "unknown GET is a JSON 404, never a page", path: "/api/config", method: "get", status: 404, live: true },
-  { name: "the root is a JSON 404", path: "/", method: "get", status: 404, live: true },
+  // A54 (10-02): "/" is now the SITE — a page, deliberately (the domain had no front door). It is no
+  // longer an API scenario; test/site.test.js pins it. Every other unknown path is still a JSON 404.
   { name: "unknown POST under /v1 is a JSON 404", path: "/v1/nope", method: "post", body: {}, status: 404, live: true },
 
   // format — free
