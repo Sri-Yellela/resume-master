@@ -1,8 +1,11 @@
 # Resume Master
 
-Stateless résumé tools — generation, deterministic formatting, PDF text extraction and ATS scoring —
-served as an HTTP API on `resumemaster.one`. **No database; nothing a caller sends is retained.**
-The API and its promises are in [`docs/API.md`](docs/API.md).
+Résumé tools — generation, deterministic formatting, PDF text extraction and ATS scoring — served
+as an HTTP API on `resumemaster.one` (the token API retains nothing a caller sends), and, since
+2026-10-02, as a SITE at the same address with accounts, a credit ledger and opt-in storage
+(`src/http/siteRoutes.js`, `src/accounts/`, `src/store/`; the store is switched on by `RM_DB_PATH`).
+The API and its promises are in [`docs/API.md`](docs/API.md); what the site keeps is in
+[`docs/PRIVACY.md`](docs/PRIVACY.md).
 
 Resume Master is a separate product from draft (`jobsviadraft.com`). draft calls this API as a
 third-party client would, with its own service token, and keeps its own users, database and

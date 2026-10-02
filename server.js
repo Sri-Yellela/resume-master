@@ -4,6 +4,8 @@ import Anthropic from "@anthropic-ai/sdk";
 import { createApp } from "./src/http/app.js";
 import { loadAllPrompts } from "./src/generation/promptAssembler.js";
 import { parseClientTokens } from "./src/http/auth.js";
+import { openStore } from "./src/store/db.js";
+import { purgeExpired } from "./src/accounts/artifacts.js";
 
 loadAllPrompts();
 
@@ -24,9 +26,18 @@ const anthropic = process.env.ANTHROPIC_API_KEY ? new Anthropic({ apiKey: proces
 // side, exactly like a revoked token. Zero clients is allowed and FAILS CLOSED (503 auth_unconfigured).
 const clients = parseClientTokens(process.env.RESUME_MASTER_CLIENT_TOKENS);
 
+// A57: the store is OPTIONAL and explicit. Without RM_DB_PATH (a path on a persistent volume) the
+// service runs as before and every account route answers 503 accounts_unconfigured — so a deploy
+// with no volume can never create accounts that vanish at the next restart.
+const store = process.env.RM_DB_PATH ? openStore(process.env.RM_DB_PATH) : null;
+if (store) {
+  purgeExpired(store);
+  setInterval(() => { try { purgeExpired(store); } catch { /* next hour */ } }, 3600_000).unref();
+}
+
 const port = Number(process.env.PORT) || 3100;
-createApp({ anthropic, version, clients }).listen(port, () => {
+createApp({ anthropic, version, clients, store }).listen(port, () => {
   // Client IDS only — never a hash, never a token.
   console.log(JSON.stringify({ t: new Date().toISOString(), boot: "listening", port, model: !!anthropic,
-    clients: [...clients.keys()] }));
+    clients: [...clients.keys()], accounts: !!store }));
 });

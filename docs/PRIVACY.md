@@ -1,9 +1,11 @@
 # Resume Master — privacy
 
-**Effective:** September 28, 2026
+**Effective:** October 2, 2026 (was September 28, 2026)
 
-Resume Master is a stateless résumé-processing service. It **processes what it is sent and returns
-the result. It does not retain it.**
+Resume Master **processes what it is sent and returns the result.** Called through its API by another
+product, it retains nothing. **Since October 2, 2026 it also has its own site, `resumemaster.one`,
+where a person can make an account** — and an account is the one place anything is kept, and only
+what that person asks to keep. Both are described below.
 
 ## What it receives
 
@@ -34,6 +36,28 @@ that way.
 - **The calling client receives usage records** — token counts per model call — so it can meter its
   own spend. Counts, never content.
 
+## What an account keeps — and only if you make one
+
+Using the free tools on the site (ATS scoring, formatting) needs no account and keeps nothing.
+
+| What | Why | How long | How it goes |
+|---|---|---|---|
+| Your email address and a password hash (scrypt — the password itself is never stored) | to sign you in | until you delete the account | **Delete account** removes it at once |
+| A session record — only a hash of the cookie's value | to keep you signed in | 30 days, or until you sign out | signing out, or a password reset, ends it |
+| Your credit ledger — grants, and for each tool you used: which tool, when, and how many model tokens it took | credits are granted free each month; the ledger is how a balance is kept honest | until you delete the account | deleted with the account |
+| **Documents you choose to save** — the OUTPUT of a tool (a generated or formatted résumé, text read from a PDF, an ATS report), and only when you tick "Save to my account" for that run | so you can come back to it | **90 days**, then deleted automatically — or sooner, when you delete it | **Delete** on the document removes it; the store zeroes the freed space |
+| A one-time password-reset token (a hash of it) | to reset a forgotten password | 30 minutes, used once | expires |
+
+**Never kept, account or not:** the résumé, job description or PDF you send in. A document is kept
+only as the result, only when you ask, per document.
+
+**Your access:** *Export* downloads everything held for your account as JSON. *Delete account*
+removes the account, its sessions, its ledger and every saved document.
+
+⚠ A résumé can contain a home address, a phone number and sometimes sensitive details (veteran or
+disability status). If you save one, it is kept as above. Do not save a document you do not want
+held for up to 90 days.
+
 ## Who it is shared with
 
 | Recipient | What | Why |
@@ -48,7 +72,7 @@ Nothing else. The ATS scorer and the formatter run locally with no network call.
 Resume Master is called by other products, each with its own service token. A client — including
 **draft** (`jobsviadraft.com`), a separate product run by the same operator — is responsible for
 telling its own users that their data is sent here, and draft's privacy policy does so. Resume
-Master has no end users of its own and no accounts.
+Master's own users are the people who make an account on its site (above).
 
 ## Contact
 

@@ -1,7 +1,7 @@
 {
   "name": "resume-master",
   "version": "0.1.0",
-  "description": "Stateless résumé tools: generation, formatting, parsing, ATS scoring. No database.",
+  "description": "Résumé tools: generation, formatting, parsing, ATS scoring — a stateless token API, and a site with opt-in accounts.",
   "private": true,
   "type": "module",
   "main": "server.js",
@@ -19,6 +19,7 @@
     "@anthropic-ai/sdk": "^0.39.0",
     "@draft/ats-scorer": "file:vendor/ats-scorer",
     "@modelcontextprotocol/sdk": "^1.31.0",
+    "better-sqlite3": "^12.11.1",
     "express": "^4.21.0"
   }
 }
