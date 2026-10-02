@@ -20,7 +20,8 @@ export function creditConfig(env = process.env) {
     cost: {
       "resumes.generate": n("RM_COST_GENERATE", 1),
       "resumes.enhance": n("RM_COST_ENHANCE", 1),
-      "resumes.parse-pdf": n("RM_COST_PARSE_PDF", 1),
+      // No "resumes.parse-pdf": PDF → text reads the file's own text layer, zero model calls, and is
+      // free (A70, owner 10-02). ⛔ test/pdfTextA70.test.js fails if a cost is put back here.
     },
   };
 }

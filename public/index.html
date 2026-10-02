@@ -24,15 +24,15 @@
 
     <section class="hero">
       <h1>Résumé tools that <em>show their work.</em></h1>
-      <p>Check a résumé against a job and see exactly which terms matched — free, with no account. Format it,
-        tailor it, or read a PDF with an account. Nothing you send is kept unless you ask, per document.</p>
+      <p>Check a résumé against a job and see exactly which terms matched, format it, or read the text out of a
+        PDF — free, with no account. Tailoring it uses an account. Nothing you send is kept unless you ask, per document.</p>
     </section>
 
     <div class="tabs" role="tablist" aria-label="Tools">
       <button class="tab" role="tab" aria-selected="true" data-tab="ats">ATS check <span class="tag">free</span></button>
       <button class="tab" role="tab" aria-selected="false" data-tab="format">Format <span class="tag">free</span></button>
       <button class="tab" role="tab" aria-selected="false" data-tab="generate">Tailor a résumé <span class="tag">1 credit</span></button>
-      <button class="tab" role="tab" aria-selected="false" data-tab="pdf">PDF → text <span class="tag">1 credit</span></button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="pdf">PDF → text <span class="tag">free</span></button>
     </div>
 
     <!-- ── ATS ───────────────────────────────────────────────────────────── -->
@@ -101,12 +101,12 @@
     <!-- ── PDF ───────────────────────────────────────────────────────────── -->
     <section class="panel glass" data-panel="pdf" hidden>
       <h2>PDF → text</h2>
-      <p class="lede">Reads the text out of a résumé PDF (up to 10 MB) so you can check or tailor it. One credit.</p>
-      <p class="msg" id="pdf-gate"></p>
+      <p class="lede">Reads the text out of a résumé PDF (up to 10 MB) so you can check or tailor it. Free, no account —
+        it reads the text the PDF already carries, with no AI. A scanned PDF has no text to read, and reading scans is not offered.</p>
       <form id="pdf-form">
         <label class="f">Résumé PDF<input type="file" name="file" accept="application/pdf" required></label>
         <div class="row">
-          <button class="btn primary" type="submit">Read it (1 credit)</button>
+          <button class="btn primary" type="submit">Read it</button>
           <label class="note keep" hidden><input type="checkbox" name="store"> Save the text to my account</label>
         </div>
       </form>

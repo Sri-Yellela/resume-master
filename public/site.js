@@ -61,8 +61,9 @@ async function refreshConfig() {
     : !config.signedIn ? "Sign in to use this tool. An account gets free credits every month."
     : !config.model ? "The model behind this tool is not configured on this deployment."
     : `Uses 1 credit, only if it succeeds. You have ${config.balance}.`;
-  for (const id of ["#generate-gate", "#pdf-gate"]) say($(id), gate, config.signedIn && config.model ? "" : "bad");
-  $$("#generate-form button[type=submit], #pdf-form button[type=submit]").forEach(b => { b.disabled = !(config.signedIn && config.model); });
+  say($("#generate-gate"), gate, config.signedIn && config.model ? "" : "bad");
+  // PDF → text is free and anonymous (A70) — never gated on an account or a model.
+  $$("#generate-form button[type=submit]").forEach(b => { b.disabled = !(config.signedIn && config.model); });
 }
 
 // ── ATS ─────────────────────────────────────────────────────────────────────────────────────────
@@ -170,13 +171,14 @@ $("#pdf-form").addEventListener("submit", async (e) => {
       fr.readAsDataURL(file);
     });
     const r = await call("POST", "/tools/parse-pdf", { pdfBase64, store: f.store?.checked === true, title: file.name });
-    out.innerHTML = `<p class="msg good">Read ${r.chars} characters — ${r.credits.charged} credit used, ${r.credits.balance} left.</p>
+    if (r.needsOcr) { out.innerHTML = `<p class="msg bad">${esc(r.message)}</p>`; return; }
+    const cols = (r.columns || []).some(c => c > 1) ? " Two columns were read left, then right — check the order." : "";
+    out.innerHTML = `<p class="msg good">Read ${r.chars} characters from ${r.pages} page${r.pages === 1 ? "" : "s"}.${cols}</p>${savedNote(r.saved)}
       <textarea readonly>${esc(r.text)}</textarea>
       <div class="row"><button class="btn" type="button" data-use>Use it in the ATS check and the tailor</button></div>`;
     $("[data-use]", out).addEventListener("click", () => {
       $("#ats-form").resumeText.value = r.text; $("#generate-form").baseResumeText.value = r.text; openTab("ats");
     });
-    refreshConfig();
   } catch (err) { out.innerHTML = `<p class="msg bad">${esc(err.message)}</p>`; }
 });
 
