@@ -15,6 +15,9 @@
 // form on another site cannot send without a CORS preflight this service never grants.
 // ⛔ No payload is logged here either — the app's request log line is the only log.
 import express from "express";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   AccountError, signUp, signIn, createSession, userForSession, endSession, publicUser,
   startPasswordReset, finishPasswordReset, exportAccount, deleteAccount, SESSION_DAYS,
@@ -30,6 +33,7 @@ import { parsePdf } from "../parsing/parsePdf.js";
 import { scoreAts, formatResume, atsOutcome } from "../tools/deterministic.js";
 
 const COOKIE = "rm_session";
+const PRIVACY_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "docs", "PRIVACY.md");
 
 function readCookie(req, name) {
   for (const part of String(req.headers.cookie || "").split(";")) {
@@ -85,6 +89,12 @@ export function siteRoutes({ store, anthropic = null, env = process.env, meterin
   };
 
   r.use(withUser);
+
+  // The privacy statement the site links to IS docs/PRIVACY.md — served, not copied, so the page and
+  // the document cannot drift apart.
+  r.get("/privacy", (_req, res) => {
+    res.json({ markdown: fs.readFileSync(PRIVACY_FILE, "utf8") });
+  });
 
   // ── what this deployment offers, for the page to render honestly ──────────────────────────────
   r.get("/config", (req, res) => res.json({

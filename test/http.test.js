@@ -60,10 +60,12 @@ test("/v1/version answers JSON with the service name — assert the KEY, never a
   } finally { await s.close(); }
 });
 
+// A54 (10-02): "/" and the site's own files (public/) are pages now, deliberately — the domain had no
+// front door. test/site.test.js pins those. Every OTHER unknown path is still a JSON 404.
 test("⛔ an unknown path is a JSON 404, never a 200 page", async () => {
   const s = await serve(null);
   try {
-    for (const path of ["/", "/api/config", "/v1/nope", "/index.html"]) {
+    for (const path of ["/api/config", "/v1/nope", "/nope.html", "/admin"]) {
       const r = await fetch(s.base + path);
       assert.equal(r.status, 404, path);
       assert.deepEqual(await r.json(), { error: "not_found" });
