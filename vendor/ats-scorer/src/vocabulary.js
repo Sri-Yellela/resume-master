@@ -9,8 +9,9 @@
  *     building a domain profile. domain_profiles.selected_keywords / selected_tools /
  *     selected_verbs are drawn from exactly these, so the ATS report and the profile it scores
  *     against now speak the same language.
- *   data/DOMAIN_TOOL_REGISTRY.json — the per-company stack lists used to keep generation honest
- *     about what a company actually runs.
+ *   data/DOMAIN_TOOL_REGISTRY.json — per-company stack terms, admitted as a skill only when that
+ *     company's own posting names them (scorer.js). Not a source of facts about a company, and not
+ *     read by generation (A64, 2026-10-02: the old "keeps generation honest" was never true).
  *
  * The point is a CLOSED SET. Before this, the ATS report mined candidate terms by sliding a 1-3
  * word window over the job description, so it emitted "and scalable. We" and "s core productivity"
