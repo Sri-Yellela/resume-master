@@ -23,11 +23,11 @@
   src: url("/fonts/instrument-serif-latin-400-italic.woff2") format("woff2"); }
 
 :root {
-  /* ⏸ THE ACCENT — the owner picks (A68). The old site's four, as it offered them:
+  /* THE ACCENT — the owner's pick (A68, 10-03): Sky Blue. The old site's four, as it offered them:
        Sky Blue #A8D8EA · Lemon Yellow #F0EF8A · Celtic Green #88C87A · Sunset Orange #FFB07A
      Every one is a light fill with dark text on it, and ≥ 9:1 as text on the night.
-     Set until the owner chooses: Lemon (the one the old site happened to show in the reference shot). */
-  --accent: #F0EF8A;
+     Chosen: Sky Blue. Changing it is this one line. */
+  --accent: #A8D8EA;
   --on-accent: #0f0f0f;
 
   /* the night — the old site's hsl(201 100% 13%) */
