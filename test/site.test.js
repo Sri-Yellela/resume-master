@@ -25,7 +25,7 @@ test("/ is the site: HTML, with the tools and the account surfaces", async () =>
                       'data-dialog="signin"', 'data-dialog="signup"', 'data-dialog="account"', 'href="/privacy.html"']) {
       assert.ok(html.includes(id), `the page has ${id}`);
     }
-    for (const f of ["/site.css", "/site.js", "/privacy.html", "/fonts/inter-latin-400-normal.woff2"]) {
+    for (const f of ["/site.css", "/site.js", "/chrome.js", "/privacy.html", "/sky.svg", "/fonts/dm-sans-latin-400-normal.woff2"]) {
       assert.equal((await fetch(s.base + f)).status, 200, f);
     }
     assert.equal((await fetch(s.base + "/nope.html")).status, 404);
@@ -42,10 +42,13 @@ test("the privacy page IS docs/PRIVACY.md, served — it cannot drift from the d
 });
 
 test("⛔ the site makes no third-party request, and every write sends X-RM-Client: web", () => {
-  const files = ["public/index.html", "public/site.js", "public/site.css", "public/privacy.html"].map(f => [f, fs.readFileSync(f, "utf8")]);
+  const pdfPages = fs.readdirSync("public/pdf", { withFileTypes: true }).filter(d => d.isDirectory()).map(d => `public/pdf/${d.name}/index.html`);
+  const files = ["public/index.html", "public/site.js", "public/site.css", "public/privacy.html", "public/chrome.js", "public/pdf-tools.js",
+                 "public/pdf/index.html", ...pdfPages].map(f => [f, fs.readFileSync(f, "utf8")]);
   for (const [f, src] of files) {
     const urls = [...src.matchAll(/(?:src|href|url\()\s*=?\s*["']?(https?:\/\/[^"')\s]+)/g)].map(m => m[1]);
-    const external = urls.filter(u => !/^https:\/\/jobsviadraft\.com/.test(u));
+    // Its own origin (canonical links) and draft are links, not loads.
+    const external = urls.filter(u => !/^https:\/\/(jobsviadraft\.com|resumemaster\.one)/.test(u));
     assert.deepEqual(external, [], `${f} loads from another origin: ${external.join(", ")}`);
     assert.doesNotMatch(src, /fonts\.googleapis|fonts\.gstatic|cdn\.|unpkg|jsdelivr/, `${f} uses a CDN`);
   }
@@ -53,7 +56,7 @@ test("⛔ the site makes no third-party request, and every write sends X-RM-Clie
   assert.match(js, /headers: \{ "content-type": "application\/json", "x-rm-client": "web" \}/);
   assert.equal((js.match(/fetch\(/g) || []).length, 1, "one fetch helper — every call goes through it");
   for (const f of fs.readdirSync("public/fonts").filter(f => f.endsWith(".woff2"))) {
-    const family = f.startsWith("inter") ? "inter" : "instrument-serif";
+    const family = f.replace(/-latin-.*$/, "");
     assert.ok(fs.existsSync(`public/fonts/LICENSE-${family}.txt`), `${f} ships with its licence`);
   }
 });

@@ -4,31 +4,48 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Resume Master — résumé tools that show their work</title>
-  <meta name="description" content="Free ATS check and résumé formatting for anyone. Tailored résumés with an account. Nothing you send is kept unless you ask.">
+  <meta name="description" content="A free ATS check, résumé formatting and PDF tools that never upload your file. Tailored résumés with an account. Nothing you send is kept unless you ask.">
+  <link rel="canonical" href="https://resumemaster.one/">
   <link rel="stylesheet" href="/site.css">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2300283f'/%3E%3Ctext x='16' y='22' font-size='17' text-anchor='middle' fill='%23f5c35b' font-family='serif' font-style='italic'%3ERM%3C/text%3E%3C/svg%3E">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 </head>
 <body>
-  <div class="wrap">
-    <header class="top">
-      <a class="wordmark" href="/">Resume <em>Master</em></a>
-      <nav class="top" aria-label="Account">
-        <span id="acct-signed-out"><button class="btn" data-open="signin">Sign in</button> <button class="btn primary" data-open="signup">Create an account</button></span>
-        <span id="acct-signed-in" class="account-bar" hidden>
-          <span id="acct-email"></span> · <span class="balance" id="acct-balance"></span>
-          <button class="btn" data-open="account">Account</button>
-          <button class="btn" id="signout">Sign out</button>
-        </span>
-      </nav>
-    </header>
-
+  <!-- chrome:nav -->
+<header class="nav" id="nav">
+  <a class="stamp" href="/" aria-label="Resume Master — home"><span class="stamp__box"><span>R</span><span class="stamp__fold">esume</span><span>M</span><span class="stamp__fold">aster</span></span></a>
+  <nav class="nav__links" aria-label="Tools">
+    <a class="nav__link" href="/#ats" data-nav="ats">ATS check</a>
+    <a class="nav__link" href="/#format" data-nav="format">Format</a>
+    <a class="nav__link" href="/#generate" data-nav="generate">Tailor</a>
+    <a class="nav__link" href="/pdf/" data-nav="pdf">PDF tools</a>
+  </nav>
+  <details class="nav__menu">
+    <summary>Menu</summary>
+    <nav class="nav__menu-panel glass" aria-label="Tools">
+      <a href="/#ats">ATS check</a><a href="/#format">Format</a><a href="/#generate">Tailor a résumé</a>
+      <a href="/pdf/">PDF tools</a><a href="/privacy.html">Privacy</a>
+    </nav>
+  </details>
+  <div class="nav__account">
+    <span id="acct-signed-out"><button class="btn ghost" data-open="signin">Sign in</button> <button class="btn primary" data-open="signup">Get started</button></span>
+    <span id="acct-signed-in" class="account-bar" hidden>
+      <span id="acct-email"></span> · <span class="balance" id="acct-balance"></span>
+      <button class="btn ghost" data-open="account">Account</button>
+      <button class="btn ghost" id="signout">Sign out</button>
+    </span>
+  </div>
+</header>
+  <!-- /chrome:nav -->
+  <main class="wrap">
     <section class="hero">
-      <h1>Résumé tools that <em>show their work.</em></h1>
-      <p>Check a résumé against a job and see exactly which terms matched, format it, or work on a PDF — merge,
-        compress, protect, read its text — free, with no account. Tailoring it uses an account. Nothing you send is kept
-        unless you ask, per document, and the PDF tools never upload your file at all.</p>
+      <a class="stamp stamp--lg" href="/" aria-label="Resume Master — home" tabindex="-1"><span class="stamp__box"><span>R</span><span class="stamp__fold">esume</span><span>M</span><span class="stamp__fold">aster</span></span></a>
+      <h1 class="hero__title">Résumé tools that show their work.</h1>
+      <p class="hero__tagline">Check a résumé against a job and see exactly which terms matched, format it, or work on a PDF —
+        free, with no account. Tailoring uses an account. Nothing you send is kept unless you ask, per document.</p>
+      <a class="hero__cta" href="#tools">Check a résumé free →</a>
     </section>
 
+    <section id="tools" class="tools">
     <div class="tabs" role="tablist" aria-label="Tools">
       <button class="tab" role="tab" aria-selected="true" data-tab="ats">ATS check <span class="tag">free</span></button>
       <button class="tab" role="tab" aria-selected="false" data-tab="format">Format <span class="tag">free</span></button>
@@ -103,8 +120,8 @@
     <section class="panel glass" data-panel="pdf" hidden>
       <h2>PDF tools</h2>
       <p class="lede">Merge, split, compress for an upload limit, protect, unlock, turn into images, read the text.</p>
-      <!-- A69: the same component draft mounts (@draft/pdf-toolkit, vendored). Loaded when this tab opens. -->
-      <div id="pdf-tools" class="pdf-tools"><p class="note">Loading the PDF tools…</p></div>
+      <p class="note">Each tool also has its own page: <a href="/pdf/">all PDF tools</a>.</p>
+      <div id="pdf-tools" class="pdf-tools" data-initial="merge" data-lazy><p class="note">Loading the PDF tools…</p></div>
     </section>
 
     <!-- ── Account dialogs ───────────────────────────────────────────────── -->
@@ -154,14 +171,34 @@
       </div>
       <p class="msg" id="account-msg"></p>
     </section>
+    </section>
 
-    <footer>
-      <p>Resume Master — a sibling of <a href="https://jobsviadraft.com">draft</a>. Bands are calibrated on draft's
-        human-graded postings; they are coarse by design. <a href="/privacy.html">Privacy — what is kept, and for how long</a>.
-        For developers: the API is documented in the contract the service publishes.</p>
-    </footer>
-  </div>
+    <section class="everything" aria-labelledby="everything-title">
+      <h2 id="everything-title" class="display">Everything here, and what it costs</h2>
+      <p class="everything__sub">Three of the four are free and need no account. Only tailoring runs a model.</p>
+      <div class="cards cards--four">
+        <a class="card" href="/#ats"><span class="card__num">01</span><span class="card__rule"></span><span class="card__title">ATS check</span>
+          <span class="card__desc">The terms a posting asks for that your résumé shows, and the ones it does not. A band, never a bare number. Free.</span></a>
+        <a class="card" href="/#format"><span class="card__num">02</span><span class="card__rule"></span><span class="card__title">Format</span>
+          <span class="card__desc">A clean, print-ready page with a fixed layout. No model, free.</span></a>
+        <a class="card" href="/#generate"><span class="card__num">03</span><span class="card__rule"></span><span class="card__title">Tailor</span>
+          <span class="card__desc">A rewrite for one posting, checked before you see it. One credit, only if it succeeds.</span></a>
+        <a class="card" href="/pdf/"><span class="card__num">04</span><span class="card__rule"></span><span class="card__title">PDF tools</span>
+          <span class="card__desc">Merge, split, compress, protect, convert — in your browser. Your file is never uploaded. Free.</span></a>
+      </div>
+    </section>
+  </main>
+  <!-- chrome:footer -->
+<footer class="foot">
+  <a class="stamp" href="/" aria-label="Resume Master — home"><span class="stamp__box"><span>R</span><span class="stamp__fold">esume</span><span>M</span><span class="stamp__fold">aster</span></span></a>
+  <p>Résumé tools that show their work, and PDF tools that never upload your file. Bands are calibrated on
+    human-graded postings and are coarse by design.</p>
+  <p class="foot__links"><a href="/#ats">ATS check</a> · <a href="/#format">Format</a> · <a href="/#generate">Tailor</a> ·
+    <a href="/pdf/">PDF tools</a> · <a href="/privacy.html">Privacy — what is kept, and for how long</a></p>
+</footer>
+  <!-- /chrome:footer -->
   <script src="/site.js" defer></script>
+  <script src="/chrome.js" defer></script>
   <script type="module" src="/pdf-tools.js"></script>
 </body>
 </html>

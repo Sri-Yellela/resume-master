@@ -1,13 +1,14 @@
-// A69 — the PDF tools, in the visitor's browser. The component is @draft/pdf-toolkit (vendored,
-// checksummed, served at /lib/pdf-toolkit/) — the same file draft mounts. Libraries come from this
-// service (/lib/…): the site makes no third-party request, and the file is never uploaded.
-// Loaded only when the PDF tab is first opened, so nobody pays ~2 MB for a tab they never use.
-const panel = document.querySelector('[data-panel="pdf"]');
+// The PDF tools (A69), in the visitor's browser — the file is never uploaded. The component is
+// src/pdf-toolkit (served at /lib/pdf-toolkit/); its libraries are served by this service (/lib/…),
+// so the site makes no third-party request.
+//   · a tool page (/pdf/<tool>/) mounts at once, on the tool its #pdf-tools names (data-initial);
+//   · the home page's PDF tab (data-lazy) mounts the first time the tab opens, so nobody downloads
+//     ~2 MB of PDF code for a tab they never use.
 const host = document.getElementById("pdf-tools");
 let started = false;
 
 async function start() {
-  if (started) return;
+  if (started || !host) return;
   started = true;
   try {
     const [lib, pdfjs, ui] = await Promise.all([
@@ -19,7 +20,8 @@ async function start() {
     const css = document.createElement("link");
     css.rel = "stylesheet"; css.href = "/lib/pdf-toolkit/styles.css";
     document.head.append(css);
-    ui.mountPdfToolkit(host, { lib, pdfjs, initial: "merge", onText: (t) => window.rmUseText?.(t) });
+    ui.mountPdfToolkit(host, { lib, pdfjs, initial: host.dataset.initial || "merge",
+      onText: window.rmUseText ? (t) => window.rmUseText(t) : null });
   } catch (e) {
     started = false;
     host.innerHTML = "";
@@ -30,7 +32,11 @@ async function start() {
   }
 }
 
-if (panel && host) {
-  if (!panel.hidden) start();
-  new MutationObserver(() => { if (!panel.hidden) start(); }).observe(panel, { attributes: true, attributeFilter: ["hidden"] });
+if (host) {
+  const panel = host.closest("[data-panel]");
+  if (!("lazy" in host.dataset) || !panel) start();
+  else {
+    if (!panel.hidden) start();
+    new MutationObserver(() => { if (!panel.hidden) start(); }).observe(panel, { attributes: true, attributeFilter: ["hidden"] });
+  }
 }

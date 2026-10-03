@@ -1,0 +1,5 @@
+User-agent: *
+Disallow: /v1/
+Disallow: /mcp
+Allow: /
+Sitemap: https://resumemaster.one/sitemap.xml

@@ -17,7 +17,7 @@ import { textFromPdfDocument } from "./pdfText.js";
 const TOOLS = [
   { id: "merge", label: "Merge", blurb: "Join PDFs into one, in the order you set." },
   { id: "split", label: "Split", blurb: "One PDF per page, or per range you choose." },
-  { id: "organise", label: "Organise", blurb: "Reorder, rotate or delete pages." },
+  { id: "organise", label: "Organize", blurb: "Reorder, rotate or delete pages." },
   { id: "compress", label: "Compress", blurb: "Shrink the pictures inside — the text stays readable, for upload limits." },
   { id: "watermark", label: "Watermark", blurb: "Stamp text across every page." },
   { id: "protect", label: "Protect", blurb: "Add a password (AES-256)." },
