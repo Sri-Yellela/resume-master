@@ -11,8 +11,9 @@
 // promise the header states, and the reason this beats an uploader.
 
 import * as core from "./core.js";
-import { renderPages, thumbnails, reencodeJpegInBrowser } from "./render.js";
-import { textFromPdfDocument } from "./pdfText.js";
+import { renderPages, thumbnails, reencodeJpegInBrowser, flattenToImages, ocrPdf } from "./render.js";
+import { textFromPdfDocument, linesOf } from "./pdfText.js";
+import { paragraphsOf, toDocx, tableOf, toXlsx } from "./office.js";
 
 const TOOLS = [
   { id: "merge", label: "Merge", blurb: "Join PDFs into one, in the order you set." },
@@ -25,6 +26,9 @@ const TOOLS = [
   { id: "images", label: "Images → PDF", blurb: "JPEG or PNG pictures into one PDF." },
   { id: "toimages", label: "PDF → images", blurb: "Each page as a PNG or JPEG." },
   { id: "text", label: "PDF → text", blurb: "The text a PDF carries — no AI, nothing sent." },
+  { id: "word", label: "PDF → Word", blurb: "A .docx of the text, in reading order, with headings and paragraphs. Not the exact layout or pictures." },
+  { id: "excel", label: "PDF → Excel", blurb: "A .xlsx of the text laid out in columns — tables and statements. One sheet per page; numbers stay numbers." },
+  { id: "ocr", label: "OCR", blurb: "Read a scanned PDF: its text, and a searchable copy you can select and search. English; it runs on this computer, a page at a time." },
 ];
 
 const el = (tag, attrs = {}, ...kids) => {
@@ -47,7 +51,7 @@ const readBytes = async (file) => new Uint8Array(await file.arrayBuffer());
  * @param opts  { lib, pdfjs, initial?: tool id, onText?: (text) => void }
  * @returns { destroy }
  */
-export function mountPdfToolkit(root, { lib, pdfjs, initial = "merge", onText = null } = {}) {
+export function mountPdfToolkit(root, { lib, pdfjs, zipSync = null, loadOcr = null, initial = "merge", onText = null } = {}) {
   if (!lib || !pdfjs) throw new Error("mountPdfToolkit needs { lib, pdfjs }");
   const urls = new Set();
   const blobUrl = (bytes, type = "application/pdf") => { const u = URL.createObjectURL(new Blob([bytes], { type })); urls.add(u); return u; };
@@ -61,8 +65,6 @@ export function mountPdfToolkit(root, { lib, pdfjs, initial = "merge", onText = 
     el("p", { class: "pt-promise", "data-pt-promise": true },
       "Your files never leave this browser — nothing is uploaded, stored or seen by anyone. Free, no account."),
     tabs, panel,
-    el("details", { class: "pt-notoffered" }, el("summary", {}, "What these tools do not do"),
-      el("ul", {}, core.NOT_OFFERED.map(n => el("li", {}, el("strong", {}, n.what), " — ", n.why)))),
   );
 
   let current = null;
@@ -177,16 +179,26 @@ export function mountPdfToolkit(root, { lib, pdfjs, initial = "merge", onText = 
       const level = el("select", { class: "pt-text" },
         el("option", { value: "1600|0.72" }, "Balanced — pictures up to 1600 px"),
         el("option", { value: "1100|0.6" }, "Smaller — pictures up to 1100 px"),
-        el("option", { value: "2400|0.82" }, "Light — pictures up to 2400 px"));
+        el("option", { value: "2400|0.82" }, "Light — pictures up to 2400 px"),
+        el("option", { value: "flatten" }, "Maximum — every page becomes a picture (text no longer selectable)"));
+      const warn = el("p", { class: "pt-muted", hidden: true },
+        "Maximum turns every page into a picture: the smallest file, but its text can no longer be selected, searched, or read by software — including the systems employers use to read a résumé.");
+      level.addEventListener("change", () => { warn.hidden = level.value !== "flatten"; });
       const { btn, s, out } = run("Compress", async (s, out) => {
         const f = one(input, s); if (!f) return;
+        if (level.value === "flatten") {
+          const before = f.size, bytes = await flattenToImages(lib, pdfjs, await readBytes(f));
+          if (bytes.length >= before) return say(s, `${kb(before)} — flattening would not make this one smaller; the original is unchanged.`);
+          say(s, `${kb(before)} → ${kb(bytes.length)} (${Math.round((1 - bytes.length / before) * 100)}% smaller). Every page is now a picture — its text is no longer selectable.`, "good");
+          return download(out, bytes, `${base(f.name)}-compressed-max.pdf`);
+        }
         const [maxDimension, quality] = level.value.split("|").map(Number);
         const r = await core.compress(lib, await readBytes(f), { reencodeJpeg: reencodeJpegInBrowser, maxDimension, quality });
         const pct = Math.round((1 - r.after / r.before) * 100);
         say(s, `${kb(r.before)} → ${kb(r.after)}${r.keptOriginal ? "" : ` (${pct}% smaller)`}. ${r.note}`, r.keptOriginal ? "" : "good");
         if (!r.keptOriginal) download(out, r.bytes, `${base(f.name)}-compressed.pdf`);
       });
-      return [el("label", { class: "pt-field" }, "PDF", input), el("label", { class: "pt-field" }, "How much", level), btn, s, out];
+      return [el("label", { class: "pt-field" }, "PDF", input), el("label", { class: "pt-field" }, "How much", level), warn, btn, s, out];
     },
     watermark() {
       const input = fileInput();
@@ -255,7 +267,11 @@ export function mountPdfToolkit(root, { lib, pdfjs, initial = "merge", onText = 
           .catch(e => { throw new core.ToolkitError(e?.name === "PasswordException" ? "This PDF is password-protected. Unlock it first." : "This file could not be read as a PDF."); });
         try {
           const r = await textFromPdfDocument(doc);
-          if (r.needsOcr) return say(s, "This PDF has no text to read — it looks like a scan. Reading scans (OCR) is not offered.", "bad");
+          if (r.needsOcr) {
+            say(s, "This PDF has no text layer — it looks like a scan. OCR can read it.", "bad");
+            if (loadOcr) out.append(el("button", { type: "button", class: "pt-btn pt-primary", onclick: () => open("ocr") }, "Read it with OCR"));
+            return;
+          }
           say(s, `${r.chars} characters from ${r.pages} page${r.pages === 1 ? "" : "s"}.${r.columns.some(c => c > 1) ? " Two columns were read left, then right — check the order." : ""}`, "good");
           const area = el("textarea", { class: "pt-textout", readonly: true, rows: "14" }); area.value = r.text;
           out.append(area);
@@ -265,7 +281,69 @@ export function mountPdfToolkit(root, { lib, pdfjs, initial = "merge", onText = 
       });
       return [el("label", { class: "pt-field" }, "PDF", input), btn, s, out];
     },
+    word() {
+      const input = fileInput();
+      const { btn, s, out } = run("Make a Word file", async (s, out) => {
+        const f = one(input, s); if (!f) return;
+        if (!zipSync) throw new core.ToolkitError("This page cannot make Office files.");
+        const pages = await pagesOf(f);
+        if (!pages.some(p => p.lines.length)) return say(s, "This PDF has no text layer — it looks like a scan. Use OCR first.", "bad");
+        const blocks = paragraphsOf(pages);
+        download(out, toDocx(zipSync, blocks, { title: base(f.name) }), `${base(f.name)}.docx`, null,
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+        say(s, `${blocks.filter(b => b.kind !== "pagebreak").length} paragraphs and headings from ${pages.length} page${pages.length === 1 ? "" : "s"}. Check the layout — fonts and pictures are not carried over.`, "good");
+      });
+      return [el("label", { class: "pt-field" }, "PDF", input), btn, s, out];
+    },
+    excel() {
+      const input = fileInput();
+      const { btn, s, out } = run("Make an Excel file", async (s, out) => {
+        const f = one(input, s); if (!f) return;
+        if (!zipSync) throw new core.ToolkitError("This page cannot make Office files.");
+        const pages = await pagesOf(f);
+        if (!pages.some(p => p.lines.length)) return say(s, "This PDF has no text layer — it looks like a scan. Use OCR first.", "bad");
+        const sheets = pages.map((p, i) => ({ name: `Page ${i + 1}`, rows: tableOf(p.lines) }));
+        download(out, toXlsx(zipSync, sheets), `${base(f.name)}.xlsx`, null,
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        const rows = sheets.reduce((n, sh) => n + sh.rows.length, 0), cols = Math.max(0, ...sheets.flatMap(sh => sh.rows.map(r => r.length)));
+        say(s, `${rows} rows, up to ${cols} columns, across ${sheets.length} sheet${sheets.length === 1 ? "" : "s"}. Columns come from how the text is aligned — check them.`, "good");
+      });
+      return [el("label", { class: "pt-field" }, "PDF", input), btn, s, out];
+    },
+    ocr() {
+      const input = fileInput();
+      const { btn, s, out } = run("Read it", async (s, out) => {
+        const f = one(input, s); if (!f) return;
+        if (!loadOcr) throw new core.ToolkitError("OCR is not available on this page.");
+        say(s, "Loading the reader (once — about 15 MB)…");
+        const { createWorker, workerOptions } = await loadOcr();
+        const r = await ocrPdf(lib, pdfjs, createWorker, workerOptions, await readBytes(f),
+          { onProgress: (n, total) => say(s, `Reading page ${n} of ${total}…`) });
+        if (!r.words) return say(s, "No text was found on these pages.", "bad");
+        say(s, `${r.words} words from ${r.pages} page${r.pages === 1 ? "" : "s"} (average confidence ${r.confidence}%). Read it through — OCR misreads some characters.`, "good");
+        const area = el("textarea", { class: "pt-textout", readonly: true, rows: "12" }); area.value = r.text;
+        out.append(area);
+        download(out, r.bytes, `${base(f.name)}-searchable.pdf`, "a searchable copy");
+        download(out, new TextEncoder().encode(r.text), `${base(f.name)}-ocr.txt`, null, "text/plain");
+        if (onText) out.append(el("button", { type: "button", class: "pt-btn", onclick: () => onText(r.text) }, "Use this text"));
+      });
+      return [el("label", { class: "pt-field" }, "Scanned PDF", input), btn, s, out];
+    },
   };
+
+  async function pagesOf(file) {
+    const doc = await pdfjs.getDocument({ data: await readBytes(file), isEvalSupported: false }).promise
+      .catch(e => { throw new core.ToolkitError(e?.name === "PasswordException" ? "This PDF is password-protected. Unlock it first." : "This file could not be read as a PDF."); });
+    try {
+      const pages = [];
+      for (let n = 1; n <= doc.numPages; n++) {
+        const page = await doc.getPage(n);
+        pages.push({ lines: linesOf((await page.getTextContent()).items) });
+        page.cleanup();
+      }
+      return pages;
+    } finally { await doc.destroy(); }
+  }
 
   open(TOOLS.some(t => t.id === initial) ? initial : "merge");
   return { open, destroy: () => { clearUrls(); root.replaceChildren(); root.classList.remove("pt-root"); }, get current() { return current; } };

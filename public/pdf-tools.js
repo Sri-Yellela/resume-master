@@ -20,7 +20,16 @@ async function start() {
     const css = document.createElement("link");
     css.rel = "stylesheet"; css.href = "/lib/pdf-toolkit/styles.css";
     document.head.append(css);
-    ui.mountPdfToolkit(host, { lib, pdfjs, initial: host.dataset.initial || "merge",
+    const { zipSync } = await import("/lib/fflate/browser.js");
+    // OCR loads only when someone runs it: the reader, its wasm core and the English data (~15 MB).
+    const loadOcr = async () => {
+      const { default: Tesseract } = await import("/lib/tesseract/tesseract.esm.min.js");   // default export only
+      const { createWorker } = Tesseract;
+      const at = (p) => new URL(p, location.origin).href;
+      return { createWorker, workerOptions: { workerPath: at("/lib/tesseract/worker.min.js"),
+        corePath: at("/lib/tesseract-core"), langPath: at("/lib/tessdata"), gzip: true } };
+    };
+    ui.mountPdfToolkit(host, { lib, pdfjs, zipSync, loadOcr, initial: host.dataset.initial || "merge",
       onText: window.rmUseText ? (t) => window.rmUseText(t) : null });
   } catch (e) {
     started = false;

@@ -28,7 +28,7 @@ export const PDF_PAGES = [
   { slug: "organize-pdf", tool: "organise", name: "Organize PDF", h1: "Organize PDF pages",
     desc: "Reorder, rotate or delete the pages of a PDF, with a picture of each page.", steps: ["Choose a PDF", "Move, rotate or remove pages", "Save, and download"] },
   { slug: "compress-pdf", tool: "compress", name: "Compress PDF", h1: "Compress a PDF",
-    desc: "Make a PDF smaller for an upload limit: the pictures shrink, the text stays selectable and readable.", steps: ["Choose a PDF", "Pick how much to shrink the pictures", "Download — or keep the original if it could not get smaller"] },
+    desc: "Make a PDF smaller for an upload limit: the pictures shrink and the text stays selectable — or, at Maximum, every page becomes a picture for the smallest file.", steps: ["Choose a PDF", "Pick how much to shrink it", "Download — or keep the original if it could not get smaller"] },
   { slug: "watermark-pdf", tool: "watermark", name: "Watermark PDF", h1: "Add a watermark to a PDF",
     desc: "Stamp text diagonally across every page of a PDF.", steps: ["Choose a PDF", "Type the watermark", "Download"] },
   { slug: "protect-pdf", tool: "protect", name: "Protect PDF", h1: "Password-protect a PDF",
@@ -41,6 +41,12 @@ export const PDF_PAGES = [
     desc: "Save every page of a PDF as a picture.", steps: ["Choose a PDF", "Pick PNG or JPEG", "Download each page"] },
   { slug: "pdf-to-text", tool: "text", name: "PDF to text", h1: "PDF to text",
     desc: "Copy the text out of a PDF, in reading order — two columns read left, then right. No AI.", steps: ["Choose a PDF", "Read it", "Copy or download the text"] },
+  { slug: "pdf-to-word", tool: "word", name: "PDF to Word", h1: "PDF to Word",
+    desc: "Turn a PDF into an editable Word document: the text in reading order, with headings and paragraphs.", steps: ["Choose a PDF", "Make the Word file", "Download the .docx and check the layout"] },
+  { slug: "pdf-to-excel", tool: "excel", name: "PDF to Excel", h1: "PDF to Excel",
+    desc: "Turn tables and statements in a PDF into an Excel workbook — rows and columns, numbers kept as numbers.", steps: ["Choose a PDF", "Make the Excel file", "Download the .xlsx — one sheet per page"] },
+  { slug: "ocr-pdf", tool: "ocr", name: "OCR PDF", h1: "OCR a scanned PDF",
+    desc: "Read the text in a scanned PDF, and get a searchable copy you can select and search.", steps: ["Choose a scanned PDF", "Read it — a page at a time, on this computer", "Download the text and the searchable PDF"] },
 ];
 
 // ── the shared chrome ────────────────────────────────────────────────────────────────────────────
@@ -132,9 +138,11 @@ ${PDF_PAGES.map(card).join("\n")}
       <h2>Why it is private</h2>
       <p>Most PDF sites upload your file to their servers to work on it. These tools do the work on your own computer,
         in this page — so a résumé, a contract or a statement never travels anywhere.</p>
-      <h2>What these tools do not do</h2>
-      <p>Convert to Word or Excel, read scanned PDFs (OCR), or shrink a file by turning its pages into pictures — that would
-        make a résumé unreadable to the systems employers use to read it.</p>
+      <h2>What each conversion carries</h2>
+      <p>PDF to Word keeps the text, in reading order, as headings and paragraphs — not the exact layout, fonts or pictures.
+        PDF to Excel builds rows and columns from text that is aligned in columns. OCR reads English from scanned pages and
+        makes a searchable copy; read it through, because OCR misreads some characters. Compress at Maximum turns every page
+        into a picture, so its text can no longer be selected or read by software.</p>
     </section>`);
 }
 

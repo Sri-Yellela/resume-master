@@ -51,7 +51,7 @@ test("⛔ nothing in the package can send a file anywhere — the promise on the
 });
 
 test("⛔ the operations import nothing — the host passes the libraries in", () => {
-  for (const f of ["core.js", "pdfText.js", "render.js"]) {
+  for (const f of ["core.js", "pdfText.js", "render.js", "office.js"]) {
     const src = fs.readFileSync(path.join(SRC, f), "utf8");
     assert.doesNotMatch(src, /^\s*import\s/m, `${f} must not import (one file, three hosts)`);
   }

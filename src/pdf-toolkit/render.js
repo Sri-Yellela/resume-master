@@ -62,3 +62,79 @@ export async function reencodeJpegInBrowser(bytes, { maxDimension = 1600, qualit
   if (!blob) return null;
   return { bytes: new Uint8Array(await blob.arrayBuffer()), width, height };
 }
+
+async function renderToCanvas(page, scale) {
+  const viewport = page.getViewport({ scale });
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.ceil(viewport.width); canvas.height = Math.ceil(viewport.height);
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  await page.render({ canvasContext: ctx, viewport }).promise;
+  return canvas;
+}
+const jpegOf = async (canvas, quality) =>
+  new Uint8Array(await (await new Promise(r => canvas.toBlob(r, "image/jpeg", quality))).arrayBuffer());
+
+/**
+ * Compress → Maximum (owner, 10-03): every page becomes a picture. The biggest saving — and the text
+ * is no longer selectable or readable by software (an ATS, a screen reader, search). Said on the page.
+ * Pages keep their size in points.
+ */
+export async function flattenToImages(lib, pdfjs, bytes, { scale = 1.5, quality = 0.6 } = {}) {
+  const src = await pdfjs.getDocument({ data: new Uint8Array(bytes), isEvalSupported: false }).promise;
+  const out = await lib.PDFDocument.create();
+  try {
+    for (let n = 1; n <= src.numPages; n++) {
+      const page = await src.getPage(n);
+      const { width, height } = page.getViewport({ scale: 1 });
+      const img = await out.embedJpg(await jpegOf(await renderToCanvas(page, scale), quality));
+      out.addPage([width, height]).drawImage(img, { x: 0, y: 0, width, height });
+      page.cleanup();
+    }
+  } finally { await src.destroy(); }
+  return out.save({ useObjectStreams: true });
+}
+
+/**
+ * OCR (owner, 10-03): read a scanned PDF with Tesseract, in this browser, and return its text and a
+ * SEARCHABLE PDF — each page's image with the recognised words laid over it as invisible text at
+ * their positions, so the words can be selected, searched and read by software.
+ * `createWorker` and `workerOptions` come from the page (tesseract.js, self-hosted).
+ */
+export async function ocrPdf(lib, pdfjs, createWorker, workerOptions, bytes, { scale = 2, lang = "eng", onProgress = null } = {}) {
+  const src = await pdfjs.getDocument({ data: new Uint8Array(bytes), isEvalSupported: false }).promise;
+  const worker = await createWorker(lang, 1, workerOptions);
+  const out = await lib.PDFDocument.create();
+  const font = await out.embedFont(lib.StandardFonts.Helvetica);
+  const safe = (s) => [...s].filter(ch => { try { font.encodeText(ch); return true; } catch { return false; } }).join("");
+  const texts = [];
+  let words = 0, confSum = 0;
+  try {
+    for (let n = 1; n <= src.numPages; n++) {
+      onProgress?.(n, src.numPages);
+      const page = await src.getPage(n);
+      const { width, height } = page.getViewport({ scale: 1 });
+      const canvas = await renderToCanvas(page, scale);
+      const { data } = await worker.recognize(canvas, {}, { text: true, blocks: true });
+      texts.push((data.text || "").trim());
+      const pdfPage = out.addPage([width, height]);
+      pdfPage.drawImage(await out.embedJpg(await jpegOf(canvas, 0.8)), { x: 0, y: 0, width, height });
+      for (const block of data.blocks || []) for (const para of block.paragraphs || []) for (const line of para.lines || []) {
+        for (const w of line.words || []) {
+          const text = safe(w.text || "");
+          if (!text.trim()) continue;
+          const { x0, y0, x1, y1 } = w.bbox;
+          const size = Math.max(4, ((y1 - y0) / scale) * 0.9);
+          pdfPage.drawText(text, { x: x0 / scale, y: height - y1 / scale + size * 0.15, size, font, opacity: 0 });
+          words++; confSum += w.confidence || 0;
+        }
+      }
+      page.cleanup();
+    }
+  } finally {
+    await worker.terminate();
+    await src.destroy();
+  }
+  return { bytes: await out.save({ useObjectStreams: true }), text: texts.join("\n\n"), pages: texts.length,
+           words, confidence: words ? Math.round(confSum / words) : 0 };
+}

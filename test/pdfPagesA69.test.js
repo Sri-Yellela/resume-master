@@ -48,6 +48,16 @@ test("the hub links every page; the sitemap lists every page; robots keeps crawl
   } finally { await s.close(); }
 });
 
+test("everything is offered: Word, Excel, OCR and Maximum compress, and no 'do not do' list (owner, 10-03)", () => {
+  const slugs = PDF_PAGES.map(p => p.slug);
+  for (const s of ["pdf-to-word", "pdf-to-excel", "ocr-pdf"]) assert.ok(slugs.includes(s), s);
+  const ui = fs.readFileSync("src/pdf-toolkit/ui.js", "utf8");
+  assert.match(ui, /value: "flatten"/, "Compress offers Maximum");
+  assert.doesNotMatch(ui + fs.readFileSync("public/pdf/index.html", "utf8"), /do not do|not offered/i);
+  const loader = fs.readFileSync("public/pdf-tools.js", "utf8");
+  assert.match(loader, /zipSync, loadOcr/, "the page hands the component the Office and OCR libraries");
+});
+
 test("the product stands alone: no page or script depends on draft", () => {
   for (const f of ["public/pdf-tools.js", "src/pdf-toolkit/ui.js", "src/pdf-toolkit/core.js", "public/pdf/index.html"]) {
     assert.doesNotMatch(fs.readFileSync(f, "utf8"), /@draft\/|jobsviadraft|draft mounts/i, f);

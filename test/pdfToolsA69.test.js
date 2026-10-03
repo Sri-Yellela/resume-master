@@ -9,7 +9,8 @@ import { createApp } from "../src/http/app.js";
 async function serve() {
   const app = createApp({ log: () => {} });
   const server = await new Promise(r => { const s = app.listen(0, () => r(s)); });
-  return { base: `http://127.0.0.1:${server.address().port}`, close: () => new Promise(r => server.close(r)) };
+  // closeAllConnections: a keep-alive socket left open would hold server.close() for ever.
+  return { base: `http://127.0.0.1:${server.address().port}`, close: () => new Promise(r => { server.close(r); server.closeAllConnections?.(); }) };
 }
 
 test("the libraries and the component are served from here, as JavaScript", async () => {
@@ -20,7 +21,24 @@ test("the libraries and the component are served from here, as JavaScript", asyn
       const r = await fetch(s.base + p);
       assert.equal(r.status, 200, p);
       assert.match(r.headers.get("content-type"), /^text\/javascript/, `${p}: a module script refuses any other type`);
+      await r.arrayBuffer();
     }
+    // Tier 2 (owner, 10-03): Office files and OCR, self-hosted too.
+    for (const p of ["/lib/fflate/browser.js", "/lib/tesseract/tesseract.esm.min.js", "/lib/tesseract/worker.min.js",
+                     "/lib/tesseract-core/tesseract-core-simd-lstm.wasm.js"]) {
+      const r = await fetch(s.base + p);
+      assert.equal(r.status, 200, p);
+      assert.match(r.headers.get("content-type"), /^text\/javascript/, p);
+      await r.arrayBuffer();
+    }
+    const wasm = await fetch(`${s.base}/lib/tesseract-core/tesseract-core-simd-lstm.wasm`);
+    assert.equal(wasm.headers.get("content-type"), "application/wasm", "streaming compilation needs the wasm type");
+    await wasm.arrayBuffer();
+    const data = await fetch(`${s.base}/lib/tessdata/eng.traineddata.gz`);
+    assert.equal(data.status, 200);
+    assert.equal(data.headers.get("content-encoding"), null, "the reader unzips the data itself — never Content-Encoding");
+    assert.ok(Number(data.headers.get("content-length")) < 4_000_000, "the LSTM-only data (≈2.9 MB), not the 10.9 MB legacy set");
+    await data.arrayBuffer();
     const miss = await fetch(`${s.base}/lib/pdf-toolkit/nope.js`);
     assert.equal(miss.status, 404, "a missing file is a 404, not a 500");
     assert.equal((await miss.json()).error, "not_found");
