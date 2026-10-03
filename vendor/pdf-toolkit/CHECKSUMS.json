@@ -1,0 +1,19 @@
+{
+  "name": "@draft/pdf-toolkit",
+  "version": "1.0.0",
+  "normalisation": "LF",
+  "algorithm": "sha256",
+  "files": {
+    "README.md": "e52ee807f324340622b9095d1e672747a8529263f831a70b258d730303172940",
+    "package.json": "25c5844d73263377a881765ab2fb48256bd5616f8e151728f35be723db74e099",
+    "scripts/checksums.mjs": "078a216980a4c5519b3166101fcb9456663529245d4f2b1fe61cbdb6728181b0",
+    "src/core.js": "ed6bfaa0daaf99fab0b3e0c175516c0249ff0885f589abd0f4681ed0f12d8230",
+    "src/index.js": "d778a66571971bc1bc554d37f241144318b01fcd353430ce2963892f8ebf0a3c",
+    "src/pdfText.js": "f49e2c588a5d84554796b8525ac2ed400d30a89fe2e3423e6c00c6a32d6f8992",
+    "src/render.js": "07cca4b4a424dbbef19781dad39db92022f8e19fac79e2f82625275fbba14505",
+    "src/styles.css": "1849c3bb291a08cfb6c64eb0052b756d4c4cf8827a1cf0d40b29ee01d74066ad",
+    "src/ui.js": "c5ff8df0b7089e7f2eef838fae93c72f9949e90e2e9ec9c4831ce11116dddeac",
+    "test/core.test.js": "5d361071003e9884af450dc3b6944413cb24345acbaa1c38a08dbee3588dbc14",
+    "test/package.test.js": "3b574f056e62b3f2bd0592d6b460cc2a462dd77b85fb4d6d821a6a4dfe9c96bb"
+  }
+}

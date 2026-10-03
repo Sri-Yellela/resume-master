@@ -48,6 +48,8 @@ Using the free tools on the site (ATS scoring, formatting) needs no account and 
 | **Documents you choose to save** — the OUTPUT of a tool (a generated or formatted résumé, text read from a PDF, an ATS report), and only when you tick "Save to my account" for that run | so you can come back to it | **90 days**, then deleted automatically — or sooner, when you delete it. A document you **pin** is kept until you unpin it (its 90 days then start again) or delete it; up to 20 can be pinned | **Delete** on the document removes it; the store zeroes the freed space |
 | A one-time password-reset token (a hash of it) | to reset a forgotten password | 30 minutes, used once | expires |
 
+**The PDF tools (merge, split, compress, protect, unlock, images, text) send nothing at all.** They run in your browser; your file is never uploaded to this service or anyone else (since 10-02).
+
 **Never kept, account or not:** the résumé, job description or PDF you send in. A document is kept
 only as the result, only when you ask, per document.
 

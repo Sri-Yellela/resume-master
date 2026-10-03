@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { PDFDocument, StandardFonts } from "pdf-lib";
+import { PDFDocument, StandardFonts } from "@cantoo/pdf-lib";
 import { createApp } from "../src/http/app.js";
 import { loadAllPrompts } from "../src/generation/promptAssembler.js";
 import { mintToken, parseClientTokens } from "../src/http/auth.js";

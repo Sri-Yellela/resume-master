@@ -17,11 +17,11 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
+    "@cantoo/pdf-lib": "^2.11.1",
     "@draft/ats-scorer": "file:vendor/ats-scorer",
     "@modelcontextprotocol/sdk": "^1.31.0",
     "better-sqlite3": "^12.11.1",
     "express": "^4.21.0",
-    "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^4.10.38"
   }
 }

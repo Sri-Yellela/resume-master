@@ -158,7 +158,11 @@ $("#generate-form").addEventListener("submit", async (e) => {
 });
 
 // ── PDF ─────────────────────────────────────────────────────────────────────────────────────────
-$("#pdf-form").addEventListener("submit", async (e) => {
+// A69: the PDF tab is the in-browser toolkit (public/pdf-tools.js). Its "Use this text" lands here.
+window.rmUseText = (text) => {
+  $("#ats-form").resumeText.value = text; $("#generate-form").baseResumeText.value = text; openTab("ats");
+};
+if ($("#pdf-form")) $("#pdf-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const f = e.target, out = $("#pdf-out"), file = f.file.files[0];
   if (!file) return;
