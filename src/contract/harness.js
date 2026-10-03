@@ -48,9 +48,10 @@ function buildOnePagePdf(text) {
   return Buffer.from(pdf, "latin1").toString("base64");
 }
 export const TINY_PDF_BASE64 = buildOnePagePdf("JANE DOE - Software Engineer - Built payment services");
-// A document the provider rejects: a PDF header and nothing a parser can use. Its failure must be
-// PERMANENT — retrying an invalid document fails identically every time.
+// A PDF header and nothing a parser can use.
 export const INVALID_PDF_BASE64 = Buffer.from("%PDF-1.4\nnot a document\n%%EOF\n").toString("base64");
+// A valid PDF whose page carries NO text layer — what a scan looks like to a text reader.
+export const NO_TEXT_PDF_BASE64 = buildOnePagePdf("");
 
 const GENERATE = {
   mode: "GENERATE", domainModuleKey: "engineering", baseResumeText: BASE_RESUME,
@@ -67,9 +68,6 @@ const rpc = (method, params, id = 1) => ({ jsonrpc: "2.0", id, method, ...(param
 
 const permanent = () => Object.assign(new Error("400 Your credit balance is too low to access the Anthropic API."), { status: 400 });
 const transient = () => Object.assign(new Error("overloaded_error"), { status: 529 });
-// The provider's real answer to an invalid PDF, captured in Phase B's first live run.
-const rejectedDocument = () => Object.assign(new Error('400 {"type":"error","error":{"type":"invalid_request_error",' +
-  '"message":"messages.0.content.0.pdf.source.base64.data: The PDF specified was not valid."}}'), { status: 400 });
 
 /**
  * One scenario = one real request. Fields:
@@ -149,18 +147,19 @@ export const SCENARIOS = [
   { name: "enhance: upstream failure", route: "POST /v1/resumes/enhance", body: { resumeText: "x" }, model: permanent, status: 502 },
   { name: "enhance: no model key", route: "POST /v1/resumes/enhance", body: { resumeText: "x" }, model: "none", status: 503 },
 
-  // parse-pdf — metered
-  { name: "parse-pdf", route: "POST /v1/resumes/parse-pdf", body: { pdfBase64: TINY_PDF_BASE64 }, model: "JANE DOE\nSUMMARY", status: 200 },
-  { name: "parse-pdf: REAL", route: "POST /v1/resumes/parse-pdf", body: { pdfBase64: TINY_PDF_BASE64 }, status: 200, live: true, metered: true, inProcess: false },
+  // parse-pdf — free since 1.2.0 (D17): the PDF's own text layer, no model. The model-failure cases
+  // (upstream failure, a rejected document, no key, the client limit) went with the model.
+  { name: "parse-pdf reads the text layer", route: "POST /v1/resumes/parse-pdf", body: { pdfBase64: TINY_PDF_BASE64 }, status: 200, live: true,
+    expect: b => (/JANE DOE/.test(b.text) && b.chars === b.text.length && Array.isArray(b.usage) && b.usage.length === 0) || "the text layer was not returned, or usage was not empty" },
+  { name: "parse-pdf: a page with no text layer (a scan) is refused, not answered empty", route: "POST /v1/resumes/parse-pdf",
+    body: { pdfBase64: NO_TEXT_PDF_BASE64 }, status: 400, live: true,
+    expect: b => /no text layer/.test(b.message) || "a scan must say it has no text layer" },
+  { name: "parse-pdf: an unreadable PDF is refused", route: "POST /v1/resumes/parse-pdf",
+    body: { pdfBase64: INVALID_PDF_BASE64 }, status: 400, live: true },
+  { name: "parse-pdf: no clients configured", route: "POST /v1/resumes/parse-pdf", service: "no-clients", body: { pdfBase64: TINY_PDF_BASE64 }, status: 503 },
   { name: "parse-pdf: not a PDF", route: "POST /v1/resumes/parse-pdf", body: { pdfBase64: Buffer.from("hello").toString("base64") }, status: 400, live: true },
   { name: "parse-pdf: no token", route: "POST /v1/resumes/parse-pdf", auth: "none", body: {}, status: 401, live: true },
   { name: "parse-pdf: oversize", route: "POST /v1/resumes/parse-pdf", raw: JSON.stringify({ pdfBase64: OVERSIZE }), status: 413 },
-  { name: "parse-pdf: limit refused", route: "POST /v1/resumes/parse-pdf", service: "refuse-limits", body: { pdfBase64: TINY_PDF_BASE64 }, status: 429 },
-  { name: "parse-pdf: upstream failure", route: "POST /v1/resumes/parse-pdf", body: { pdfBase64: TINY_PDF_BASE64 }, model: transient, status: 502 },
-  { name: "parse-pdf: a document the provider rejects is PERMANENT", route: "POST /v1/resumes/parse-pdf",
-    body: { pdfBase64: INVALID_PDF_BASE64 }, model: rejectedDocument, status: 502,
-    expect: b => (b.permanent === true && b.retryable === false) || "an invalid document must never be reported retryable" },
-  { name: "parse-pdf: no model key", route: "POST /v1/resumes/parse-pdf", body: { pdfBase64: TINY_PDF_BASE64 }, model: "none", status: 503 },
 
   // /mcp — free. The transport answers JSON-RPC; auth refusals are this service's Error shape.
   { name: "mcp: initialize names the server", route: "POST /mcp", headers: MCP_ACCEPT, status: 200, live: true,

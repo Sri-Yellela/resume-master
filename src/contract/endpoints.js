@@ -9,7 +9,7 @@ import { str, num, bool, arr, obj, ref, nullable, enumOf } from "./schema.js";
 
 // 1.1.0 (E1): additive — the /mcp routes, the JSON-RPC envelopes, the MCP tool result shapes and
 // the generated tool table (`x-mcp`). No 1.0.0 shape changed.
-export const CONTRACT_VERSION = "1.1.0";
+export const CONTRACT_VERSION = "1.2.0";
 
 const usage = arr(ref("UsageRecord"));
 
@@ -106,8 +106,9 @@ export const ENDPOINTS = [
     responses: { 200: ref("GenerateResponse"), 422: E, ...modelErrors } },
   { method: "post", path: "/v1/resumes/enhance", auth: true, cost: "metered", request: ref("EnhanceRequest"),
     responses: { 200: ref("EnhanceResponse"), ...modelErrors } },
-  { method: "post", path: "/v1/resumes/parse-pdf", auth: true, cost: "metered", request: ref("ParsePdfRequest"),
-    responses: { 200: ref("ParsePdfResponse"), ...modelErrors } },
+  // 1.2.0 (D17): read from the PDF's text layer — free, no model; a scan is a 400.
+  { method: "post", path: "/v1/resumes/parse-pdf", auth: true, cost: "free", request: ref("ParsePdfRequest"),
+    responses: { 200: ref("ParsePdfResponse"), 400: E, 413: E, ...authErrors } },
 
   // MCP (E1). Auth errors are this service's Error shape — they are refused before the MCP layer
   // runs, by the same middleware as /v1. Everything past auth answers JSON-RPC. 202 is the one

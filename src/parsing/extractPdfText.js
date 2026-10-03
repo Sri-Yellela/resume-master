@@ -1,9 +1,11 @@
 // The server's door to the PDF text reader (A70): base64 in, text out, ZERO model calls.
-// Same input checks as parsePdf (the model path, which the token API still uses — see that file).
+// Serves BOTH the site's free tool and, since D17 (10-03), the token API's /v1/resumes/parse-pdf —
+// whose Sonnet transcription (parsePdf.js) is deleted: a model is for generation only.
 import { InvalidRequestError } from "../generation/generate.js";
 // The reader is the PDF toolkit's — the same file the browser runs (A69).
 import { textFromPdfDocument } from "../pdf-toolkit/pdfText.js";
-import { MAX_PDF_BYTES } from "./parsePdf.js";
+
+export const MAX_PDF_BYTES = 10 * 1024 * 1024;
 
 let pdfjs = null;
 async function loadPdfjs() {
