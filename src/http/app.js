@@ -13,7 +13,7 @@
 import express from "express";
 import { generateResume, InvalidRequestError } from "../generation/generate.js";
 import { enhanceResume } from "../generation/enhance.js";
-import { parsePdf } from "../parsing/parsePdf.js";
+import { extractPdfText } from "../parsing/extractPdfText.js";
 import { scoreAts, formatResume } from "../tools/deterministic.js";
 import { requireClient } from "./auth.js";
 import { createMetering } from "./metering.js";
@@ -99,10 +99,24 @@ export function createApp({ anthropic = null, version = {}, log = defaultLog, en
   app.get("/mcp", client, mcp.methodNotAllowed);
   app.delete("/mcp", client, mcp.methodNotAllowed);
 
+  // PDF → text (D17, O16e — 10-03): the PDF's own text layer, read here by the same reader as the
+  // site's free tool (A70). It was Sonnet transcribing the document; D17 allows a model for
+  // generation only. A scan has no text layer — refused with what to do, never an empty résumé.
+  // `usage` stays in the answer, always empty, so the response shape is unchanged.
+  app.post("/v1/resumes/parse-pdf", client, json, async (req, res, next) => {
+    try {
+      const out = await extractPdfText(req.body || {});
+      if (out.needsOcr) {
+        throw new InvalidRequestError("This PDF has no text layer — it looks like a scan or an image. " +
+          "Export it from its editor as a PDF, or send the text instead.");
+      }
+      res.json({ text: out.text, chars: out.chars, usage: [] });
+    } catch (e) { next(e); }
+  });
+
   // ── model-backed ─────────────────────────────────────────────────────────────────────────────
   app.post("/v1/resumes/generate", client, json, metered("resumes.generate", req => generateResume(anthropic, req.body || {}, { env })));
   app.post("/v1/resumes/enhance", client, json, metered("resumes.enhance", req => enhanceResume(anthropic, req.body || {})));
-  app.post("/v1/resumes/parse-pdf", client, json, metered("resumes.parse-pdf", req => parsePdf(anthropic, req.body || {})));
 
   // ── the site (A54) and a person's routes (A57) ──────────────────────────────────────────────
   app.use("/v1/site", siteRoutes({ store, anthropic, env, metering, ...siteOptions }));

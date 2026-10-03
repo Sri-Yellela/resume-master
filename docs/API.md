@@ -1,4 +1,4 @@
-# Resume Master API — v1 (contract 1.1.0)
+# Resume Master API — v1 (contract 1.2.0)
 
 Stateless résumé tools: generation, deterministic formatting, PDF text extraction, ATS scoring — over
 HTTP, and the deterministic ones also as MCP tools at `/mcp` (see [MCP](#mcp--the-deterministic-tools-as-llm-tools-e1)).
@@ -145,7 +145,7 @@ message that can never be true. A 429 is always retryable.
 | `POST /v1/ats/score` | `{ job, resumeText, signalProfile?, domainProfile?, claims?, termWeights?, synonyms? }` → `{ report }` | no | free |
 | `POST /v1/resumes/generate` | see below → `{ html, domainModuleKey, claimCheck, usage[] }` | yes | metered |
 | `POST /v1/resumes/enhance` | `{ resumeText, profile: { name, roleFamily, domain }, selectedAdditions[] }` → `{ text, usage[] }` | yes | metered |
-| `POST /v1/resumes/parse-pdf` | `{ pdfBase64 }` (≤ 10 MB) → `{ text, chars, usage[] }` | yes | metered |
+| `POST /v1/resumes/parse-pdf` | `{ pdfBase64 }` (≤ 10 MB) → `{ text, chars, usage[] }` — the PDF's own text layer (`usage` always empty); a scan, with no text layer, is a `400` | no (since 1.2.0, D17) | free |
 | `POST /mcp` | JSON-RPC 2.0 — MCP Streamable HTTP, stateless; tools below | no | free |
 | `GET` / `DELETE /mcp` | `405` — no SSE stream, no session | no | free |
 
@@ -254,7 +254,7 @@ saying it is not a result: `invalid_request` (malformed input — never "the ré
 | | why |
 |---|---|
 | **Generation** (`/v1/resumes/generate`, `/enhance`) | Deferred by design (E1). An LLM calling an API to call an LLM: the caller can already write prose; what it lacks is the constraints, so the tool's value would be the claim guard, not the writing. It also costs ~$0.04 a call and a tool loop can repeat it. It needs metering limits and a description built around the integrity layer before it ships. |
-| **PDF parsing** (`/v1/resumes/parse-pdf`) | ⚠ **10-02 (A70): a deterministic path now exists** — `src/parsing/pdfText.js` reads the PDF's own text layer (pdf.js), zero model calls, and serves the site's free PDF → text. It cannot read scans. The TOKEN endpoint still uses the model (draft's résumé upload depends on it; moving it is O16e). Was: **There is no deterministic path.** The only implementation is a model call — Sonnet reads the PDF. Exposing it would put a metered model call behind a "deterministic tools" server, and the calling assistant already has the file. A local extractor (e.g. pdf.js) would be a new capability, not this one. |
+| **PDF parsing** (`/v1/resumes/parse-pdf`) | ✅ **10-03 (contract 1.2.0, D17 — only generation may call a model): the token endpoint is deterministic too** — `src/parsing/extractPdfText.js`, the same reader as the site's tool; Sonnet's transcription (`parsePdf.js`) is deleted. What that loses: a scan (the model read images; now a `400` that says so) and the untangling of a table layout whose draw order interleaves its columns. Not yet an MCP tool. Was: ⚠ **10-02 (A70): a deterministic path now exists** — `src/parsing/pdfText.js` reads the PDF's own text layer (pdf.js), zero model calls, and serves the site's free PDF → text. It cannot read scans. The TOKEN endpoint still uses the model (draft's résumé upload depends on it; moving it is O16e). Was: **There is no deterministic path.** The only implementation is a model call — Sonnet reads the PDF. Exposing it would put a metered model call behind a "deterministic tools" server, and the calling assistant already has the file. A local extractor (e.g. pdf.js) would be a new capability, not this one. |
 
 ### ⛔ ENFORCED vs INSTRUCTED — over MCP
 
