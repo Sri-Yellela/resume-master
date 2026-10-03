@@ -1,0 +1,15 @@
+{
+  "name": "@draft/pdf-toolkit",
+  "version": "1.0.0",
+  "description": "PDF tools that run in the browser — merge, split, organise, compress, watermark, protect, unlock, images to PDF, PDF to images, PDF to text. The file never leaves the machine. One implementation for draft and Resume Master.",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": { ".": "./src/index.js", "./ui": "./src/ui.js", "./pdfText": "./src/pdfText.js", "./styles.css": "./src/styles.css", "./package.json": "./package.json" },
+  "files": ["src/", "test/", "scripts/", "README.md", "CHECKSUMS.json"],
+  "scripts": {
+    "test": "node --test",
+    "checksums": "node scripts/checksums.mjs --write"
+  },
+  "peerDependencies": { "@cantoo/pdf-lib": ">=2.11", "pdfjs-dist": ">=4" }
+}

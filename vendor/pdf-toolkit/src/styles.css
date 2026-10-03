@@ -1,0 +1,58 @@
+/* @draft/pdf-toolkit — structure only. Each host sets the --pt-* variables to its own tokens. */
+.pt-root {
+  --pt-surface: var(--pt-host-surface, #ffffff);
+  --pt-text: var(--pt-host-text, #1a1a1a);
+  --pt-muted: var(--pt-host-muted, #5b5b5b);
+  --pt-border: var(--pt-host-border, rgba(0, 0, 0, 0.14));
+  --pt-accent: var(--pt-host-accent, #1a1a1a);
+  --pt-on-accent: var(--pt-host-on-accent, #ffffff);
+  --pt-good: var(--pt-host-good, #1d6b3a);
+  --pt-bad: var(--pt-host-bad, #a12a1c);
+  --pt-radius: var(--pt-host-radius, 10px);
+  color: var(--pt-text);
+  font: inherit;
+}
+.pt-promise { margin: 0 0 12px; font-size: 0.92em; color: var(--pt-muted); }
+.pt-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+.pt-tab {
+  font: inherit; font-size: 0.9em; padding: 6px 12px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--pt-border); background: transparent; color: var(--pt-text);
+}
+.pt-tab[aria-selected="true"] { background: var(--pt-accent); color: var(--pt-on-accent); border-color: var(--pt-accent); }
+.pt-tab:focus-visible, .pt-btn:focus-visible, .pt-mini:focus-visible { outline: 2px solid var(--pt-accent); outline-offset: 2px; }
+.pt-panel { display: grid; gap: 10px; }
+.pt-blurb { margin: 0; color: var(--pt-muted); }
+.pt-field { display: grid; gap: 4px; font-size: 0.9em; }
+.pt-file, .pt-text {
+  font: inherit; color: var(--pt-text); background: var(--pt-surface); max-width: 100%;
+  border: 1px solid var(--pt-border); border-radius: calc(var(--pt-radius) * 0.6); padding: 7px 9px;
+}
+.pt-btn {
+  font: inherit; justify-self: start; padding: 8px 16px; border-radius: 999px; cursor: pointer; text-decoration: none;
+  border: 1px solid var(--pt-border); background: transparent; color: var(--pt-text); display: inline-block;
+}
+.pt-btn.pt-primary { background: var(--pt-accent); color: var(--pt-on-accent); border-color: var(--pt-accent); }
+.pt-btn:disabled { opacity: 0.55; cursor: progress; }
+.pt-mini {
+  font: inherit; font-size: 0.85em; min-width: 28px; padding: 2px 6px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--pt-border); background: var(--pt-surface); color: var(--pt-text);
+}
+.pt-mini:disabled { opacity: 0.4; cursor: default; }
+.pt-list { margin: 0; padding-left: 1.4em; display: grid; gap: 4px; }
+.pt-name { overflow-wrap: anywhere; }
+.pt-status { min-height: 1.2em; font-size: 0.92em; }
+.pt-status.pt-good { color: var(--pt-good); }
+.pt-status.pt-bad { color: var(--pt-bad); }
+.pt-results { display: grid; gap: 8px; }
+.pt-result { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.pt-muted { color: var(--pt-muted); font-size: 0.9em; }
+.pt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(156px, 1fr)); gap: 10px; }
+.pt-page { margin: 0; padding: 6px; border: 1px solid var(--pt-border); border-radius: var(--pt-radius); background: var(--pt-surface); text-align: center; }
+.pt-page img { width: 100%; height: auto; transition: transform 160ms ease; }
+.pt-page figcaption { font-size: 0.8em; color: var(--pt-muted); margin: 4px 0; }
+.pt-row { display: flex; justify-content: center; gap: 4px; flex-wrap: wrap; }
+.pt-textout { width: 100%; box-sizing: border-box; font: 0.85em/1.45 ui-monospace, monospace; color: var(--pt-text);
+  background: var(--pt-surface); border: 1px solid var(--pt-border); border-radius: calc(var(--pt-radius) * 0.6); padding: 8px; }
+.pt-notoffered { margin-top: 16px; font-size: 0.9em; color: var(--pt-muted); }
+.pt-notoffered summary { cursor: pointer; }
+@media (prefers-reduced-motion: reduce) { .pt-page img { transition: none; } }
