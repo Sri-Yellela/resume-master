@@ -1,6 +1,6 @@
 // A69 (owner, 10-02): the PDF tools run in the visitor's browser. This service only SERVES them —
 // self-hosted (no third-party request), as JavaScript, and a miss is the usual JSON 404. The tools'
-// own behaviour is tested in vendor/pdf-toolkit/test, which this suite runs.
+// own behaviour is tested in test/pdf-toolkit/.
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";

@@ -11,7 +11,7 @@
 //                              a 2 MB body.
 //   PDF → text                 free, ANONYMOUS — A70 (owner, 10-02). It used to send the PDF to Sonnet
 //                              and cost a credit; it now reads the PDF's own text layer
-//                              (vendor/pdf-toolkit/src/pdfText.js), zero model calls, so nothing to meter.
+//                              (src/pdf-toolkit/pdfText.js), zero model calls, so nothing to meter.
 //                              Bounded: the per-IP rate, a 15 MB body, and a per-IP DAILY ceiling
 //                              (RM_PDF_TEXT_PER_DAY, default 100) — free is not unbounded. A scan (no text
 //                              layer) is answered needsOcr, never charged and never sent to a model.

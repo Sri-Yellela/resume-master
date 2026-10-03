@@ -24,7 +24,7 @@ import { fileURLToPath } from "node:url";
 
 const PUBLIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "public");
 const ROOT_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const TOOLKIT_SRC = path.join(ROOT_DIR, "vendor", "pdf-toolkit", "src");
+const TOOLKIT_SRC = path.join(ROOT_DIR, "src", "pdf-toolkit");
 const PDF_LIB_DIST = path.join(ROOT_DIR, "node_modules", "@cantoo", "pdf-lib", "dist");
 const PDFJS_BUILD = path.join(ROOT_DIR, "node_modules", "pdfjs-dist", "build");
 
@@ -102,8 +102,8 @@ export function createApp({ anthropic = null, version = {}, log = defaultLog, en
   // ── the site (A54) and a person's routes (A57) ──────────────────────────────────────────────
   app.use("/v1/site", siteRoutes({ store, anthropic, env, metering, ...siteOptions }));
   // A69: the PDF tools run in the visitor's browser. Their libraries are served from HERE — the site
-  // makes no third-party request — and the component is the vendored @draft/pdf-toolkit, the same
-  // file draft mounts. Static middleware, like public/ — files, not API routes, so the contract's route
+  // makes no third-party request — and the component is src/pdf-toolkit, the same file the server's
+  // PDF → text reads with. Static middleware, like public/ — files, not API routes, so the contract's route
   // table stays the API. Explicit JavaScript types: a module script refuses anything else.
   const js = { fallthrough: true, setHeaders: (res, file) => { if (/\.m?js$/.test(file)) res.setHeader("Content-Type", "text/javascript; charset=utf-8"); } };
   app.use("/lib/pdf-lib", express.static(PDF_LIB_DIST, js));

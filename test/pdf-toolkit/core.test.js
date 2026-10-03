@@ -1,4 +1,4 @@
-// @draft/pdf-toolkit — the operations, on real PDFs, under node --test. Synthetic content only.
+// The PDF toolkit — the operations, on real PDFs, under node --test. Synthetic content only.
 import test from "node:test";
 import assert from "node:assert/strict";
 import zlib from "node:zlib";
@@ -6,7 +6,7 @@ import * as lib from "@cantoo/pdf-lib";
 import {
   parsePageRanges, merge, selectPages, split, deletePages, rotate, watermark, protect, unlock,
   imagesToPdf, compress, info, sniffImage, ToolkitError, NOT_OFFERED,
-} from "../src/core.js";
+} from "../../src/pdf-toolkit/core.js";
 
 async function makePdf(labels, size = [300, 400]) {
   const doc = await lib.PDFDocument.create();
