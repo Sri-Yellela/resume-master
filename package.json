@@ -20,8 +20,11 @@
     "@cantoo/pdf-lib": "^2.11.1",
     "@draft/ats-scorer": "file:vendor/ats-scorer",
     "@modelcontextprotocol/sdk": "^1.31.0",
+    "@tesseract.js-data/eng": "^1.0.0",
     "better-sqlite3": "^12.11.1",
     "express": "^4.21.0",
-    "pdfjs-dist": "^4.10.38"
+    "fflate": "^0.8.3",
+    "pdfjs-dist": "^4.10.38",
+    "tesseract.js": "^7.0.0"
   }
 }

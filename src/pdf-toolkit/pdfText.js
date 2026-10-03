@@ -37,14 +37,30 @@ export async function textFromPdfDocument(doc) {
   return { text: needsOcr ? "" : text, chars: needsOcr ? 0 : text.length, pages: doc.numPages, needsOcr, columns };
 }
 
-/** Exported for tests: pdf.js text items → the page's text. */
-export function layoutPage(items, pageWidth) {
-  const runs = items
+/** pdf.js text items → runs ({ s, x, y, w, size }). */
+function runsOf(items) {
+  return items
     .filter(it => typeof it.str === "string" && it.str.length > 0)
     .map(it => {
       const size = Math.abs(it.transform?.[3] || it.height || 10) || 10;
       return { s: it.str, x: it.transform[4], y: it.transform[5], w: it.width || it.str.length * size * 0.5, size };
     });
+}
+
+/**
+ * The page as LINES, top to bottom, each with its runs left to right — what PDF → Word and PDF → Excel
+ * are built from (office.js), using the same grouping as the text reader so the three agree.
+ * Each line: { y, size, text, runs: [{ s, x, w, size }] }.
+ */
+export function linesOf(items) {
+  const runs = runsOf(items);
+  if (!runs.length) return [];
+  return groupLines(runs).map(line => ({ ...line, text: lineText(line) })).filter(line => line.text);
+}
+
+/** Exported for tests: pdf.js text items → the page's text. */
+export function layoutPage(items, pageWidth) {
+  const runs = runsOf(items);
   if (!runs.length) return { text: "", cols: 1 };
 
   const lines = groupLines(runs);

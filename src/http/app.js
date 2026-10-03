@@ -27,6 +27,11 @@ const ROOT_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "
 const TOOLKIT_SRC = path.join(ROOT_DIR, "src", "pdf-toolkit");
 const PDF_LIB_DIST = path.join(ROOT_DIR, "node_modules", "@cantoo", "pdf-lib", "dist");
 const PDFJS_BUILD = path.join(ROOT_DIR, "node_modules", "pdfjs-dist", "build");
+// A69 tier 2 (owner, 10-03): Office files (fflate) and OCR (tesseract.js, its wasm core, English data).
+const FFLATE_ESM = path.join(ROOT_DIR, "node_modules", "fflate", "esm");
+const TESSERACT_DIST = path.join(ROOT_DIR, "node_modules", "tesseract.js", "dist");
+const TESSERACT_CORE = path.join(ROOT_DIR, "node_modules", "tesseract.js-core");
+const TESSDATA = path.join(ROOT_DIR, "node_modules", "@tesseract.js-data", "eng", "4.0.0_best_int");   // LSTM-only data, 2.9 MB — the engine runs LSTM (OEM 1)
 
 export const SERVICE = "resume-master";
 
@@ -105,10 +110,19 @@ export function createApp({ anthropic = null, version = {}, log = defaultLog, en
   // makes no third-party request — and the component is src/pdf-toolkit, the same file the server's
   // PDF → text reads with. Static middleware, like public/ — files, not API routes, so the contract's route
   // table stays the API. Explicit JavaScript types: a module script refuses anything else.
-  const js = { fallthrough: true, setHeaders: (res, file) => { if (/\.m?js$/.test(file)) res.setHeader("Content-Type", "text/javascript; charset=utf-8"); } };
+  const js = { fallthrough: true, setHeaders: (res, file) => {
+    if (/\.m?js$/.test(file)) res.setHeader("Content-Type", "text/javascript; charset=utf-8");
+    if (/\.wasm$/.test(file)) res.setHeader("Content-Type", "application/wasm");
+    // The language data is fetched as bytes and unzipped by the reader itself — never Content-Encoding.
+    if (/\.gz$/.test(file)) res.setHeader("Content-Type", "application/octet-stream");
+  } };
   app.use("/lib/pdf-lib", express.static(PDF_LIB_DIST, js));
   app.use("/lib/pdfjs", express.static(PDFJS_BUILD, js));
   app.use("/lib/pdf-toolkit", express.static(TOOLKIT_SRC, js));
+  app.use("/lib/fflate", express.static(FFLATE_ESM, js));
+  app.use("/lib/tesseract", express.static(TESSERACT_DIST, js));
+  app.use("/lib/tesseract-core", express.static(TESSERACT_CORE, js));
+  app.use("/lib/tessdata", express.static(TESSDATA, { ...js, maxAge: "30d" }));
   app.use(express.static(PUBLIC_DIR, { index: "index.html", extensions: false, fallthrough: true }));
 
   // Everything else is still JSON, including "not found" — only the site's own files are pages.

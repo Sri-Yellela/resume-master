@@ -14,15 +14,9 @@
 // shares pdfText.js with it. The pdf-lib used is the maintained fork @cantoo/pdf-lib, which adds the
 // encryption the original lacks (AES-256).
 //
-// ⛔ NOT OFFERED, said plainly rather than shipped badly: PDF → Word/Excel with real fidelity, OCR
-// of scans, and "compress" by turning pages into pictures (it would make a résumé unreadable to the
-// very ATS whose upload cap the user is trying to meet). See NOT_OFFERED.
-
-export const NOT_OFFERED = Object.freeze([
-  { what: "PDF → Word or Excel", why: "A faithful conversion is a hard problem; a bad one is worse than none." },
-  { what: "Reading scanned PDFs (OCR)", why: "A scan has no text layer. Export the document as a PDF instead." },
-  { what: "Compressing by turning pages into images", why: "It would make the text unreadable to an ATS — the reason most people compress a résumé." },
-]);
+// The owner, 10-03: this product offers everything — PDF → Word and Excel (office.js), OCR of scans
+// and compress-by-flattening (render.js). An earlier "not offered" list was a constraint of draft's
+// contract, never of this product, and is gone. Each tool says what it carries, on the page.
 
 export class ToolkitError extends Error {
   constructor(message) { super(message); this.name = "ToolkitError"; }

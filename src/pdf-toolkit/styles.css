@@ -53,6 +53,4 @@
 .pt-row { display: flex; justify-content: center; gap: 4px; flex-wrap: wrap; }
 .pt-textout { width: 100%; box-sizing: border-box; font: 0.85em/1.45 ui-monospace, monospace; color: var(--pt-text);
   background: var(--pt-surface); border: 1px solid var(--pt-border); border-radius: calc(var(--pt-radius) * 0.6); padding: 8px; }
-.pt-notoffered { margin-top: 16px; font-size: 0.9em; color: var(--pt-muted); }
-.pt-notoffered summary { cursor: pointer; }
 @media (prefers-reduced-motion: reduce) { .pt-page img { transition: none; } }

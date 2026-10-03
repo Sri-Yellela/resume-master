@@ -5,7 +5,7 @@ import zlib from "node:zlib";
 import * as lib from "@cantoo/pdf-lib";
 import {
   parsePageRanges, merge, selectPages, split, deletePages, rotate, watermark, protect, unlock,
-  imagesToPdf, compress, info, sniffImage, ToolkitError, NOT_OFFERED,
+  imagesToPdf, compress, info, sniffImage, ToolkitError,
 } from "../../src/pdf-toolkit/core.js";
 
 async function makePdf(labels, size = [300, 400]) {
@@ -143,11 +143,4 @@ test("compress never makes a file bigger — the original comes back, and the no
     assert.ok(r.after < r.before);
     assert.match(r.note, /No pictures inside/);
   }
-});
-
-test("what is NOT offered is stated, including the 'compress by flattening' trap", () => {
-  const what = NOT_OFFERED.map(n => n.what).join(" | ");
-  assert.match(what, /Word or Excel/);
-  assert.match(what, /OCR/);
-  assert.match(what, /turning pages into images/);
 });
