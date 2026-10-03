@@ -8,7 +8,7 @@
 // account, nothing to breach. (SmallPDF uploads your file to its servers; this does not.)
 //
 // ⛔ This module IMPORTS NOTHING. The host passes the pdf-lib namespace in (`lib`), so the same file
-// runs under Vite in draft, from an import map on resumemaster.one, and under node --test — one
+// runs under Vite in draft, from plain module imports on the tools service's site, and under node --test — one
 // implementation, never a copy (A52's lesson, and StampLogo's before it). The pdf-lib used is the
 // maintained fork @cantoo/pdf-lib, which adds the encryption the original lacks (AES-256).
 //
