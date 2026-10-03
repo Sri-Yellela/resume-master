@@ -1,15 +1,13 @@
-// @draft/pdf-toolkit — the text reader on real PDFs, the "nothing leaves the browser" promise, and
-// the manifest that makes a vendored copy tamper-evident.
+// The PDF toolkit — the text reader on real PDFs, and the "nothing leaves the browser" promise.
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as lib from "@cantoo/pdf-lib";
-import { textFromPdfDocument } from "../src/pdfText.js";
-import { verifyManifest } from "../scripts/checksums.mjs";
+import { textFromPdfDocument } from "../../src/pdf-toolkit/pdfText.js";
 
-const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src");
+const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "src", "pdf-toolkit");
 
 async function read(draw) {
   const doc = await lib.PDFDocument.create();
@@ -57,8 +55,4 @@ test("⛔ the operations import nothing — the host passes the libraries in", (
     const src = fs.readFileSync(path.join(SRC, f), "utf8");
     assert.doesNotMatch(src, /^\s*import\s/m, `${f} must not import (one file, three hosts)`);
   }
-});
-
-test("the package matches CHECKSUMS.json — a hand edit to a vendored copy fails", () => {
-  assert.deepEqual(verifyManifest(), []);
 });

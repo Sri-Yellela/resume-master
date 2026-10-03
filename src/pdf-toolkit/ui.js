@@ -1,8 +1,7 @@
-// ── @draft/pdf-toolkit · the component (A69) ─────────────────────────────────────────────────────
+// ── PDF toolkit · the component (A69) ─────────────────────────────────────────────────────
 //
-// ONE component, mounted by both hosts: the tools service's site calls mountPdfToolkit() from its plain
-// page; draft wraps it in a React component (client/src/components/PdfToolkit.jsx). Framework-free
-// DOM so neither host needs the other's stack — and so there is no second implementation to drift.
+// The site's PDF pages call mountPdfToolkit() (public/pdf-tools.js). Framework-free DOM: the site has
+// no framework, and the component carries no look of its own beyond structure.
 //
 // The host passes the libraries in: { lib: the @cantoo/pdf-lib namespace, pdfjs: pdf.js with its
 // worker already set }. Theming is CSS variables only (styles.css: --pt-*), so each host keeps its

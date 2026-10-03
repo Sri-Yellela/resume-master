@@ -1,4 +1,4 @@
-// ── @draft/pdf-toolkit · the operations (A69) ────────────────────────────────────────────────────
+// ── PDF toolkit · the operations (A69) ────────────────────────────────────────────────────
 //
 // Tier 1 of the owner's "everything SmallPDF provides": the operations that are LIBRARY WORK —
 // deterministic, zero model calls, no marginal cost — so they are free and ungated, for the same
@@ -7,10 +7,12 @@
 // ⭐ They run IN THE BROWSER: the file never leaves the user's machine. No upload, no storage, no
 // account, nothing to breach. (SmallPDF uploads your file to its servers; this does not.)
 //
-// ⛔ This module IMPORTS NOTHING. The host passes the pdf-lib namespace in (`lib`), so the same file
-// runs under Vite in draft, from plain module imports on the tools service's site, and under node --test — one
-// implementation, never a copy (A52's lesson, and StampLogo's before it). The pdf-lib used is the
-// maintained fork @cantoo/pdf-lib, which adds the encryption the original lacks (AES-256).
+// ⭐ A Resume Master product in its own right (owner, 10-03): independent, not designed for draft.
+//
+// ⛔ This module IMPORTS NOTHING. The page passes the pdf-lib namespace in (`lib`), so the same file
+// runs in the browser and under node --test, and the server's PDF → text (src/parsing/extractPdfText.js)
+// shares pdfText.js with it. The pdf-lib used is the maintained fork @cantoo/pdf-lib, which adds the
+// encryption the original lacks (AES-256).
 //
 // ⛔ NOT OFFERED, said plainly rather than shipped badly: PDF → Word/Excel with real fidelity, OCR
 // of scans, and "compress" by turning pages into pictures (it would make a résumé unreadable to the

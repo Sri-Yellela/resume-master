@@ -1,4 +1,4 @@
-// ── @draft/pdf-toolkit · the browser-only half (A69) ─────────────────────────────────────────────
+// ── PDF toolkit · the browser-only half (A69) ─────────────────────────────────────────────
 //
 // What needs a canvas: PDF → images, page thumbnails, and compress's JPEG re-encoder. Imports
 // nothing — the host passes pdf.js in (`pdfjs`), already configured with its worker.

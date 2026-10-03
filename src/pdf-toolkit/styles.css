@@ -1,4 +1,4 @@
-/* @draft/pdf-toolkit — structure only. Each host sets the --pt-* variables to its own tokens. */
+/* The PDF toolkit — structure only. The page sets the --pt-host-* variables to its own tokens. */
 .pt-root {
   --pt-surface: var(--pt-host-surface, #ffffff);
   --pt-text: var(--pt-host-text, #1a1a1a);
