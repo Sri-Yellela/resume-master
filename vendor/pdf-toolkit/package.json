@@ -1,7 +1,7 @@
 {
   "name": "@draft/pdf-toolkit",
   "version": "1.0.0",
-  "description": "PDF tools that run in the browser — merge, split, organise, compress, watermark, protect, unlock, images to PDF, PDF to images, PDF to text. The file never leaves the machine. One implementation for draft and Resume Master.",
+  "description": "PDF tools that run in the browser — merge, split, organise, compress, watermark, protect, unlock, images to PDF, PDF to images, PDF to text. The file never leaves the machine. One implementation for draft and the tools service.",
   "private": true,
   "type": "module",
   "main": "./src/index.js",

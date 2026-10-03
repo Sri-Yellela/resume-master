@@ -1,6 +1,6 @@
 // ── @draft/pdf-toolkit · the component (A69) ─────────────────────────────────────────────────────
 //
-// ONE component, mounted by both hosts: resumemaster.one calls mountPdfToolkit() from its plain
+// ONE component, mounted by both hosts: the tools service's site calls mountPdfToolkit() from its plain
 // page; draft wraps it in a React component (client/src/components/PdfToolkit.jsx). Framework-free
 // DOM so neither host needs the other's stack — and so there is no second implementation to drift.
 //

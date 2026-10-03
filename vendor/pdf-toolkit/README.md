@@ -1,8 +1,8 @@
 # @draft/pdf-toolkit
 
 PDF tools that run **in the browser** — the file never leaves the user's machine (A69, 2026-10-02).
-One implementation, used by draft (`client/src/components/PdfToolkit.jsx`) and by Resume Master
-(vendored, checksummed, mounted on resumemaster.one).
+One implementation, used by draft (`client/src/components/PdfToolkit.jsx`) and by the tools service
+(vendored, checksummed, mounted on the tools service's site).
 
 | Tool | How |
 |---|---|
@@ -29,4 +29,4 @@ mountPdfToolkit(document.querySelector("#pdf-tools"), { lib, pdfjs });
 ```
 
 Theme it with `--pt-host-*` CSS variables (`styles.css`). ⛔ After any edit: `npm run checksums`
-here, then re-vendor into Resume Master.
+here, then re-vendor into the tools service.
