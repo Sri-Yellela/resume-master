@@ -255,4 +255,14 @@ $("#delete-account").addEventListener("click", async () => {
   catch (err) { say($("#account-msg"), err.message, "bad"); }
 });
 
+// The shared header links here with a fragment (/#format, /#signin): open what it names.
+function followHash() {
+  const name = location.hash.slice(1);
+  if (!name || name.startsWith("reset=")) return;
+  if ($(`[data-tab="${name}"]`)) { openTab(name); $("#tools")?.scrollIntoView({ behavior: "smooth", block: "start" }); }
+  else if ($(`[data-dialog="${name}"]`)) openDialog(name);
+}
+window.addEventListener("hashchange", followHash);
+followHash();
+
 refreshConfig();
