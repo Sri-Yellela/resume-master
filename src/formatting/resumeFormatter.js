@@ -591,18 +591,46 @@ function parseEntriesFromHtml(contentHtml) {
   return parseEntriesFromText(stripTagsToText(contentHtml));
 }
 
+// A date range — "Jan 2021 – Present", "2018 – 2021", "Mar. 2019 - Dec 2020".
+const DATE_RANGE_SOURCE = "(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\\.?\\s+)?\\d{4}\\s*[-–—]\\s*(?:Present|Current|Now|(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\\.?\\s+)?\\d{4})";
+const DATE_ONLY_LINE = new RegExp(`^${DATE_RANGE_SOURCE}$`, "i");
+const DATE_IN_HEADER = new RegExp(`\\b${DATE_RANGE_SOURCE}\\b`, "i");
+const isBulletLine = (line) => /^[-•*]\s+/.test(line);
+
+// F3 (10-03): a block is split into ENTRIES wherever a plain line follows bullets. Entries used to be
+// split only at blank lines, so a pasted résumé with none between jobs became ONE entry — the first
+// job's header, then every later header as loose text, then every job's bullets in one list, so a
+// bullet read as the wrong employer's. "Header / date / bullets, Header / date / bullets" is the
+// shape the site's Format tool invites ("one line per heading, role or bullet").
+function splitEntryRuns(lines) {
+  const runs = [];
+  let current = [];
+  let sawBullet = false;
+  for (const line of lines) {
+    const bullet = isBulletLine(line);
+    if (!bullet && sawBullet) { runs.push(current); current = []; sawBullet = false; }
+    current.push(line);
+    if (bullet) sawBullet = true;
+  }
+  if (current.length) runs.push(current);
+  return runs;
+}
+
 function parseEntriesFromText(contentText) {
   const blocks = collapseWhitespace(contentText).split(/\n{2,}/).map(block => block.trim()).filter(Boolean);
-  return blocks.map(block => {
-    const lines = block.split("\n").map(line => line.trim()).filter(Boolean);
-    const bullets = lines.filter(line => /^[-•*]\s+/.test(line)).map(line => line.replace(/^[-•*]\s+/, ""));
-    const nonBullet = lines.filter(line => !/^[-•*]\s+/.test(line));
+  const runs = blocks.flatMap(block => splitEntryRuns(block.split("\n").map(line => line.trim()).filter(Boolean)));
+  return runs.map(lines => {
+    const bullets = lines.filter(isBulletLine).map(line => line.replace(/^[-•*]\s+/, ""));
+    const plain = lines.filter(line => !isBulletLine(line));
+    // A line that is only a date range is the entry's date, not its role.
+    const dateLine = plain.find(line => DATE_ONLY_LINE.test(line));
+    const nonBullet = plain.filter(line => line !== dateLine);
     const header = nonBullet[0] || "";
     const role = nonBullet[1] || "";
     const text = nonBullet.slice(2).join(" ");
-    const dateMatch = header.match(/\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4}\s*[-–]\s*(?:Present|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4})\b/i);
-    const date = dateMatch?.[0] || "";
-    const headerWithoutDate = date ? header.replace(date, "").trim().replace(/[|,-]\s*$/, "").trim() : header;
+    const dateMatch = dateLine ? null : header.match(DATE_IN_HEADER);
+    const date = dateLine || dateMatch?.[0] || "";
+    const headerWithoutDate = dateMatch ? header.replace(date, "").trim().replace(/[|,–—-]\s*$/, "").trim() : header;
     const pieces = headerWithoutDate.split(/\s+\|\s+|,\s+(?=[A-Z][a-z])/);
     return {
       company: pieces[0] || headerWithoutDate,
