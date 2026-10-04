@@ -1,6 +1,6 @@
 # Resume Master — privacy
 
-**Effective:** October 2, 2026 (was September 28, 2026)
+**Effective:** October 4, 2026 (was October 2, 2026)
 
 Resume Master **processes what it is sent and returns the result.** Called through its API by another
 product, it retains nothing. **Since October 2, 2026 it also has its own site, `resumemaster.one`,
@@ -18,7 +18,7 @@ Only what a calling client sends in a request, and only for the endpoint called:
 | `POST /v1/resumes/parse-pdf` | a résumé PDF |
 | `POST /v1/resumes/format` | a résumé as HTML |
 | `POST /v1/ats/score` | a résumé's text and a job posting |
-| `POST /mcp` | the same as the HTTP route behind the tool called: `score_ats_fit` as `/v1/ats/score`, `format_resume_print_html` as `/v1/resumes/format`. Stateless — no session is created |
+| `POST /mcp` | the same as the HTTP route behind the tool called: `score_ats_fit` as `/v1/ats/score`, `format_resume_print_html` as `/v1/resumes/format`. Stateless — no session is created. `score_ats_fit` can also be called **without a token**, by an AI assistant — see *Through an AI assistant* below |
 
 A résumé routinely contains a home address, a phone number and an employment history. It is treated
 that way.
@@ -35,6 +35,28 @@ that way.
   line, and by `test/stateless.test.js`.
 - **The calling client receives usage records** — token counts per model call — so it can meter its
   own spend. Counts, never content.
+
+## Through an AI assistant (ChatGPT, Claude, and others)
+
+Resume Master's ATS check can be used from inside an AI assistant — ChatGPT, Claude, or any other app that supports the Model Context Protocol (MCP) — at `https://resumemaster.one/mcp`. No account and no sign-in are needed for it.
+
+**The assistant receives your text first, under its own terms.** Anything you type, paste or upload into an assistant — a résumé, a job posting — goes first to the company that runs that assistant: **OpenAI** for ChatGPT, **Anthropic** for Claude, or whoever runs the app you are using. That company handles it under its own privacy policy and your settings there, including whether your conversations are kept and whether they are used to improve its models. Resume Master is not a party to that, cannot see it, and cannot delete it. To change what the assistant keeps, use the assistant's own settings and policy.
+
+**What Resume Master receives.** Only what the assistant sends when it calls the tool. For the ATS check (`score_ats_fit`) that is a job posting — its title, and usually the company and description — and the text of a résumé. The résumé text is whatever the assistant passes on, which is usually the whole résumé, including your name and contact details. Resume Master does not receive your conversation, your account at the assistant, or any file the assistant does not send.
+
+**What it does with it.** It scores the résumé against the posting, here, with no AI model and no network call, and sends the result back to the assistant. That is the only use.
+
+**What it keeps — nothing of what you sent.** The résumé and the posting are processed in memory and are not stored and not logged, exactly as for the API above. Each request leaves the same content-free lines as any other request: method, path, status and duration, with the caller recorded as `(anonymous)`; and each tool call one metering line: which tool, whether it succeeded or was refused, and token counts, which are always zero here.
+
+**The one thing held about you: a scrambled form of your network address, for at most a day.** So that a free tool with no sign-in cannot be overrun, the service limits how often it can be called from one address. To count, it keeps a one-way, salted hash of the address — never the address itself — in memory only, next to a count. The salt is random, created when the server starts and never written down, so the hash cannot be turned back into the address or matched across restarts. Counts are kept for the current minute and the current day (UTC); nothing is written to disk, and a restart erases all of it. The address is never logged.
+
+**Who receives it.** **Railway**, which hosts the service, as for every request. Nobody else: the ATS check calls no model, so nothing goes to Anthropic, and Resume Master sends nothing to OpenAI or to any other assistant beyond the result of the call that assistant made.
+
+**Your controls.** You choose whether to connect Resume Master to an assistant, and you can disconnect it in that assistant's settings at any time. The score matches the skills, tools and verbs in your résumé against the posting, not your contact details, so you can leave out your address, phone number and email before you paste it. Because Resume Master keeps nothing of what you send, there is nothing to export or delete on its side; the assistant's copy is governed by the assistant.
+
+⚠ A résumé can contain sensitive details — disability or veteran status, health, religion, or a photo. Anything you paste reaches the assistant's operator first and then, when the tool is called, this service, which uses it only to score and keeps none of it. Leave out what the score does not need.
+
+Generation and formatting are not offered anonymously: `format_resume_print_html` needs a service token, and résumé generation is not available through an assistant at all.
 
 ## What an account keeps — and only if you make one
 
@@ -76,12 +98,15 @@ except to restore the service after a failure, and a restore is a deliberate act
 
 Nothing else. The ATS scorer and the formatter run locally with no network call.
 
+**An AI assistant is not a recipient of ours — it is where your text starts.** When you use the ATS check from ChatGPT, Claude or another assistant, that assistant's operator receives your text before Resume Master does, under its own terms; Resume Master sends it nothing but the result of the call it made. See *Through an AI assistant* above.
+
 ## Who its clients are
 
 Resume Master is called by other products, each with its own service token. A client — including
 **draft** (`jobsviadraft.com`), a separate product run by the same operator — is responsible for
 telling its own users that their data is sent here, and draft's privacy policy does so. Resume
 Master's own users are the people who make an account on its site (above).
+An AI assistant that calls the ATS check without a token is not a client in this sense: it acts for the person using it, and that person is covered by *Through an AI assistant* above.
 
 ## Contact
 

@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { createApp } from "../src/http/app.js";
 import { mintToken, parseClientTokens } from "../src/http/auth.js";
-import { createMetering } from "../src/http/metering.js";
+import { createMetering, createAnonymousLimiter } from "../src/http/metering.js";
 import { loadAllPrompts } from "../src/generation/promptAssembler.js";
 import { buildOpenApi } from "../src/contract/build.js";
 import { ENDPOINTS, CONTRACT_VERSION } from "../src/contract/endpoints.js";
@@ -31,7 +31,10 @@ async function run(scenario) {
   const app = createApp({
     anthropic, log: () => {}, env: {}, version: { version: "0.1.0", commit: null, scorer: "@draft/ats-scorer@1.0.0", llmFormat: false },
     clients: scenario.service === "no-clients" ? null : parseClientTokens(entry),
-    metering: scenario.service === "refuse-limits" ? { ...metering, allow: () => false } : metering,
+    metering: scenario.service === "refuse-limits" ? { ...metering, allow: () => false }
+      : scenario.service === "refuse-free" ? { ...metering, allowFree: () => false } : metering,
+    anonymous: scenario.service === "anonymous" ? createAnonymousLimiter({ perIpPerMinute: 100, perIpPerDay: 100, perDay: 100 })
+      : scenario.service === "anon-exhausted" ? { take: () => "perDay" } : null,
   });
   const server = await new Promise(r => { const s = app.listen(0, () => r(s)); });
   try {
