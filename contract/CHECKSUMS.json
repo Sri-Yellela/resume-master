@@ -4,7 +4,7 @@
   "algorithm": "sha256 over LF-normalised UTF-8",
   "note": "LF-normalised on purpose: checkouts differ in line endings, and a raw-byte hash would fail spuriously.",
   "files": {
-    "resume-master-api.v1.json": "6bcc24ab35673dc9e8ada6b609564344768ca0daef2222d75700381f96b3d8b7",
+    "resume-master-api.v1.json": "51be0e2f737d6642e448a42c83fd0c20d4f5a62aa4cba9b078f51b9b8e121ff8",
     "resume-master-api.v1.d.ts": "85df327d1615d9c74e30aaa9a8a44fa304a651e4f31de19a43d7ec13edaeb621"
   }
 }
