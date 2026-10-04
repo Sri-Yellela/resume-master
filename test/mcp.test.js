@@ -203,9 +203,15 @@ test("⛔ DRIFT: tools/list serves the generated contract's x-mcp table verbatim
   const { tools: contractTools } = loadMcpContract();
   const fresh = (await buildOpenApi())["x-mcp"].tools;
   assert.deepEqual(contractTools, fresh, "contract/ x-mcp is stale — run `npm run contract`");
-  await withClient(async (client) => {
-    const { tools } = await client.listTools();
-    assert.deepEqual(tools, contractTools.map(servedTool), "/mcp serves a tool table that is not the contract's");
+  // D21: compared on the WIRE, as a host receives it. The official SDK client parses tools/list
+  // through its own schema and drops keys it does not model — `securitySchemes`, which ChatGPT reads —
+  // so the client's view is not what was served.
+  await withClient(async (_client, s, token) => {
+    const r = await fetch(s.url, { method: "POST", headers: { "content-type": "application/json",
+      accept: "application/json, text/event-stream", authorization: `Bearer ${token}` },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }) });
+    const { result } = await r.json();
+    assert.deepEqual(result.tools, contractTools.map(servedTool), "/mcp serves a tool table that is not the contract's");
   });
 });
 
@@ -312,16 +318,18 @@ test("per-client accounting: one metering line per MCP tool call, keyed by clien
   });
 });
 
-test("the limit hook is consulted on every MCP tool call, before the tool runs (limits are OFF)", async () => {
-  const seen = [];
+test("the FREE limit hook is consulted on every MCP tool call, before the tool runs — never the model budget", async () => {
+  const seen = [], model = [];
   const log = () => {};
-  const metering = { ...createMetering({ log }), allow: (client, route) => { seen.push([client, route]); return false; } };
+  const metering = { ...createMetering({ log }), allow: (client, route) => { model.push([client, route]); return true; },
+    allowFree: (client, route) => { seen.push([client, route]); return false; } };
   await withClient(async (client) => {
     const r = await client.callTool({ name: "score_ats_fit", arguments: { job: JOB, resumeText: "Python" } });
     assert.equal(r.isError, true);
     assert.match(r.content[0].text, /limit_exceeded/);
     assert.match(r.content[0].text, /says nothing about the résumé/);
     assert.deepEqual(seen, [["draft", "mcp.score_ats_fit"]]);
+    assert.deepEqual(model, [], "a deterministic tool call took from the model budget");
   }, { metering });
 });
 

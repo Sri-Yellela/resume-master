@@ -15,7 +15,7 @@ import { generateResume, InvalidRequestError } from "../generation/generate.js";
 import { enhanceResume } from "../generation/enhance.js";
 import { extractPdfText } from "../parsing/extractPdfText.js";
 import { scoreAts, formatResume } from "../tools/deterministic.js";
-import { requireClient } from "./auth.js";
+import { requireClient, mcpCaller } from "./auth.js";
 import { createMetering } from "./metering.js";
 import { mcpHandlers } from "../mcp/server.js";
 import { siteRoutes } from "./siteRoutes.js";
@@ -41,7 +41,7 @@ export const SERVICE = "resume-master";
  */
 export function createApp({ anthropic = null, version = {}, log = defaultLog, env = process.env,
                             clients = null, metering = createMetering({ log }), store = null,
-                            siteOptions = {} } = {}) {
+                            anonymous = null, siteOptions = {} } = {}) {
   const app = express();
   app.disable("x-powered-by");
   // Railway terminates TLS in front of the service: req.secure (the session cookie's Secure flag)
@@ -77,33 +77,47 @@ export function createApp({ anthropic = null, version = {}, log = defaultLog, en
   // Parsed only AFTER authentication: an unauthenticated caller cannot make this service read a
   // 15 MB body before being refused.
   const json = express.json({ limit: "15mb" });
+  // D21: an anonymous MCP caller gets a body cap sized for a résumé and a posting, not for a PDF.
+  const anonJson = express.json({ limit: "512kb" });
+  const mcpJson = (req, res, next) => (req.client?.anonymous ? anonJson : json)(req, res, next);
+
+  // D21: free is not unbounded. The deterministic routes take from the client's FREE daily cap
+  // (RM_FREE_LIMITS_PER_DAY), before the body is read; off unless configured.
+  const freeCap = (route) => (req, res, next) => {
+    if (metering.allowFree(req.client.id, route)) return next();
+    res.status(429).json({ error: "limit_exceeded", retryable: true,
+      message: "This client has reached its daily limit for the free tools. Try again tomorrow." });
+  };
 
   app.get("/health", (_req, res) => res.json({ ok: true, service: SERVICE }));
   app.get("/v1/version", (_req, res) => res.json({ service: SERVICE, ...version }));
 
   // ── deterministic: no model, no cost — still authenticated, so every caller is identified ───────
   // One implementation each, in src/tools/deterministic.js — the MCP tools below call the same ones.
-  app.post("/v1/resumes/format", client, json, (req, res, next) => {
+  app.post("/v1/resumes/format", client, freeCap("resumes.format"), json, (req, res, next) => {
     try { res.json(formatResume(req.body)); } catch (e) { next(e); }
   });
 
-  app.post("/v1/ats/score", client, json, (req, res, next) => {
+  app.post("/v1/ats/score", client, freeCap("ats.score"), json, (req, res, next) => {
     try { res.json(scoreAts(req.body)); } catch (e) { next(e); }
   });
 
   // ── MCP (E1): the deterministic tools as LLM tools, in the same service ─────────────────────────
   // The SAME auth middleware, and it runs FIRST: an unauthenticated or unconfigured request is
   // refused before the body is read, exactly as on /v1. See src/mcp/server.js.
+  // D21: with RM_MCP_ANONYMOUS set, a caller with NO token is admitted as "(anonymous)" — capped per
+  // address and in total, before the body is read — and sees only the tools marked anonymous.
   const mcp = mcpHandlers({ metering, log, version });
-  app.post("/mcp", client, json, mcp.post, mcp.errors);
-  app.get("/mcp", client, mcp.methodNotAllowed);
-  app.delete("/mcp", client, mcp.methodNotAllowed);
+  const mcpAuth = mcpCaller(clients, anonymous);
+  app.post("/mcp", mcpAuth, mcpJson, mcp.post, mcp.errors);
+  app.get("/mcp", mcpAuth, mcp.methodNotAllowed);
+  app.delete("/mcp", mcpAuth, mcp.methodNotAllowed);
 
   // PDF → text (D17, O16e — 10-03): the PDF's own text layer, read here by the same reader as the
   // site's free tool (A70). It was Sonnet transcribing the document; D17 allows a model for
   // generation only. A scan has no text layer — refused with what to do, never an empty résumé.
   // `usage` stays in the answer, always empty, so the response shape is unchanged.
-  app.post("/v1/resumes/parse-pdf", client, json, async (req, res, next) => {
+  app.post("/v1/resumes/parse-pdf", client, freeCap("resumes.parse-pdf"), json, async (req, res, next) => {
     try {
       const out = await extractPdfText(req.body || {});
       if (out.needsOcr) {

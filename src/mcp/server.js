@@ -78,6 +78,9 @@ function refusal(error, message, retryable, meaning) {
 export function mcpHandlers({ metering, log, version = {}, contractFile = CONTRACT_FILE } = {}) {
   const { tools } = loadMcpContract(contractFile);
   const served = tools.map(servedTool);
+  // D21: what an anonymous caller may see and call — the tools the contract marks x-anonymous.
+  const anonymousNames = new Set(tools.filter(t => t["x-anonymous"] === true).map(t => t.name));
+  const servedAnonymous = served.filter(t => anonymousNames.has(t.name));
   const names = tools.map(t => t.name);
   const unimplemented = names.filter(n => !IMPLEMENTATIONS[n]);
   const undeclared = Object.keys(IMPLEMENTATIONS).filter(n => !names.includes(n));
@@ -86,19 +89,25 @@ export function mcpHandlers({ metering, log, version = {}, contractFile = CONTRA
       `implemented only: [${undeclared}]. Declare tools in src/contract/endpoints.js MCP_TOOLS and regenerate.`);
   }
 
-  function buildServer(clientId) {
+  function buildServer({ id: clientId, anonymous = false }) {
     const server = new Server({ name: "resume-master", version: String(version.version ?? "0.0.0") },
       { capabilities: { tools: {} }, instructions: MCP_INSTRUCTIONS });
     server.onerror = (e) => log({ error: "mcp_protocol_error", name: e?.name ?? "Error" });
 
-    server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: served }));
+    server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: anonymous ? servedAnonymous : served }));
 
     server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
       const impl = Object.hasOwn(IMPLEMENTATIONS, params.name) ? IMPLEMENTATIONS[params.name] : null;
       if (!impl) throw new McpError(ErrorCode.InvalidParams, `unknown tool: ${String(params.name).slice(0, 64)}`);
       const route = `mcp.${params.name}`;
-      // The limit hook, before any work — MCP is the first caller that can loop. Limits are OFF.
-      if (!metering.allow(clientId, route)) {
+      if (anonymous && !anonymousNames.has(params.name)) {
+        metering.record(clientId, route, [], { via: "mcp", result: "unauthenticated" });
+        return refusal("unauthenticated", "this tool needs an API token", false,
+          "Refused: this tool is not offered without an API token. It says nothing about the résumé.");
+      }
+      // The limit hook, before any work — MCP is the first caller that can loop. D21: a tool call is
+      // free (no model), so it takes from the FREE cap, never the model budget. Off unless configured.
+      if (!metering.allowFree(clientId, route)) {
         metering.record(clientId, route, [], { via: "mcp", result: "limit_exceeded" });
         return refusal("limit_exceeded", "this client's limit is reached", true,
           "Refused: this client's usage limit is reached. It says nothing about the résumé; retry later.");
@@ -123,7 +132,7 @@ export function mcpHandlers({ metering, log, version = {}, contractFile = CONTRA
 
   return {
     async post(req, res, next) {
-      const server = buildServer(req.client.id);
+      const server = buildServer(req.client);
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
       transport.onerror = (e) => log({ error: "mcp_transport_error", name: e?.name ?? "Error" });
       res.on("close", () => { transport.close().catch(() => {}); server.close().catch(() => {}); });

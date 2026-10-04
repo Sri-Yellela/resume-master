@@ -87,11 +87,16 @@ export function buildMcpTools(components) {
     for (const [k, s] of [["inputSchema", inputSchema], ["outputSchema", outputSchema]]) {
       if (s.type !== "object") throw new Error(`MCP tool ${t.name}: ${k} must be an object schema`);
     }
+    // D21: per-tool auth as MCP hosts read it (ChatGPT's plugin docs: "noauth" = callable anonymously).
+    // A token-only tool declares no scheme a host can satisfy, and is never listed to an anonymous caller.
+    const securitySchemes = t.anonymous ? [{ type: "noauth" }] : [];
     return {
       name: t.name, title: t.title, description: t.description,
       inputSchema, outputSchema,
       annotations: { title: t.title, readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-      "x-endpoint": t.endpoint, "x-result": t.result, "x-cost": t.cost,
+      securitySchemes,
+      _meta: { securitySchemes },
+      "x-endpoint": t.endpoint, "x-result": t.result, "x-cost": t.cost, "x-anonymous": Boolean(t.anonymous),
     };
   });
 }
