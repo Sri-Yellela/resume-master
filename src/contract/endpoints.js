@@ -9,7 +9,9 @@ import { str, num, bool, arr, obj, ref, nullable, enumOf } from "./schema.js";
 
 // 1.1.0 (E1): additive — the /mcp routes, the JSON-RPC envelopes, the MCP tool result shapes and
 // the generated tool table (`x-mcp`). No 1.0.0 shape changed.
-export const CONTRACT_VERSION = "1.2.0";
+// 1.3.0 (D21): additive — 429 limit_exceeded on the free routes and /mcp (free daily caps; the
+// anonymous caps), and each MCP tool's `securitySchemes` (noauth for the anonymous ones).
+export const CONTRACT_VERSION = "1.3.0";
 
 const usage = arr(ref("UsageRecord"));
 
@@ -92,6 +94,7 @@ export const DECLARED_SCHEMAS = {
 const E = ref("Error");
 const RPC = ref("JsonRpcResponse");
 const authErrors = { 401: E, 503: E };
+const limited = { 429: E };
 const modelErrors = { 400: E, ...authErrors, 413: E, 429: E, 502: E };
 
 /** method, path, auth, request, responses (status -> schema) — the table the harness covers. */
@@ -99,25 +102,25 @@ export const ENDPOINTS = [
   { method: "get", path: "/health", auth: false, responses: { 200: ref("Health") } },
   { method: "get", path: "/v1/version", auth: false, responses: { 200: ref("Version") } },
   { method: "post", path: "/v1/resumes/format", auth: true, cost: "free", request: ref("FormatRequest"),
-    responses: { 200: ref("FormatResponse"), 400: E, 413: E, ...authErrors } },
+    responses: { 200: ref("FormatResponse"), 400: E, 413: E, ...authErrors, ...limited } },
   { method: "post", path: "/v1/ats/score", auth: true, cost: "free", request: ref("AtsScoreRequest"),
-    responses: { 200: ref("AtsScoreResponse"), 400: E, 413: E, ...authErrors } },
+    responses: { 200: ref("AtsScoreResponse"), 400: E, 413: E, ...authErrors, ...limited } },
   { method: "post", path: "/v1/resumes/generate", auth: true, cost: "metered", request: ref("GenerateRequest"),
     responses: { 200: ref("GenerateResponse"), 422: E, ...modelErrors } },
   { method: "post", path: "/v1/resumes/enhance", auth: true, cost: "metered", request: ref("EnhanceRequest"),
     responses: { 200: ref("EnhanceResponse"), ...modelErrors } },
   // 1.2.0 (D17): read from the PDF's text layer — free, no model; a scan is a 400.
   { method: "post", path: "/v1/resumes/parse-pdf", auth: true, cost: "free", request: ref("ParsePdfRequest"),
-    responses: { 200: ref("ParsePdfResponse"), 400: E, 413: E, ...authErrors } },
+    responses: { 200: ref("ParsePdfResponse"), 400: E, 413: E, ...authErrors, ...limited } },
 
   // MCP (E1). Auth errors are this service's Error shape — they are refused before the MCP layer
   // runs, by the same middleware as /v1. Everything past auth answers JSON-RPC. 202 is the one
   // body-less answer in the contract, and the protocol requires it: a POST carrying only
   // notifications MUST be answered 202 with no body. `null` declares exactly that.
   { method: "post", path: "/mcp", auth: true, cost: "free", request: { type: ["object", "array"] },
-    responses: { 200: { anyOf: [RPC, arr(RPC)] }, 202: null, 400: RPC, 406: RPC, 413: RPC, 415: RPC, ...authErrors } },
-  { method: "get", path: "/mcp", auth: true, responses: { 405: RPC, ...authErrors } },
-  { method: "delete", path: "/mcp", auth: true, responses: { 405: RPC, ...authErrors } },
+    responses: { 200: { anyOf: [RPC, arr(RPC)] }, 202: null, 400: RPC, 406: RPC, 413: RPC, 415: RPC, ...authErrors, ...limited } },
+  { method: "get", path: "/mcp", auth: true, responses: { 405: RPC, ...authErrors, ...limited } },
+  { method: "delete", path: "/mcp", auth: true, responses: { 405: RPC, ...authErrors, ...limited } },
 ];
 
 // ── The MCP tool table — the ONE place a tool is declared ───────────────────────────────────────
@@ -131,6 +134,10 @@ export const ENDPOINTS = [
 // Descriptions are what a model chooses tools by, so each says what the tool does, what it refuses
 // and what a refusal MEANS. They are prose: the shape hash ignores them, so rewording is not a version.
 //
+// `anonymous: true` (D21) = served to a caller with NO token when RM_MCP_ANONYMOUS is set. Every MCP tool
+// is already free and read-only — the generator refuses any other (buildMcpTools) — so this marks only
+// WHICH free tools strangers may call.
+//
 // ⛔ DELIBERATELY ABSENT (see docs/API.md, MCP):
 //   · generation — an LLM calling an API to call an LLM; its value would be the integrity layer, and
 //     it costs money a tool loop can spend repeatedly. Not in the first pass.
@@ -143,6 +150,8 @@ export const MCP_TOOLS = [
     endpoint: "POST /v1/ats/score",
     result: "McpAtsScoreResult",
     cost: "free",
+    // D21 (owner, 10-04): anonymous first — callable on /mcp with no token, under RM_MCP_ANONYMOUS's caps.
+    anonymous: true,
     description: [
       "Scores how well a résumé's text matches one job posting, using Resume Master's deterministic ATS scorer " +
       "(@draft/ats-scorer — the same code as POST /v1/ats/score). Local and free: NO model call, no network call, " +
@@ -163,6 +172,12 @@ export const MCP_TOOLS = [
       "profile any individual — companies and roles only.",
       "Only `job` (title and description at least) and `resumeText` are needed; omit the other fields unless you " +
       "already hold them.",
+      "⚠ NOT READ FROM THE RÉSUMÉ TEXT (D21, measured): years of experience, security clearance and citizenship. " +
+      "Years are compared only when signalProfile.yearsExperience (a number) is given; without it the experience " +
+      "line says the candidate's years are not set — report that, never \"lacks the experience\". A requirement in " +
+      "hard_constraint_misses (e.g. \"Security clearance\") means the POSTING states it and it was not confirmed — " +
+      "not that the résumé lacks it. Say \"the posting requires X; check whether you meet it\". Do not ask the user " +
+      "for clearance or citizenship status to fill these in.",
     ].join("\n\n"),
   },
   {

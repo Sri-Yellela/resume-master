@@ -1,4 +1,4 @@
-# Resume Master API — v1 (contract 1.2.0)
+# Resume Master API — v1 (contract 1.3.0)
 
 Stateless résumé tools: generation, deterministic formatting, PDF text extraction, ATS scoring — over
 HTTP, and the deterministic ones also as MCP tools at `/mcp` (see [MCP](#mcp--the-deterministic-tools-as-llm-tools-e1)).
@@ -60,6 +60,12 @@ calls a model. MCP is the first caller that can loop, so the line exists per cal
 A limit hook runs on every model route and every MCP tool call **before any spend or work**. It allows everything: limits are off by
 decision. Enabling them means giving the hook a policy; no call site changes. A refusal will be
 `429 limit_exceeded`.
+
+**D21 (10-04) — free is not unbounded.** There are now two daily caps per client, both off until set:
+`RM_LIMITS_PER_DAY` for **model-backed** calls (generate, enhance) and `RM_FREE_LIMITS_PER_DAY` for the
+**free** ones (`/v1/ats/score`, `/v1/resumes/format`, `/v1/resumes/parse-pdf`, and every MCP tool call),
+in the same `client=N,*=N` form. A deterministic call never takes from the model budget — before 1.3.0 an
+MCP tool call did. The free cap is checked before the body is read.
 
 ---
 
@@ -184,7 +190,7 @@ bands are each product's presentation decision, calibrated against its own users
 |---|---|---|
 | 400 | `invalid_request`, `invalid_json` | — |
 | 401 | `unauthenticated` | false |
-| 429 | `limit_exceeded` (off unless `RM_LIMITS_PER_DAY` is set — A55) | true |
+| 429 | `limit_exceeded` — a daily cap (`RM_LIMITS_PER_DAY` model calls, A55; `RM_FREE_LIMITS_PER_DAY` free calls, D21) or, on `/mcp` without a token, an anonymous cap (`RM_MCP_ANONYMOUS`). All off unless set | true |
 | 503 | `auth_unconfigured` | false |
 | 404 | `not_found` | — |
 | 413 | `payload_too_large` | — |
@@ -220,6 +226,19 @@ Content-Type: application/json
   — `401 unauthenticated`, or `503 auth_unconfigured` with no clients configured. Those two are this
   service's `Error` shape; everything past auth answers JSON-RPC (`400` bad JSON, `406` missing
   Accept, `413` oversize, `415` not JSON).
+- **Anonymous (D21, 10-04 — off unless `RM_MCP_ANONYMOUS` is set).** MCP hosts reach a server
+  anonymously or through OAuth 2.1; ChatGPT's plugin directory offers no static-token option. So a
+  request with **no `Authorization` header** is admitted as the client `(anonymous)` — which no minted
+  token can be — and sees and may call **only the tools marked anonymous: `score_ats_fit`**. Each such
+  tool carries `securitySchemes: [{ "type": "noauth" }]` (also under `_meta`); token-only tools carry
+  none and are not listed to an anonymous caller, and calling one is refused (`unauthenticated`). The
+  switch IS the caps: `RM_MCP_ANONYMOUS="perIpPerMinute=N,perIpPerDay=N,perDay=N"`, all three required —
+  partial or malformed refuses to boot, so there is no uncapped anonymous mode. Over a cap: `429
+  limit_exceeded`, before the body is read. Anonymous bodies are capped at **512 KB**. A request that
+  **presents** a token is judged as a token — a wrong one is `401`, never a quiet downgrade to anonymous.
+  The address is held only as a salted hash, in memory, for at most a minute (per-minute count) and never
+  past its UTC day (per-day count), and is never logged. OAuth 2.1 (per-user, O16c as an auth flow) is
+  the later step for anything per-user.
 - **Schemas are generated, not written.** `src/contract/endpoints.js` `MCP_TOOLS` names each tool's
   HTTP endpoint and result shape; `npm run contract` resolves the endpoint's **request schema** into
   the tool's `inputSchema` and the result shape into its `outputSchema`, and writes the table to
@@ -247,7 +266,8 @@ text (measured: no words dropped on the inputs tried, but order and grouping cha
 
 A refusal is a tool error (`isError: true`) carrying `{ error, message, retryable }` and a sentence
 saying it is not a result: `invalid_request` (malformed input — never "the résumé is weak"),
-`limit_exceeded` (limits are off), `internal_error`. An unknown tool name is a JSON-RPC `-32602`.
+`limit_exceeded` (off unless a cap is set), `unauthenticated` (a token-only tool called anonymously),
+`internal_error`. An unknown tool name is a JSON-RPC `-32602`.
 
 ### Not exposed, deliberately
 
@@ -301,6 +321,9 @@ caller does not read "Resume Master formatted it" as "Resume Master checked it".
 | `RESUME_MASTER_CLIENT_TOKENS` | unset | `clientId:sha256hex,…` — unset fails closed (503 `auth_unconfigured`) |
 | `ANTHROPIC_API_KEY` | unset | unset is supported: deterministic routes serve, model routes answer 503 |
 | `RESUME_MASTER_LLM_FORMAT` | off | `1` adds a Haiku reformatting pass, instructed with the renderer's own stylesheet |
+| `RM_LIMITS_PER_DAY` | off | `client=N,*=N` — daily cap on MODEL-backed calls (A55) |
+| `RM_FREE_LIMITS_PER_DAY` | off | `client=N,*=N` — daily cap on FREE calls: the deterministic `/v1` routes and every MCP tool call (D21) |
+| `RM_MCP_ANONYMOUS` | off | `perIpPerMinute=N,perIpPerDay=N,perDay=N` — all three, or the service refuses to boot. Setting it opens `score_ats_fit` on `/mcp` without a token (D21) |
 | `PORT` | 3100 | |
 
 Prompt caching: the static system layers carry the breakpoints and every per-request value is in

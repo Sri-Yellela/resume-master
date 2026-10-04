@@ -4,7 +4,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { createApp } from "./src/http/app.js";
 import { loadAllPrompts } from "./src/generation/promptAssembler.js";
 import { parseClientTokens } from "./src/http/auth.js";
-import { createMetering, parseLimits } from "./src/http/metering.js";
+import { createMetering, parseLimits, parseFreeLimits, parseAnonymousPolicy, createAnonymousLimiter } from "./src/http/metering.js";
 import { openStore, resolveStorePath } from "./src/store/db.js";
 import { configureStoreBackups, scheduleDailyBackups } from "./src/store/backups.js";
 import { purgeExpired } from "./src/accounts/artifacts.js";
@@ -44,9 +44,15 @@ if (store) {
 const port = Number(process.env.PORT) || 3100;
 // A55: per-client daily limits on model-backed calls — OFF unless RM_LIMITS_PER_DAY is set.
 const limits = parseLimits(process.env.RM_LIMITS_PER_DAY);
-const metering = createMetering({ log: (e) => console.log(JSON.stringify({ t: new Date().toISOString(), ...e })), limits });
-createApp({ anthropic, version, clients, store, metering, siteOptions: { backups: !!store } }).listen(port, () => {
+// D21: per-client daily caps on the FREE routes and MCP tool calls — OFF unless RM_FREE_LIMITS_PER_DAY is set.
+const freeLimits = parseFreeLimits(process.env.RM_FREE_LIMITS_PER_DAY);
+// D21: anonymous /mcp — ON only when RM_MCP_ANONYMOUS sets all three caps; a partial value refuses to boot.
+const anonymousPolicy = parseAnonymousPolicy(process.env.RM_MCP_ANONYMOUS);
+const anonymous = createAnonymousLimiter(anonymousPolicy);
+const metering = createMetering({ log: (e) => console.log(JSON.stringify({ t: new Date().toISOString(), ...e })), limits, freeLimits });
+createApp({ anthropic, version, clients, store, metering, anonymous, siteOptions: { backups: !!store } }).listen(port, () => {
   // Client IDS only — never a hash, never a token.
   console.log(JSON.stringify({ t: new Date().toISOString(), boot: "listening", port, model: !!anthropic,
-    clients: [...clients.keys()], accounts: !!store, backups: store ? "daily 02:00 UTC" : "off", limits: metering.limitsEnabled ? Object.fromEntries(limits) : "off" }));
+    clients: [...clients.keys()], accounts: !!store, backups: store ? "daily 02:00 UTC" : "off", limits: metering.limitsEnabled ? Object.fromEntries(limits) : "off",
+    freeLimits: metering.freeLimitsEnabled ? Object.fromEntries(freeLimits) : "off", mcpAnonymous: anonymousPolicy ?? "off" }));
 });
