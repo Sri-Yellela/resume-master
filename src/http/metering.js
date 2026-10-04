@@ -22,6 +22,8 @@
 // client's MODEL-BACKED calls per UTC day (deterministic routes are never limited — they cost
 // nothing). A client with no entry and no "*" is unlimited — so "draft" stays unlimited unless named.
 // Counted in memory: a restart resets the day's count, which errs toward serving.
+import crypto from "node:crypto";
+
 export function parseLimits(raw) {
   const out = new Map();
   for (const part of String(raw || "").split(",").map(s => s.trim()).filter(Boolean)) {
@@ -32,13 +34,23 @@ export function parseLimits(raw) {
   return out;
 }
 
-export function createMetering({ log, limits = null, now = () => Date.now() } = {}) {
-  const limitsEnabled = !!limits && limits.size > 0;
+// ── D21 (10-04): FREE IS NOT UNBOUNDED ───────────────────────────────────────────────────────────
+// "An assistant in a loop calls a tool far more often than a human, and a zero-model endpoint still
+// costs CPU." So the deterministic routes and every MCP tool call get their OWN daily cap, separate
+// from the model budget above: RM_FREE_LIMITS_PER_DAY="acme=5000,*=20000", same shape, same rules (a
+// client with no entry and no "*" is unlimited). Before D21 an MCP tool call was counted against the
+// MODEL budget (allow), which a deterministic call never spends from.
+export const parseFreeLimits = (raw) => {
+  try { return parseLimits(raw); } catch (e) { throw new Error(e.message.replace("RM_LIMITS_PER_DAY", "RM_FREE_LIMITS_PER_DAY")); }
+};
+
+function dailyCounter(limits, now) {
+  const enabled = !!limits && limits.size > 0;
   const used = new Map();                            // `${day}|${client}` -> calls
   return {
-    limitsEnabled,
-    allow(clientId, _route) {
-      if (!limitsEnabled) return true;               // ⛔ OFF unless RM_LIMITS_PER_DAY says otherwise
+    enabled,
+    take(clientId) {
+      if (!enabled) return true;
       const cap = limits.has(clientId) ? limits.get(clientId) : limits.get("*");
       if (cap == null) return true;
       const day = new Date(now()).toISOString().slice(0, 10);
@@ -48,6 +60,87 @@ export function createMetering({ log, limits = null, now = () => Date.now() } = 
       used.set(key, n + 1);
       if (used.size > 5000) for (const k of used.keys()) if (!k.startsWith(day)) used.delete(k);
       return true;
+    },
+  };
+}
+
+// ── D21: ANONYMOUS MCP — ON ONLY WITH ITS LIMITS ─────────────────────────────────────────────────
+// ChatGPT's plugin directory (and any MCP host) reaches a server anonymously or through OAuth 2.1;
+// a static bearer token is not an option it offers. The owner chose anonymous first, for the
+// read-only, zero-model tools only (D21, 10-04). ⛔ Anonymous mode is SWITCHED ON BY ITS LIMITS:
+//   RM_MCP_ANONYMOUS="perIpPerMinute=10,perIpPerDay=200,perDay=5000"
+// All three are required; an absent variable leaves /mcp exactly as it was (a token or a 401), and a
+// malformed or partial one refuses to boot. There is no way to open /mcp to strangers without a cap.
+// The caller's address is hashed before it is held and is never logged.
+const ANON_KEYS = ["perIpPerMinute", "perIpPerDay", "perDay"];
+export function parseAnonymousPolicy(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return null;
+  const out = {};
+  for (const part of text.split(",").map(s => s.trim()).filter(Boolean)) {
+    const m = /^(\w+)=(\d+)$/.exec(part);
+    if (!m || !ANON_KEYS.includes(m[1]) || Number(m[2]) < 1) {
+      throw new Error(`RM_MCP_ANONYMOUS: malformed entry "${part.slice(0, 30)}" — expected ${ANON_KEYS.map(k => `${k}=N`).join(",")} (N ≥ 1)`);
+    }
+    out[m[1]] = Number(m[2]);
+  }
+  const missing = ANON_KEYS.filter(k => !(k in out));
+  if (missing.length) throw new Error(`RM_MCP_ANONYMOUS: missing ${missing.join(", ")} — anonymous access is never uncapped`);
+  return out;
+}
+
+export function createAnonymousLimiter(policy, { now = () => Date.now() } = {}) {
+  if (!policy) return null;
+  // hashed address -> { at, n }. ⛔ Each map holds ONE window: it is emptied when its minute or UTC day
+  // turns over, so a hashed address is held at most a minute (minute map) and never past the end of
+  // its UTC day (day map) — a bound the privacy policy states, not a size-triggered sweep.
+  const minute = new Map(), day = new Map();
+  let minuteAt = null, dayAt = null;
+  let total = { day: null, n: 0 };
+  const salt = crypto.randomBytes(16);               // per process: the hash is not portable either
+  const keyOf = (ip) => crypto.createHash("sha256").update(salt).update(String(ip || "")).digest("base64url").slice(0, 22);
+  const bump = (map, key, window, cap) => {
+    const e = map.get(key);
+    if (!e || e.at !== window) { map.set(key, { at: window, n: 1 }); return true; }
+    if (e.n >= cap) return false;
+    e.n++;
+    return true;
+  };
+  return {
+    policy,
+    /** For the privacy bound's test: how many hashed addresses are held right now. */
+    held: () => ({ minute: minute.size, day: day.size }),
+    /** @returns null when allowed, else which cap refused it ("perIpPerMinute" | "perIpPerDay" | "perDay"). */
+    take(ip) {
+      const t = now();
+      const m = Math.floor(t / 60000), d = new Date(t).toISOString().slice(0, 10);
+      if (minuteAt !== m) { minute.clear(); minuteAt = m; }
+      if (dayAt !== d) { day.clear(); dayAt = d; }
+      if (total.day !== d) total = { day: d, n: 0 };
+      if (total.n >= policy.perDay) return "perDay";
+      const k = keyOf(ip);
+      const dayEntry = day.get(k);
+      if (dayEntry?.at === d && dayEntry.n >= policy.perIpPerDay) return "perIpPerDay";
+      if (!bump(minute, k, m, policy.perIpPerMinute)) return "perIpPerMinute";
+      bump(day, k, d, Infinity);
+      total.n++;
+      return null;
+    },
+  };
+}
+
+export function createMetering({ log, limits = null, freeLimits = null, now = () => Date.now() } = {}) {
+  const model = dailyCounter(limits, now);
+  const free = dailyCounter(freeLimits, now);
+  return {
+    limitsEnabled: model.enabled,
+    freeLimitsEnabled: free.enabled,
+    allow(clientId, _route) {
+      return model.take(clientId);                   // ⛔ OFF unless RM_LIMITS_PER_DAY says otherwise
+    },
+    // D21: deterministic routes and MCP tool calls. OFF unless RM_FREE_LIMITS_PER_DAY says otherwise.
+    allowFree(clientId, _route) {
+      return free.take(clientId);
     },
     // `extra` carries content-free labels only — the MCP path passes { via: "mcp", result } so a tool
     // call is accounted for even though it spends nothing (calls: 0 — no model was called).

@@ -77,7 +77,8 @@ const transient = () => Object.assign(new Error("overloaded_error"), { status: 5
  *   auth     "valid" (default on authed routes) | "none" | "wrong"
  *   headers  extra request headers (MCP needs Accept: application/json, text/event-stream)
  *   model    in-process only: text the fake model returns, or an Error to throw, or "none" = no client
- *   service  in-process only: "no-clients" | "refuse-limits"
+ *   service  in-process only: "no-clients" | "refuse-limits" | "refuse-free" (the free daily cap is spent)
+ *            | "anonymous" (RM_MCP_ANONYMOUS set, caps not reached) | "anon-exhausted" (its caps reached)
  *   expect   extra assertions on the parsed body
  *   live     safe to run against a deployed service; `metered` = spends money
  */
@@ -96,6 +97,8 @@ export const SCENARIOS = [
   { name: "format: no token", route: "POST /v1/resumes/format", auth: "none", body: { html: "x" }, status: 401, live: true },
   { name: "format: wrong token", route: "POST /v1/resumes/format", auth: "wrong", body: { html: "x" }, status: 401, live: true },
   { name: "format: oversize body", route: "POST /v1/resumes/format", raw: JSON.stringify({ html: OVERSIZE }), status: 413 },
+  { name: "format: the free daily cap is reached", route: "POST /v1/resumes/format", service: "refuse-free", body: { html: "x" }, status: 429,
+    expect: b => (b.error === "limit_exceeded" && b.retryable === true) || "expected limit_exceeded, retryable" },
   { name: "format: no clients configured fails closed", route: "POST /v1/resumes/format", service: "no-clients", body: { html: "x" }, status: 503,
     expect: b => b.error === "auth_unconfigured" && b.retryable === false || "expected auth_unconfigured, retryable false" },
 
@@ -113,6 +116,8 @@ export const SCENARIOS = [
     body: { job: ATS_JOB, resumeText: "x", termWeights: { kafka: 3 } } },
   { name: "ats: no token", route: "POST /v1/ats/score", auth: "none", body: {}, status: 401, live: true },
   { name: "ats: no clients configured", route: "POST /v1/ats/score", service: "no-clients", body: {}, status: 503 },
+  { name: "ats: the free daily cap is reached, before the body is read", route: "POST /v1/ats/score", service: "refuse-free",
+    raw: "{\"not json", status: 429 },
   { name: "ats: oversize", route: "POST /v1/ats/score", raw: JSON.stringify({ resumeText: OVERSIZE }), status: 413 },
 
   // generate — metered
@@ -156,6 +161,7 @@ export const SCENARIOS = [
     expect: b => /no text layer/.test(b.message) || "a scan must say it has no text layer" },
   { name: "parse-pdf: an unreadable PDF is refused", route: "POST /v1/resumes/parse-pdf",
     body: { pdfBase64: INVALID_PDF_BASE64 }, status: 400, live: true },
+  { name: "parse-pdf: the free daily cap is reached", route: "POST /v1/resumes/parse-pdf", service: "refuse-free", body: { pdfBase64: TINY_PDF_BASE64 }, status: 429 },
   { name: "parse-pdf: no clients configured", route: "POST /v1/resumes/parse-pdf", service: "no-clients", body: { pdfBase64: TINY_PDF_BASE64 }, status: 503 },
   { name: "parse-pdf: not a PDF", route: "POST /v1/resumes/parse-pdf", body: { pdfBase64: Buffer.from("hello").toString("base64") }, status: 400, live: true },
   { name: "parse-pdf: no token", route: "POST /v1/resumes/parse-pdf", auth: "none", body: {}, status: 401, live: true },
@@ -184,6 +190,26 @@ export const SCENARIOS = [
   { name: "mcp: wrong token", route: "POST /mcp", auth: "wrong", headers: MCP_ACCEPT, body: rpc("tools/list"), status: 401, live: true },
   { name: "mcp: no clients configured fails closed", route: "POST /mcp", service: "no-clients", headers: MCP_ACCEPT, body: rpc("tools/list"), status: 503,
     expect: b => (b.error === "auth_unconfigured" && b.retryable === false) || "expected auth_unconfigured, retryable false" },
+  // D21 — anonymous: on only when RM_MCP_ANONYMOUS sets its caps; only the tools marked anonymous.
+  { name: "mcp: anonymous tools/list serves ONLY the anonymous tools, marked noauth", route: "POST /mcp", service: "anonymous", auth: "none",
+    headers: MCP_ACCEPT, status: 200, body: rpc("tools/list"),
+    expect: b => (b.result?.tools?.map(t => t.name).join() === "score_ats_fit"
+      && b.result.tools[0].securitySchemes?.[0]?.type === "noauth") || "anonymous saw more than score_ats_fit, or it was not marked noauth" },
+  { name: "mcp: anonymous score_ats_fit scores", route: "POST /mcp", service: "anonymous", auth: "none", headers: MCP_ACCEPT, status: 200,
+    body: rpc("tools/call", { name: "score_ats_fit", arguments: { job: ATS_JOB, resumeText: "Python Kubernetes Kafka Terraform AWS engineer" } }),
+    expect: b => (b.result?.structuredContent?.outcome === "scored" && typeof b.result.structuredContent.score === "number") || "anonymous scoring did not score" },
+  { name: "mcp: anonymous call of a token-only tool is refused", route: "POST /mcp", service: "anonymous", auth: "none", headers: MCP_ACCEPT, status: 200,
+    body: rpc("tools/call", { name: "format_resume_print_html", arguments: { html: "JANE DOE" } }),
+    expect: b => (b.result?.isError === true && /unauthenticated/.test(b.result.content?.[0]?.text) && !b.result.structuredContent) || "a token-only tool ran anonymously" },
+  { name: "mcp: a WRONG token is still 401 with anonymous on — never a quiet downgrade", route: "POST /mcp", service: "anonymous", auth: "wrong",
+    headers: MCP_ACCEPT, body: rpc("tools/list"), status: 401 },
+  { name: "mcp: anonymous body over 512 KB", route: "POST /mcp", service: "anonymous", auth: "none", headers: MCP_ACCEPT,
+    raw: JSON.stringify({ html: "x".repeat(600 * 1024) }), status: 413 },
+  { name: "mcp: anonymous caps reached — refused before the body is read", route: "POST /mcp", service: "anon-exhausted", auth: "none",
+    headers: MCP_ACCEPT, raw: "{\"not json", status: 429,
+    expect: b => (b.error === "limit_exceeded" && b.retryable === true) || "expected limit_exceeded" },
+  { name: "mcp: GET anonymous caps reached", route: "GET /mcp", service: "anon-exhausted", auth: "none", status: 429 },
+  { name: "mcp: DELETE anonymous caps reached", route: "DELETE /mcp", service: "anon-exhausted", auth: "none", status: 429 },
   { name: "mcp: GET — no SSE stream in a stateless server", route: "GET /mcp", headers: MCP_ACCEPT, status: 405, live: true },
   { name: "mcp: GET no token", route: "GET /mcp", auth: "none", status: 401, live: true },
   { name: "mcp: GET no clients", route: "GET /mcp", service: "no-clients", status: 503 },

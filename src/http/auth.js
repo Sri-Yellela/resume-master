@@ -59,6 +59,32 @@ export function authenticate(clients, authorization) {
   return ok ? m[1] : null;
 }
 
+/**
+ * D21 — /mcp only. A caller that PRESENTS a token is held to requireClient exactly as on /v1: a wrong
+ * token is a 401, never a quiet downgrade to anonymous. A caller with NO Authorization header is
+ * admitted as the anonymous client only when `anonymous` (createAnonymousLimiter) exists — i.e. when
+ * RM_MCP_ANONYMOUS set its caps — and only while those caps allow. Otherwise: requireClient's answer.
+ * The limiter runs here, before the body is read, so a capped caller costs one hash and a map lookup.
+ */
+// Parenthesised so it can never collide with a minted client id (CLIENT_ID_RE has no parentheses).
+export const ANONYMOUS_CLIENT = "(anonymous)";
+
+export function mcpCaller(clients, anonymous) {
+  const withToken = requireClient(clients);
+  return (req, res, next) => {
+    if (req.headers.authorization !== undefined || !anonymous) return withToken(req, res, next);
+    const refusedBy = anonymous.take(req.ip);
+    if (refusedBy) {
+      return res.status(429).json({ error: "limit_exceeded", retryable: true,
+        message: refusedBy === "perDay"
+          ? "Anonymous use of these tools has reached today's limit for everyone. Try again tomorrow, or use the free tools on resumemaster.one."
+          : "Too many anonymous requests from this address. Slow down and try again shortly." });
+    }
+    req.client = { id: ANONYMOUS_CLIENT, anonymous: true };
+    next();
+  };
+}
+
 /** Express middleware. `clients` null/empty = no client configured: FAIL CLOSED, and say why. */
 export function requireClient(clients) {
   return (req, res, next) => {
