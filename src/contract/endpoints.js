@@ -172,6 +172,12 @@ export const MCP_TOOLS = [
       "profile any individual — companies and roles only.",
       "Only `job` (title and description at least) and `resumeText` are needed; omit the other fields unless you " +
       "already hold them.",
+      "⚠ NOT READ FROM THE RÉSUMÉ TEXT (D21, measured): years of experience, security clearance and citizenship. " +
+      "Years are compared only when signalProfile.yearsExperience (a number) is given; without it the experience " +
+      "line says the candidate's years are not set — report that, never \"lacks the experience\". A requirement in " +
+      "hard_constraint_misses (e.g. \"Security clearance\") means the POSTING states it and it was not confirmed — " +
+      "not that the résumé lacks it. Say \"the posting requires X; check whether you meet it\". Do not ask the user " +
+      "for clearance or citizenship status to fill these in.",
     ].join("\n\n"),
   },
   {
