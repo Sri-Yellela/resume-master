@@ -19,6 +19,7 @@ import { requireClient, mcpCaller } from "./auth.js";
 import { createMetering } from "./metering.js";
 import { mcpHandlers } from "../mcp/server.js";
 import { siteRoutes } from "./siteRoutes.js";
+import { renderPrivacyPage } from "./privacyPage.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -151,6 +152,14 @@ export function createApp({ anthropic = null, version = {}, log = defaultLog, en
   app.use("/lib/tesseract", express.static(TESSERACT_DIST, js));
   app.use("/lib/tesseract-core", express.static(TESSERACT_CORE, js));
   app.use("/lib/tessdata", express.static(TESSDATA, { ...js, maxAge: "30d" }));
+  // A83: the privacy page is rendered on the server from docs/PRIVACY.md, so it reads with no JavaScript
+  // (an app-directory review reads the URL). Before the static files, which hold only its frame. A
+  // page, like public/ — middleware, not an API route, so the contract's route table stays the API.
+  const PRIVACY_PATHS = new Set(["/privacy.html", "/privacy"]);
+  app.use((req, res, next) => {
+    if (!PRIVACY_PATHS.has(req.path) || (req.method !== "GET" && req.method !== "HEAD")) return next();
+    try { res.type("html").send(renderPrivacyPage()); } catch (e) { next(e); }
+  });
   app.use(express.static(PUBLIC_DIR, { index: "index.html", extensions: false, fallthrough: true }));
 
   // Everything else is still JSON, including "not found" — only the site's own files are pages.
