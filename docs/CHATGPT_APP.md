@@ -30,7 +30,7 @@ anonymous. See `docs/API.md` (MCP → Anonymous) and `docs/PRIVACY.md` (*Through
   of the three was read and the experience line always said the years were not set.)
 - **Contact details do not affect the score** — measured: the same synthetic résumé with and without
   its contact block gives byte-identical reports.
-- `report.source` is a scorer version string (`local_ats_v4`) — provenance, not an identifier; noted
+- `report.source` is a scorer version string (`local_ats_v5`) — provenance, not an identifier; noted
   in case review asks.
 
 ## Listing

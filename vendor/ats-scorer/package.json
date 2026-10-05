@@ -1,6 +1,6 @@
 {
   "name": "@draft/ats-scorer",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Deterministic local ATS scorer: no database, no network, no model call. Weights and synonyms are arguments.",
   "private": true,
   "type": "module",
