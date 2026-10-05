@@ -36,7 +36,19 @@ export const ATS_SCENARIOS = {
     runtimeBasis: buildRuntimeAtsBasis({ resumeText: "Python Kubernetes", signalProfile: {}, domainProfile: {} }) }),
   "claims present": () => scoreAtsLocally({ job: job(), runtimeBasis: basis({ claims: { skills: ["Terraform"], actionVerbs: ["Led"] } }) }),
   "hard-constraint miss": () => scoreAtsLocally({ job: job({ description: job().description + " Active security clearance required." }), runtimeBasis: basis() }),
-  "synonym match": () => scoreAtsLocally({ job: job(), runtimeBasis: basis(), synonyms: new Map([["terraform", ["pulumi"]]]) }),
+  // A81 (1.4.0): with no signalProfile the tool reads years and a stated clearance from the text, and
+  // the report says so in `facts_from_text`. Three variants: dated roles + a clearance; stated years;
+  // nothing found (both null). asOf pinned so "Present" cannot change a value between runs.
+  "facts from text — dated roles and a clearance": () => scoreAtsLocally({
+    job: job({ description: job().description + " Active TS/SCI clearance required." }),
+    runtimeBasis: buildRuntimeAtsBasis({ resumeText: "EXPERIENCE\nAcme — Engineer\nJan 2019 – Dec 2024\nActive TS/SCI. Python, Kubernetes, Kafka.",
+      factsFromText: true, asOf: Date.UTC(2026, 9, 4) }) }),
+  "facts from text — stated years": () => scoreAtsLocally({ job: job(),
+    runtimeBasis: buildRuntimeAtsBasis({ resumeText: "Engineer with 6 years of experience in Python, Kubernetes and Kafka.",
+      factsFromText: true, asOf: Date.UTC(2026, 9, 4) }) }),
+  "facts from text — nothing found": () => scoreAtsLocally({ job: job(),
+    runtimeBasis: buildRuntimeAtsBasis({ resumeText: "Python Kubernetes Kafka engineer.", factsFromText: true, asOf: Date.UTC(2026, 9, 4) }) }),
+  "synonym match": () =>scoreAtsLocally({ job: job(), runtimeBasis: basis(), synonyms: new Map([["terraform", ["pulumi"]]]) }),
   // Without this one, five arrays were never observed non-empty and their item type was unknown.
   "competencies, verbs and generic language": () => scoreAtsLocally({
     job: job({ description: job().description + " You will design, build, deploy and manage services, lead " +
