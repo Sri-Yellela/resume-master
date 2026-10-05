@@ -41,6 +41,7 @@ import { generateResume } from "../generation/generate.js";
 import { enhanceResume } from "../generation/enhance.js";
 import { extractPdfText } from "../parsing/extractPdfText.js";
 import { scoreAts, formatResume, atsOutcome } from "../tools/deterministic.js";
+import { createAddressHasher } from "./metering.js";
 
 const COOKIE = "rm_session";
 const PRIVACY_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "docs", "PRIVACY.md");
@@ -53,28 +54,47 @@ function readCookie(req, name) {
   return null;
 }
 
-/** Per-key count per UTC day, in memory (one process) — the free PDF reader's ceiling (A70). */
-export function createDailyLimiter({ perDay = 100, now = () => Date.now() } = {}) {
+// ⛔ A82 (10-04): both limiters below count by ADDRESS, and an address is personal data. They hold it the
+// way /mcp's anonymous caps do (src/http/metering.js): only a salted one-way hash (createAddressHasher —
+// random per-process salt, never written down), and each map holds ONE window, emptied the moment the
+// window turns — so a hashed address is held at most a minute (rate) or never past its UTC day (daily).
+// Before A82 they keyed on the raw req.ip and were cleared only past 10,000 entries, while the privacy
+// page said the free tools keep nothing. test/a82SiteLimiterPrivacy.test.js holds the bound.
+
+/** A fixed-window counter keyed by a hashed address; the map is emptied whenever `windowOf` changes. */
+function windowedAddressCounter(windowOf, now) {
+  const keyOf = createAddressHasher();
   const hits = new Map();
-  return (key) => {
-    const d = Math.floor(now() / 86400000);
-    const e = hits.get(key);
-    if (!e || e.d !== d) { hits.set(key, { d, n: 1 }); if (hits.size > 10000) hits.clear(); return perDay > 0; }
-    e.n++;
-    return e.n <= perDay;
+  let at = null;
+  const take = (ip) => {
+    const w = windowOf(now());
+    if (w !== at) { hits.clear(); at = w; }
+    const k = keyOf(ip);
+    const n = (hits.get(k) || 0) + 1;
+    hits.set(k, n);
+    return n;
   };
+  /** For the privacy bound's test: the keys held right now (hashes, never addresses). */
+  take.keys = () => [...hits.keys()];
+  return take;
 }
 
-/** A small per-key fixed-window limiter, in memory (one process). */
+/** Per-address count per UTC day, in memory (one process) — the free PDF reader's ceiling (A70). */
+export function createDailyLimiter({ perDay = 100, now = () => Date.now() } = {}) {
+  const take = windowedAddressCounter(t => Math.floor(t / 86400000), now);
+  const allow = (ip) => take(ip) <= perDay;
+  allow.held = () => take.keys().length;
+  allow.heldKeys = take.keys;
+  return allow;
+}
+
+/** A small per-address fixed-window limiter, in memory (one process). */
 export function createRateLimiter({ perMinute = 30, now = () => Date.now() } = {}) {
-  const hits = new Map();
-  return (key) => {
-    const t = now(), w = Math.floor(t / 60000);
-    const e = hits.get(key);
-    if (!e || e.w !== w) { hits.set(key, { w, n: 1 }); if (hits.size > 10000) hits.clear(); return true; }
-    e.n++;
-    return e.n <= perMinute;
-  };
+  const take = windowedAddressCounter(t => Math.floor(t / 60000), now);
+  const allow = (ip) => take(ip) <= perMinute;
+  allow.held = () => take.keys().length;
+  allow.heldKeys = take.keys;
+  return allow;
 }
 
 export function siteRoutes({ store, anthropic = null, env = process.env, metering, sendEmail = sendResetEmail,

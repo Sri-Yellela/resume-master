@@ -60,7 +60,9 @@ Generation and formatting are not offered anonymously: `format_resume_print_html
 
 ## What an account keeps — and only if you make one
 
-Using the free tools on the site (ATS scoring, formatting) needs no account and keeps nothing.
+Using the free tools on the site (ATS scoring, formatting, PDF → text) needs no account and keeps nothing of what you send.
+
+**The one thing the free tools hold: a scrambled form of your network address, for at most a day.** So that tools with no sign-in cannot be overrun, the site limits how often they can be used from one address — a per-minute rate for every free tool, and a daily ceiling for reading PDFs. To count, it keeps a one-way, salted hash of your network address — never the address itself — in memory only, next to a count. The salt is random, created when the server starts and never written down, so the hash cannot be turned back into the address or matched across restarts. The per-minute count is held for the current minute and the daily count for the current day (UTC); each is emptied the moment its minute or day ends. Nothing is written to disk, a restart erases all of it, and the address is never logged. (Since October 4, 2026; before that the address itself was held this way, in memory, until a periodic clear.)
 
 | What | Why | How long | How it goes |
 |---|---|---|---|

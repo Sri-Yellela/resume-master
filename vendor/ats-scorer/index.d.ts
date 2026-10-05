@@ -37,7 +37,14 @@ export interface RuntimeAtsBasis {
   seniority: string | null;
   structuredFacts: Record<string, unknown>;
   termWeights: TermWeights | null;
+  /** A81 — present ONLY when built with factsFromText: true. What was read from the résumé text. */
+  factsFromText?: { yearsExperience: YearsFromText | null; clearance: ClearanceFromText | null; notRead: string[] };
 }
+
+/** A81 — years read from the résumé text. */
+export type YearsFromText = { years: number; source: "dated_roles"; roles: number } | { years: number; source: "stated_years" };
+/** A81 — a clearance the résumé states is held. */
+export interface ClearanceFromText { stated: true; text: string }
 
 export interface AtsJob {
   title?: string | null;
@@ -68,6 +75,8 @@ export interface AtsReport {
   action_verbs_generic: string[];
   experience: unknown;
   hard_constraint_misses: unknown[];
+  /** A81 — present ONLY when the basis was built with factsFromText: true. */
+  facts_from_text?: { years_experience: YearsFromText | null; clearance: ClearanceFromText | null; not_read: string[] };
 }
 
 export interface BuildBasisArgs {
@@ -76,6 +85,13 @@ export interface BuildBasisArgs {
   domainProfile?: Record<string, unknown> | null;
   termWeights?: TermWeights;
   claims?: { skills?: string[]; actionVerbs?: string[] } | null;
+  /**
+   * A81 — read years (dated roles) and a stated clearance from resumeText where signalProfile leaves
+   * them unset. OFF by default: without it the basis is exactly as before. Citizenship is never read.
+   */
+  factsFromText?: boolean;
+  /** What "present" means when reading dated roles (default: now). */
+  asOf?: number | Date;
 }
 
 export interface ScoreArgs extends BuildBasisArgs {
@@ -108,3 +124,5 @@ export function skillVocabularyTerms(): string[];
 export function actionVerbVocabularyTerms(): string[];
 export function companyStackTerms(company: unknown): string[];
 export function resetSkillVocabularyCache(): void;
+export function yearsFromResumeText(text: unknown, opts?: { asOf?: number | Date }): YearsFromText | null;
+export function clearanceFromResumeText(text: unknown): ClearanceFromText | null;

@@ -11,7 +11,9 @@ import { str, num, bool, arr, obj, ref, nullable, enumOf } from "./schema.js";
 // the generated tool table (`x-mcp`). No 1.0.0 shape changed.
 // 1.3.0 (D21): additive — 429 limit_exceeded on the free routes and /mcp (free daily caps; the
 // anonymous caps), and each MCP tool's `securitySchemes` (noauth for the anonymous ones).
-export const CONTRACT_VERSION = "1.3.0";
+// 1.4.0 (A81): additive — AtsReport.facts_from_text, present when the request carried no signalProfile
+// and the scorer read years (dated roles) and a stated clearance from the résumé text. No 1.3.0 shape changed.
+export const CONTRACT_VERSION = "1.4.0";
 
 const usage = arr(ref("UsageRecord"));
 
@@ -172,12 +174,17 @@ export const MCP_TOOLS = [
       "profile any individual — companies and roles only.",
       "Only `job` (title and description at least) and `resumeText` are needed; omit the other fields unless you " +
       "already hold them.",
-      "⚠ NOT READ FROM THE RÉSUMÉ TEXT (D21, measured): years of experience, security clearance and citizenship. " +
-      "Years are compared only when signalProfile.yearsExperience (a number) is given; without it the experience " +
-      "line says the candidate's years are not set — report that, never \"lacks the experience\". A requirement in " +
-      "hard_constraint_misses (e.g. \"Security clearance\") means the POSTING states it and it was not confirmed — " +
-      "not that the résumé lacks it. Say \"the posting requires X; check whether you meet it\". Do not ask the user " +
-      "for clearance or citizenship status to fill these in.",
+      "READ FROM THE RÉSUMÉ TEXT when no signalProfile is sent (A81): years of experience — the union of the dated " +
+      "roles in its experience section, whole years rounded down (or a stated \"N years of experience\" when no role " +
+      "is dated) — and a security clearance the résumé states is held (a hedged line such as \"eligible for\" or " +
+      "\"able to obtain\" does not count). report.facts_from_text shows exactly what was read; the experience line " +
+      "says where the years came from. If no dated roles were found the experience line says so — report that, " +
+      "never \"lacks the experience\".",
+      "⚠ CITIZENSHIP IS NEVER READ (report.facts_from_text.not_read). A \"U.S. citizenship\" entry in " +
+      "hard_constraint_misses means the POSTING requires it and nothing confirmed it — not that the person lacks " +
+      "it. Say \"the posting requires U.S. citizenship; check whether you meet it\". The same wording applies to a " +
+      "clearance miss: the résumé did not state one as held. Do not ask the user for citizenship or clearance " +
+      "status to fill these in.",
     ].join("\n\n"),
   },
   {

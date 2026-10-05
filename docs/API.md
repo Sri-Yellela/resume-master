@@ -1,4 +1,4 @@
-# Resume Master API — v1 (contract 1.3.0)
+# Resume Master API — v1 (contract 1.4.0)
 
 Stateless résumé tools: generation, deterministic formatting, PDF text extraction, ATS scoring — over
 HTTP, and the deterministic ones also as MCP tools at `/mcp` (see [MCP](#mcp--the-deterministic-tools-as-llm-tools-e1)).
@@ -148,7 +148,7 @@ message that can never be true. A 429 is always retryable.
 | `GET /health` | `{ ok, service }` | no | free |
 | `GET /v1/version` | `{ service: "resume-master", version, commit, scorer, llmFormat }` | no | free |
 | `POST /v1/resumes/format` | `{ html }` → `{ html }` — the deterministic renderer | no | free |
-| `POST /v1/ats/score` | `{ job, resumeText, signalProfile?, domainProfile?, claims?, termWeights?, synonyms? }` → `{ report }` | no | free |
+| `POST /v1/ats/score` | `{ job, resumeText, signalProfile?, domainProfile?, claims?, termWeights?, synonyms? }` → `{ report }` — with no `signalProfile`, years (dated roles) and a stated clearance are read from `resumeText` and `report.facts_from_text` says what was read; citizenship never is (1.4.0, A81) | no | free |
 | `POST /v1/resumes/generate` | see below → `{ html, domainModuleKey, claimCheck, usage[] }` | yes | metered |
 | `POST /v1/resumes/enhance` | `{ resumeText, profile: { name, roleFamily, domain }, selectedAdditions[] }` → `{ text, usage[] }` | yes | metered |
 | `POST /v1/resumes/parse-pdf` | `{ pdfBase64 }` (≤ 10 MB) → `{ text, chars, usage[] }` — the PDF's own text layer (`usage` always empty); a scan, with no text layer, is a `400` | no (since 1.2.0, D17) | free |
