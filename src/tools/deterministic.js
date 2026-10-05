@@ -25,7 +25,12 @@ export function scoreAts(body) {
   const { job, resumeText, signalProfile = {}, domainProfile = {}, claims = null } = body || {};
   if (!job || typeof job !== "object") throw new InvalidRequestError("job is required");
   if (typeof resumeText !== "string") throw new InvalidRequestError("resumeText is required");
-  const runtimeBasis = buildRuntimeAtsBasis({ resumeText, signalProfile, domainProfile, claims });
+  // A81: a caller with no signalProfile — an AI assistant over /mcp sends only job + resumeText — gets
+  // its years read from the résumé's dated roles and a clearance the résumé states it holds, instead of
+  // "years are not set" and an automatic clearance miss. A caller that sends a profile is scored exactly
+  // as before. ⛔ Citizenship is never read from text (the scorer's rule; report.facts_from_text.not_read).
+  const factsFromText = body.signalProfile == null;
+  const runtimeBasis = buildRuntimeAtsBasis({ resumeText, signalProfile, domainProfile, claims, factsFromText });
   try {
     const report = scoreAtsLocally({
       job, runtimeBasis,

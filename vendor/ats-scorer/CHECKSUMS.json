@@ -1,18 +1,20 @@
 {
   "name": "@draft/ats-scorer",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "normalisation": "LF",
   "algorithm": "sha256",
   "files": {
-    "README.md": "5c70937ecd5387e67786fbd6eef5f7c26733b860b79760f0fbb6293d0317ac2e",
+    "README.md": "b120ace0422b31fbeac31c49c28552fd82043f8b6e01098546fb644d1ff54447",
     "data/DOMAIN_METADATA_REGISTRY.json": "a2adc0cee863a3b42fe406cec3813a1497ab4db3b26ff66d5fe90e9dd2f7ee03",
     "data/DOMAIN_TOOL_REGISTRY.json": "6551baa688cde8fd2a5bacdc58edffec2c64ca72b2235b5f13fc889b9e02c7f2",
-    "index.d.ts": "36341a272d251f2675ac46768d5164d622f6971aa94b5262c1be215ad8824926",
-    "package.json": "77f9c47dc495c6672138be4a5ecfc98b2ab7a22e6d5138d877f171515c717d6b",
+    "index.d.ts": "61d664ae0423c7077ea9672497671a1697f94eb7b873bcd5bea1ad93075e6b3f",
+    "package.json": "4c6f85c7e8865e9a1044f1e754a18d8afec5651fa092f80545895bf452e77fbf",
     "scripts/checksums.mjs": "3d53d92f1fcc7cbeb4283db942f83909016c8b2b838d3309035c5ac798cb37cd",
-    "src/index.js": "a1ede68058741b3402a742b16a8cd8d0eb37338f0eb053b411cdffd24112c319",
-    "src/scorer.js": "158c98b193b91ba43105fdc7345e62ca82dfe96637e504bc8e3aece22df2daae",
+    "src/index.js": "f75a7b192f5d98ec96056ccf2ef4ea9cfdded323afc2697391f72971377905b7",
+    "src/scorer.js": "9f37c87ed5ae4692fd8ef1914ae7e4e9630ab4676921cddb8ad317828c4952bc",
+    "src/textFacts.js": "cd2a383d9d40b233dcf25758d9a01699519aec32552dceffac73fec5596d8fcc",
     "src/vocabulary.js": "4fc5fd246deaa74352f4369d6cdd86423f2c4947bed78e6abc1936ac2322739c",
-    "test/package.test.js": "72780e480991fb687a7ca5932abfb39c0951ea64c2b846fe9783fd7645a0bcb5"
+    "test/package.test.js": "72780e480991fb687a7ca5932abfb39c0951ea64c2b846fe9783fd7645a0bcb5",
+    "test/textFacts.test.js": "efe3061728567917146fdc021aa5196f47d42ae12bd4707c39f8f061c1f0747b"
   }
 }

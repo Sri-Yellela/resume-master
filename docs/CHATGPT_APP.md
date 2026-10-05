@@ -1,6 +1,6 @@
 # Resume Master in ChatGPT (and every MCP host) — D21
 
-**Status 10-04:** built on branch `d21-mcp-anonymous` (contract 1.3.0), **not deployed**. What exists:
+**Status 10-04:** built on branch `d21-mcp-anonymous` (contract 1.3.0; 1.4.0 on `a81-a83-rm` — A81), **not deployed**. What exists:
 `score_ats_fit` on `POST /mcp` with no token, once `RM_MCP_ANONYMOUS` sets its caps. Nothing else is
 anonymous. See `docs/API.md` (MCP → Anonymous) and `docs/PRIVACY.md` (*Through an AI assistant*).
 
@@ -20,12 +20,14 @@ anonymous. See `docs/API.md` (MCP → Anonymous) and `docs/PRIVACY.md` (*Through
 
 ## Known limits a reviewer will meet
 
-- **Years, clearance and citizenship are not read from the résumé text.** The scorer (vendored
-  `@draft/ats-scorer`) takes them from `signalProfile` only. With `job` + `resumeText` alone, the
-  experience line says the candidate's years are not set, and a clearance/citizenship requirement in a
-  posting is always listed in `hard_constraint_misses`. The tool description now says exactly this and
-  tells the assistant how to word it. The real fix — reading them from text — is a scorer change in
-  draft (`packages/ats-scorer`), recorded as an A row.
+- **Years and a stated clearance are read from the résumé text; citizenship never is** (A81, scorer
+  1.1.0, contract 1.4.0). With no `signalProfile` — what an assistant sends — the years come from the
+  résumé's dated roles (their union, whole years rounded down) and a clearance counts when the résumé
+  states it is held (a hedged line such as "eligible for" does not). `report.facts_from_text` shows what
+  was read. ⛔ **Citizenship is not read** — it is sensitive and an owner decision; a citizenship
+  requirement stays in `hard_constraint_misses`, and the tool description tells the assistant to word it
+  as "the posting requires it; check whether you meet it" and not to ask for the status. (Until A81 none
+  of the three was read and the experience line always said the years were not set.)
 - **Contact details do not affect the score** — measured: the same synthetic résumé with and without
   its contact block gives byte-identical reports.
 - `report.source` is a scorer version string (`local_ats_v4`) — provenance, not an identifier; noted
@@ -119,7 +121,7 @@ plus "Reasons: …".
 **P5 — hard requirement in the posting.**
 - *Prompt:* "Can you check my résumé against this defense-contractor posting? It requires an active Secret clearance. [résumé without any clearance] [posting]"
 - *Call:* same shape.
-- *Expected:* `scored` (if the posting has ≥ 4 scorable terms); `report.hard_constraint_misses` includes "Security clearance". The assistant names it as an unmet requirement alongside the score. ⚠ Use a résumé **without** a clearance. Clearance is never read from résumé text (see *Known limits*), so with one the report still lists it; the tool description tells the assistant to word that as "the posting requires it; check whether you meet it".
+- *Expected:* `scored` (if the posting has ≥ 4 scorable terms); `report.hard_constraint_misses` includes "Security clearance". The assistant names it as an unmet requirement alongside the score. ⚠ Use a résumé **without** a clearance: one that states "Active Secret clearance" satisfies the requirement since A81 and the miss is not listed (`report.facts_from_text.clearance` shows it). For a citizenship requirement the miss is always listed — citizenship is never read from text (see *Known limits*).
 
 ### Three negative cases (the tool should NOT be called)
 
