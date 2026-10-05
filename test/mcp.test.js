@@ -85,7 +85,7 @@ test("the official MCP client connects, lists exactly the deterministic tools, a
     assert.equal(scored.isError, undefined);
     assert.equal(scored.structuredContent.outcome, "scored");
     assert.equal(typeof scored.structuredContent.score, "number");
-    assert.equal(scored.structuredContent.report.source, "local_ats_v4");
+    assert.equal(scored.structuredContent.report.source, "local_ats_v5");
     assert.match(scored.content[0].text, /^Scored \d+\/100/);
 
     const formatted = await client.callTool({ name: "format_resume_print_html", arguments: { html: "JANE DOE\nSUMMARY\nBuilt things." } });

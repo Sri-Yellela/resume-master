@@ -45,6 +45,15 @@ dated) and a **security clearance** it states is held (a hedged line — "eligib
 - ⛔ **Citizenship is never read from text.** It is sensitive, and inferring it is unreliable; a
   citizenship requirement stays a stated miss. `facts_from_text.not_read` says so.
 
+## Experience: meeting a requirement is neutral (1.2.0, `local_ats_v5`)
+
+A posting's years requirement that the candidate **meets** pays exactly what a posting with **no**
+requirement pays (`MEETS_EXPERIENCE_RATIO === NO_REQUIREMENT_EXPERIENCE_RATIO`, 0.85 of the 22
+experience points). Until 1.1.0 it paid the full 22 — a bonus for a gate passed, which the years
+cannot earn: they do not see whether the role fits. A **shortfall** still costs, graded by how far
+short; unknown years still score the incomplete-profile rate. The measurement is in `src/scorer.js`
+at `MEETS_EXPERIENCE_RATIO`. Scores move only where years are known and met (or far exceeded), by 1 to 4 points down.
+
 ## How a repository consumes it
 
 - **draft** holds the source of truth and depends on it as `"file:packages/ats-scorer"`.
