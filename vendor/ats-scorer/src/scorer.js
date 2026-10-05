@@ -20,6 +20,7 @@
  */
 
 import { actionVerbVocabularyTerms, companyStackTerms, skillVocabularyTerms } from "./vocabulary.js";
+import { yearsFromResumeText, clearanceFromResumeText } from "./textFacts.js";
 // ⛔ NO BAND LOGIC IN HERE — decided 2026-09-27. The SCORE is a fact about a résumé and a posting;
 // a BAND is a product's decision about how to present it, calibrated against that product's board
 // and users. So shared/atsBands.js stayed in draft, and resume_depth — whose thresholds exist to
@@ -281,7 +282,7 @@ function parseJsonArray(value) {
  * lines shorter and would have destroyed exactly that.
  */
 export function buildRuntimeAtsBasis({ resumeText = "", signalProfile = {}, domainProfile = {}, termWeights = null,
-                                       claims = null } = {}) {
+                                       claims = null, factsFromText = false, asOf = undefined } = {}) {
   const profileKeywords = parseJsonArray(domainProfile.selected_keywords);
   const profileSkills = parseJsonArray(domainProfile.selected_tools);
   const profileVerbs = parseJsonArray(domainProfile.selected_verbs);
@@ -289,6 +290,20 @@ export function buildRuntimeAtsBasis({ resumeText = "", signalProfile = {}, doma
   const structuredFacts = {
     ...(signalProfile?.structuredFacts || {}),
   };
+  // A81 · OPT-IN. Without the flag the basis is exactly what it was — not one key added — so draft's
+  // scores, stored reports and basis hashes cannot move. With it, the résumé's own dated roles and a
+  // stated clearance fill what signalProfile left unset; a profile's stated fact always wins.
+  // ⛔ Citizenship is never read from text — see src/textFacts.js.
+  if (factsFromText === true) {
+    const textYears = signalProfile?.yearsExperience != null ? null : yearsFromResumeText(resumeText, asOf === undefined ? {} : { asOf });
+    const textClearance = structuredFacts.hasClearance != null ? null : clearanceFromResumeText(resumeText);
+    if (textClearance) structuredFacts.hasClearance = true;
+    return {
+      ...buildRuntimeAtsBasis({ resumeText, signalProfile: { ...(signalProfile || {}), structuredFacts,
+        yearsExperience: signalProfile?.yearsExperience ?? textYears?.years ?? null }, domainProfile, termWeights, claims }),
+      factsFromText: { yearsExperience: textYears, clearance: textClearance, notRead: ["citizenship"] },
+    };
+  }
   return {
     resumeText: String(resumeText || ""),
     titles: compactUnique([...(signalProfile?.titles || []), ...profileTitles], 24),
@@ -1090,8 +1105,10 @@ export function scoreAtsLocally({ job = {}, resumeText = "", runtimeBasis = null
                                   // G1 — Map<term, equivalents[]>, CONFIRMED rows only, built by the caller.
                                   // Absent means "no synonyms", which is exactly the pre-G1 behaviour, so every
                                   // existing caller keeps scoring identically until it opts in.
-                                  synonyms = null } = {}) {
-  const basis = runtimeBasis || buildRuntimeAtsBasis({ resumeText, signalProfile, domainProfile });
+                                  synonyms = null,
+                                  // A81 — only used when no runtimeBasis is passed; see buildRuntimeAtsBasis.
+                                  factsFromText = false } = {}) {
+  const basis = runtimeBasis || buildRuntimeAtsBasis({ resumeText, signalProfile, domainProfile, factsFromText });
   const weights = resolveTermWeights(termWeights ?? basis.termWeights);
   synonyms = resolveSynonyms(synonyms);
   const jobText = [
@@ -1150,7 +1167,23 @@ export function scoreAtsLocally({ job = {}, resumeText = "", runtimeBasis = null
 
   const requiredYears = experienceRequirement(jobText);
   const candidateYears = basis.yearsExperience == null ? null : Number(basis.yearsExperience);
-  const experienceFit = requiredYears == null
+  // A81 · where the years came from, in the words of the summary. Only when the caller opted in AND
+  // the years were read from the text; every other summary is word-for-word what it was.
+  const textYears = basis.factsFromText ? basis.factsFromText.yearsExperience : null;
+  const yearsWhere = textYears?.source === "dated_roles" ? "the résumé's dated roles cover about"
+    : textYears?.source === "stated_years" ? "the résumé states" : null;
+  const experienceFit = requiredYears != null && basis.factsFromText && (yearsWhere || candidateYears == null)
+    ? {
+        requiredYears,
+        candidateYears,
+        fit: candidateYears != null && candidateYears >= requiredYears,
+        summary: candidateYears == null
+          ? `Job asks for ${requiredYears}+ years; the résumé text shows no dated roles or stated years to compare.`
+          : candidateYears >= requiredYears
+            ? `Résumé experience (${yearsWhere} ${candidateYears} years) meets ${requiredYears}+ year requirement.`
+            : `Job asks for ${requiredYears}+ years; ${yearsWhere} ${candidateYears} years.`,
+      }
+    : requiredYears == null
     ? { requiredYears: null, candidateYears, fit: true, summary: "No explicit years-of-experience requirement detected." }
     : {
         requiredYears,
@@ -1271,5 +1304,13 @@ export function scoreAtsLocally({ job = {}, resumeText = "", runtimeBasis = null
     action_verbs_generic: compactUnique(genericVerbs, 10),
     experience: experienceFit,
     hard_constraint_misses: hardMisses,
+    // A81 · present ONLY when the caller opted in (factsFromText), so a default report is the same
+    // object it always was. What was read from the résumé text, so a reader can see what a fact rested
+    // on — and what is never read from text at all.
+    ...(basis.factsFromText ? { facts_from_text: {
+      years_experience: basis.factsFromText.yearsExperience || null,
+      clearance: basis.factsFromText.clearance || null,
+      not_read: [...basis.factsFromText.notRead],
+    } } : {}),
   };
 }

@@ -31,6 +31,20 @@ scoreAtsLocally({ job, runtimeBasis: basis, termWeights, synonyms });
 | `termWeights` | `null` (unweighted on purpose), a `Map<term, weight>`, or `{ weights: Map, stale }`. A stale envelope is refused and scores unweighted | **TypeError** |
 | `synonyms` | `null`, or a `Map<normalisedTerm, string[]>` of CONFIRMED rows. Applied one hop, never transitively | **TypeError** |
 
+## Facts read from résumé text (A81) — opt-in
+
+`buildRuntimeAtsBasis({ …, factsFromText: true })` fills what `signalProfile` leaves unset from the
+résumé text: **years of experience** from its dated roles (the union of the date ranges in the
+experience section, whole years rounded down; a stated "N years of experience" only when no role is
+dated) and a **security clearance** it states is held (a hedged line — "eligible", "able to obtain",
+"expired", "requiring" — is not one). A fact the profile states always wins. The report then carries
+`facts_from_text` saying what was read.
+
+- **Off by default.** Without the flag the basis and the report are exactly what they were — no key
+  added — so a product whose users have a profile (draft) does not move.
+- ⛔ **Citizenship is never read from text.** It is sensitive, and inferring it is unreliable; a
+  citizenship requirement stays a stated miss. `facts_from_text.not_read` says so.
+
 ## How a repository consumes it
 
 - **draft** holds the source of truth and depends on it as `"file:packages/ats-scorer"`.
