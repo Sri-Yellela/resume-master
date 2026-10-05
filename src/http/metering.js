@@ -89,6 +89,17 @@ export function parseAnonymousPolicy(raw) {
   return out;
 }
 
+/**
+ * A one-way key for a network address: sha256(per-process random salt ‖ address), truncated. The salt
+ * is created here, held only in memory and never written down, so a key cannot be turned back into the
+ * address or matched across restarts. Every limiter that counts by address keys on this, never on the
+ * raw address (A82) — /mcp's anonymous caps and the site's free-tool limiters alike.
+ */
+export function createAddressHasher() {
+  const salt = crypto.randomBytes(16);
+  return (ip) => crypto.createHash("sha256").update(salt).update(String(ip || "")).digest("base64url").slice(0, 22);
+}
+
 export function createAnonymousLimiter(policy, { now = () => Date.now() } = {}) {
   if (!policy) return null;
   // hashed address -> { at, n }. ⛔ Each map holds ONE window: it is emptied when its minute or UTC day
@@ -97,8 +108,7 @@ export function createAnonymousLimiter(policy, { now = () => Date.now() } = {}) 
   const minute = new Map(), day = new Map();
   let minuteAt = null, dayAt = null;
   let total = { day: null, n: 0 };
-  const salt = crypto.randomBytes(16);               // per process: the hash is not portable either
-  const keyOf = (ip) => crypto.createHash("sha256").update(salt).update(String(ip || "")).digest("base64url").slice(0, 22);
+  const keyOf = createAddressHasher();               // per process: the hash is not portable either
   const bump = (map, key, window, cap) => {
     const e = map.get(key);
     if (!e || e.at !== window) { map.set(key, { at: window, n: 1 }); return true; }
