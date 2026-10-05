@@ -134,7 +134,7 @@ test("/v1/ats/score is the shared package — real run, deterministic, weights a
     const r1 = await (await s.post("/v1/ats/score", { job, resumeText: "Python Kubernetes engineer" })).json();
     const r2 = await (await s.post("/v1/ats/score", { job, resumeText: "Python Kubernetes engineer" })).json();
     assert.deepEqual(r1, r2);
-    assert.equal(r1.report.source, "local_ats_v4");
+    assert.equal(r1.report.source, "local_ats_v5");
     assert.equal("resume_depth" in r1.report, false, "band presentation is each product's, not the scorer's");
     const weighted = await (await s.post("/v1/ats/score", { job, resumeText: "Python Kubernetes engineer",
       termWeights: [["kafka", 3], ["terraform", 3], ["aws", 3], ["python", 0.2], ["kubernetes", 0.2]] })).json();

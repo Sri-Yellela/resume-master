@@ -106,6 +106,10 @@ export const ATS_REPORT_CACHE_KEY: string;
 export const SKILL_POINTS: number;
 export const VERB_POINTS: number;
 export const EXPERIENCE_POINTS: number;
+/** The experience ratio when the posting states no years requirement. */
+export const NO_REQUIREMENT_EXPERIENCE_RATIO: number;
+/** The experience ratio when the candidate meets the requirement — equal to the no-requirement rate (1.2.0). */
+export const MEETS_EXPERIENCE_RATIO: number;
 export const HARD_MISS_PENALTY: number;
 export const NEUTRAL_TERM_WEIGHT: number;
 export const MIN_SCORABLE_TERMS: number;

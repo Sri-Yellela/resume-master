@@ -50,7 +50,11 @@ import { yearsFromResumeText, clearanceFromResumeText } from "./textFacts.js";
  * leaving the version alone would have fixed the report only for postings nobody had opened —
  * which is exactly how AG1's fragment fix appeared to work and did not (e566dbc).
  */
-export const LOCAL_ATS_SOURCE = "local_ats_v4";
+//
+// v5 (exp-weight-retune, 2026-10-05): a MET years requirement pays the no-requirement rate instead of
+// a bonus — see MEETS_EXPERIENCE_RATIO. The number moves (for profiles with years set, on postings
+// whose requirement they meet, by 1 to 4 points down), so every stored score built under v4 must re-score.
+export const LOCAL_ATS_SOURCE = "local_ats_v5";
 
 /**
  * What a CACHED report must have been built under to be served again (G6).
@@ -1018,6 +1022,38 @@ export const MIN_SCORABLE_TERMS = 4;
  * profile is a poor fit that pure term overlap would happily score high, which is exactly the
  * adversarial case a swipe feed must not get wrong.
  */
+/** What the experience component pays when the posting states no years requirement at all. */
+export const NO_REQUIREMENT_EXPERIENCE_RATIO = 0.85;
+
+/**
+ * ⛔ MEETING A YEARS REQUIREMENT PAYS EXACTLY WHAT "NO REQUIREMENT" PAYS — it is a gate passed, not
+ * evidence of fit (exp-weight-retune, 2026-10-05). Until then "meets" paid 1.0, i.e. +3.3 points over
+ * a posting that asked for nothing, and +9.9 over the same posting with the years unknown.
+ *
+ * THE REASON IS THE SAME ONE AK1 GAVE FOR HARD CONSTRAINTS: not being disqualified is not evidence of
+ * fit. Three years of engineering meets "2+ years" on a sales posting exactly as well as on a backend
+ * one; the years cannot see the role. Measured on the graded 30 with the years known (A81's text
+ * read, or a profile with years set): the three 2-year postings each gained ~10 for "meets" — two of
+ * them human FIT 1 (sales, program management), one FIT 5 — and that is how reading the years took
+ * rho 0.746 -> 0.672 (draft, profile years set) and 0.637 -> 0.592 (assistant, job + résumé text).
+ *
+ * A SHORTFALL STILL COSTS, GRADED BY DISTANCE (the ladder below is unchanged): being unable to get
+ * the job IS evidence. Unknown years stay at 0.55 — the incomplete-profile rate — because making them
+ * neutral too was measured and LOWERS draft's own path (0.746 -> 0.712: on this corpus the postings
+ * that state years are mostly poor fits, and every one of them rose).
+ *
+ * Measured, before -> after (paired bootstrap 95% CI on the change, 10,000 resamples, n = 30):
+ *   draft, profile years unset   0.746 -> 0.746   no score moves
+ *   draft, profile years set     0.672 -> 0.685   Δ +0.013 [-0.001, +0.047]
+ *   assistant (text years)       0.592 -> 0.595   Δ +0.003 [-0.042, +0.044]
+ * ⛔ Both gains are inside their CI — NOISE, not evidence the rule ranks better. It is kept for the
+ * reason above and because it lowers no path. Three variants were measured, pre-registered, no grid:
+ * this one; unknown-years neutral too (rejected, above); and capping known years at the UNKNOWN rate
+ * 0.55 (0.724 / 0.620, also inside the CI — rejected because it makes a MET requirement score below a
+ * posting that states none, which fits this corpus's composition, not a principle).
+ */
+export const MEETS_EXPERIENCE_RATIO = NO_REQUIREMENT_EXPERIENCE_RATIO;
+
 function experienceRatio(requiredYears, candidateYears) {
   // null means "this component carries no information", NOT "score it zero" and NOT "score it
   // full". See the renormalisation note in scoreAtsLocally — a component with nothing to say is
@@ -1026,9 +1062,10 @@ function experienceRatio(requiredYears, candidateYears) {
   if (candidateYears == null) return 0.55;  // the profile, not the job, is the incomplete one
   const gap = candidateYears - requiredYears;
   if (gap >= 0) {
+    // ⛔ MEETING THE REQUIREMENT IS NEUTRAL, NOT A BONUS — see MEETS_EXPERIENCE_RATIO.
     // Over-qualification is a soft signal, so the taper is gentle and floors at 70%.
     const over = Math.max(0, gap - 4);
-    return Math.max(0.7, 1 - over * 0.06);
+    return Math.min(MEETS_EXPERIENCE_RATIO, Math.max(0.7, 1 - over * 0.06));
   }
   const short = -gap;
   if (short <= 1) return 0.8;
@@ -1257,6 +1294,8 @@ export function scoreAtsLocally({ job = {}, resumeText = "", runtimeBasis = null
   // A constant under every score is a floor, which is a cosmetic problem. A component whose weight
   // depends on whether the posting happened to mention years is a ranking problem, which is the one
   // that matters. The flat rate stays until skill recall is good enough to carry the extra variance.
+  // The literal is NO_REQUIREMENT_EXPERIENCE_RATIO; it is spelled out because a test asserts this exact
+  // line, and test/experienceNeutral.test.js proves the two agree (a met requirement scores as none).
   const experienceScore = (expRatio == null ? 0.85 : expRatio) * EXPERIENCE_POINTS;
   const skillScore = (skillRatio == null ? 1 : skillRatio) * SKILL_POINTS;
   const verbScore = (verbRatio == null ? 1 : verbRatio) * VERB_POINTS;
