@@ -1,6 +1,6 @@
 // Resume Master — stateless résumé tools. See README.md and docs/API.md.
 import fs from "node:fs";
-import Anthropic from "@anthropic-ai/sdk";
+import { createAnthropicClient } from "./src/model/anthropicCall.js";
 import { createApp } from "./src/http/app.js";
 import { loadAllPrompts } from "./src/generation/promptAssembler.js";
 import { parseClientTokens } from "./src/http/auth.js";
@@ -22,7 +22,8 @@ const version = {
 
 // No key is a supported state: the deterministic routes still serve, and model routes answer
 // 503 model_unconfigured with retryable:false rather than pretending to be flaky.
-const anthropic = process.env.ANTHROPIC_API_KEY ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }) : null;
+// D70 Phase 3: the SDK's automatic retries are capped at one (MODEL_MAX_RETRIES, src/model/anthropicCall.js).
+const anthropic = createAnthropicClient({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 // Throws on a malformed entry: a typo that silently dropped a client would read, from the caller's
 // side, exactly like a revoked token. Zero clients is allowed and FAILS CLOSED (503 auth_unconfigured).

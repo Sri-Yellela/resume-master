@@ -19,7 +19,7 @@ export type Claims = { skills?: Array<string>; actionVerbs?: Array<string>; };
 
 export type Job = { title: string; company?: string; category?: string; description?: string; stack?: string | null; };
 
-export type GenerateRequest = { mode?: "GENERATE" | "A_PLUS"; domainModuleKey?: string; roleFamily?: string; domain?: string; candidate?: Candidate; profile?: JobProfile | null; claims?: Claims | null; employers?: Array<string>; job: Job; baseResumeText: string; options?: { includeSummary?: boolean; }; };
+export type GenerateRequest = { mode?: "GENERATE" | "A_PLUS"; domainModuleKey?: string; roleFamily?: string; domain?: string; candidate?: Candidate; profile?: JobProfile | null; claims?: Claims | null; employers?: Array<string>; job: Job; baseResumeText: string; options?: { includeSummary?: boolean; cache?: boolean; }; };
 
 /** Only ever returned for a document that PASSED the claim guard. */
 export type GenerateResponse = { html: string; domainModuleKey: string; claimCheck: { ok: true; inspected: ClaimInspection; }; usage: Array<UsageRecord>; };

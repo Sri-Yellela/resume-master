@@ -44,6 +44,12 @@ export async function generateResume(client, input = {}, { env = process.env } =
   if (!MODES.includes(mode)) throw new InvalidRequestError(`mode must be one of ${MODES.join(", ")}`);
   requireString(baseResumeText, "baseResumeText");
   requireString(job.title, "job.title");
+  // D70 Phase 3: AL6's cache lever, now on the contract. Absent is TRUE — the measured-best default,
+  // and byte-for-byte the request this route sent before the option existed. Anything but a boolean
+  // is refused: a string "false" read as truthy would cache while the caller believed it had not.
+  if (options.cache !== undefined && typeof options.cache !== "boolean") {
+    throw new InvalidRequestError("options.cache must be a boolean");
+  }
   const usage = [];
 
   // Domain module: explicit key, else role family + domain, else classify (a model call).
@@ -65,7 +71,8 @@ export async function generateResume(client, input = {}, { env = process.env } =
   // so no summary is generated to strip.
   const includeSummary = options.includeSummary === true;
   const runtimeInputs = buildRuntimeInputs({ candidate, job, baseResumeText, mode, employers, profile, claims });
-  const { systemBlocks } = assemblePrompt(domainModuleKey, mode, runtimeInputs, { SUMMARY: includeSummary });
+  const { systemBlocks } = assemblePrompt(domainModuleKey, mode, runtimeInputs, { SUMMARY: includeSummary },
+    { cache: options.cache !== false });
 
   const gen = await callAnthropic(client, {
     purpose: "resume_generate",
