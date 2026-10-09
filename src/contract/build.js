@@ -103,12 +103,39 @@ export function buildMcpTools(components) {
 
 export const renderJson = (doc) => JSON.stringify(doc, null, 2) + "\n";
 
-/** A hash of the SHAPE only — descriptions and summaries stripped — so rewording is not a version. */
+// ── The shape hash ──────────────────────────────────────────────────────────────────────────────
+//
+// ⛔ PROSE IS IGNORED; A FIELD NAME NEVER IS. Until 1.5.0 this stripped every key called
+// `description`, `summary`, `info` or `servers` AT EVERY DEPTH — so a schema PROPERTY with one of
+// those names (Job.description, the posting itself) fell out of the hash with its documentation, and
+// renaming, retyping or deleting it was not a shape change. Now:
+//   · `description` / `summary` are dropped only where they are ANNOTATIONS — keys of a schema node
+//     or an OpenAPI object;
+//   · the keys of a NAME MAP (`properties` and its JSON-Schema siblings) are field names, and every
+//     one is shape, whatever it is called — its value is a schema node again;
+//   · `info` / `servers` are document metadata, dropped at the ROOT only.
+const ANNOTATIONS = new Set(["description", "summary"]);
+const ROOT_METADATA = new Set(["info", "servers"]);
+const NAME_MAPS = new Set(["properties", "patternProperties", "$defs", "definitions"]);
+
+export function shapeOf(doc) {
+  const node = (v, root = false) => {
+    if (Array.isArray(v)) return v.map(x => node(x));
+    if (!v || typeof v !== "object") return v;
+    return Object.fromEntries(Object.entries(v)
+      .filter(([k]) => !ANNOTATIONS.has(k) && !(root && ROOT_METADATA.has(k)))
+      .map(([k, x]) => [k, NAME_MAPS.has(k) ? names(x) : node(x)]));
+  };
+  // Every key kept: a field may be called `description`, and it is part of the shape.
+  const names = (m) => m && typeof m === "object" && !Array.isArray(m)
+    ? Object.fromEntries(Object.entries(m).map(([k, x]) => [k, node(x)]))
+    : node(m);
+  return node(doc, true);
+}
+
+/** A hash of the SHAPE only — annotation prose stripped, field names kept — so rewording is not a version. */
 export function shapeHash(doc) {
-  const strip = (v) => Array.isArray(v) ? v.map(strip) : v && typeof v === "object"
-    ? Object.fromEntries(Object.entries(v).filter(([k]) => !["description", "summary", "info", "servers"].includes(k)).map(([k, x]) => [k, strip(x)]))
-    : v;
-  return sha256(JSON.stringify(strip(doc)));
+  return sha256(JSON.stringify(shapeOf(doc)));
 }
 
 // ── TypeScript ──────────────────────────────────────────────────────────────────────────────────

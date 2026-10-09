@@ -13,7 +13,12 @@ import { str, num, bool, arr, obj, ref, nullable, enumOf } from "./schema.js";
 // anonymous caps), and each MCP tool's `securitySchemes` (noauth for the anonymous ones).
 // 1.4.0 (A81): additive — AtsReport.facts_from_text, present when the request carried no signalProfile
 // and the scorer read years (dated roles) and a stated clearance from the résumé text. No 1.3.0 shape changed.
-export const CONTRACT_VERSION = "1.4.0";
+// 1.5.0 (D70): additive — GenerateRequest.options.cache, options.jobContext and job.keywords. And the
+// SHAPE HASH NOW SEES FIELD NAMES: before 1.5.0 it dropped every key called `description` at every
+// depth, Job.description included (src/contract/build.js shapeOf). Hashes recorded for 1.0.0–1.4.0
+// in VERSIONS.json were computed the old way and stay as recorded — append-only; nothing re-hashes
+// a version a consumer already holds. No 1.4.0 shape changed.
+export const CONTRACT_VERSION = "1.5.0";
 
 const usage = arr(ref("UsageRecord"));
 
