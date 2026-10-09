@@ -25,6 +25,9 @@ HTTP, and the deterministic ones also as MCP tools at `/mcp` (see [MCP](#mcp--th
 > - **Versioned:** `contract/VERSIONS.json` maps each version to its shape hash, append-only. A
 >   shape change without a `CONTRACT_VERSION` bump refuses to generate; a stale `contract/`
 >   fails `npm test`. Consumers vendor `contract/` and assert `CHECKSUMS.json` (LF-normalised).
+>   The shape hash ignores documentation annotations (`description`, `summary`, the root `info` and
+>   `servers`) and **never a field name**: since 1.5.0 a property called `description` — Job's
+>   posting — is part of the shape. Before 1.5.0 it was not; the 1.0.0–1.4.0 hashes stay as recorded.
 
 ---
 
