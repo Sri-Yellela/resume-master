@@ -256,6 +256,11 @@
             "properties": {
               "includeSummary": {
                 "type": "boolean"
+              },
+              "cache": {
+                "type": "boolean",
+                "default": true,
+                "description": "Prompt-cache breakpoints on the static system blocks. Absent or true: on (the default, and the request this route always sent). false: none — for a one-shot caller, whose cache write would never be read."
               }
             },
             "required": []

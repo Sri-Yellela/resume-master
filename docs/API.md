@@ -142,6 +142,12 @@ Every model-backed error carries `retryable`. An exhausted balance, a bad key or
 error is `retryable: false, permanent: true` — "please try again" for a billing failure is a
 message that can never be true. A 429 is always retryable.
 
+**Automatic retries are capped at one (1.5.0, D70 Phase 3).** The service's Anthropic client retries a
+failed model request (a connection error, 408, 409, 429 or 5xx) **at most once** before the error
+reaches you — not the SDK's default of two. A transport retry re-sends a whole generation and can
+bill it again, so any attempt beyond that one is yours to decide, from `retryable`. The `usage`
+records cover each call as the service saw it, not each transport attempt inside it.
+
 ---
 
 ## Endpoints
@@ -173,12 +179,18 @@ message that can never be true. A 429 is always retryable.
   "employers": ["Employer 1", "Employer 2"],
   "job":       { "title": "", "company": "", "category": "", "description": "", "stack": "" },
   "baseResumeText": "…",
-  "options":   { "includeSummary": false }
+  "options":   { "includeSummary": false, "cache": true }
 }
 ```
 
 `candidate.yearsOfExperience` and `profile.seniority` are **the authority** the claim guard
 enforces. Omitting them does not disable the guard; it falls back to what the base résumé states.
+
+`options.cache` (1.5.0, D70 Phase 3) — optional boolean, **default `true`**: prompt-cache breakpoints
+on the static system blocks (a write is 1.25x, a read 0.1x). Absent or `true` sends exactly the
+request this route sent before the option existed. `false` sends no `cache_control` at all — for a
+one-shot caller whose cache write would never be read. It changes billing only, never the prompt
+text. A non-boolean is a `400`.
 
 ### ATS scoring
 

@@ -7,8 +7,35 @@
 // (e.g. draft, which records usage_events) gets that record in the response and meters it itself.
 //
 // Candidate data is never routed off Anthropic here: this service has exactly one provider.
+import Anthropic from "@anthropic-ai/sdk";
 
 export const MODEL_SONNET = "claude-sonnet-5";
+
+// ── D70 Phase 3: AUTOMATIC RETRIES ARE CAPPED AT ONE, AND THE CONTRACT SAYS SO ──────────────────
+//
+// The SDK retries a failed request by itself — a connection error, 408, 409, 429 or 5xx — TWICE by
+// default, before callAnthropic ever sees the failure. A transport retry is not free here: the
+// request is a whole résumé generation, and a retry after the upstream had already started (a 5xx
+// or a dropped connection mid-response) can bill the input — and any output it produced — a
+// SECOND and THIRD time for the one document the caller asked for. draft's policy (D70 Phase 3) is
+// "cap automatic retries at one, and say so", so the number is set explicitly rather than
+// inherited from whatever the SDK's default happens to be in its next release, and docs/API.md
+// states it.
+//
+// Not an environment lever: there is no retry setting anywhere else in this service, and a
+// per-deploy knob on how many times a caller's request may be billed is the wrong kind of freedom.
+// Anything beyond the one retry is the caller's decision, made from `retryable` on the error.
+export const MODEL_MAX_RETRIES = 1;
+
+/**
+ * The service's one SDK client. Null with no key — a supported state: the deterministic routes
+ * still serve and the model routes answer 503 model_unconfigured.
+ * @param Sdk  the SDK's constructor, injectable so the configuration is testable with no network
+ */
+export function createAnthropicClient({ apiKey, Sdk = Anthropic } = {}) {
+  if (!apiKey) return null;
+  return new Sdk({ apiKey, maxRetries: MODEL_MAX_RETRIES });
+}
 export const MODEL_HAIKU = "claude-haiku-4-5-20251001";
 
 /** A usage record: what was spent, never what was said. */

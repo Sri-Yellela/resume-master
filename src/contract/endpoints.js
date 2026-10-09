@@ -43,7 +43,12 @@ export const DECLARED_SCHEMAS = {
     mode: enumOf("GENERATE", "A_PLUS"), domainModuleKey: str, roleFamily: str, domain: str,
     candidate: ref("Candidate"), profile: nullable(ref("JobProfile")), claims: nullable(ref("Claims")),
     employers: arr(str), job: ref("Job"), baseResumeText: str,
-    options: obj({ includeSummary: bool }, { optional: ["includeSummary"] }),
+    // 1.5.0 (D70 Phase 3): `cache` — prompt-cache breakpoints on the system blocks. Default true.
+    options: obj({ includeSummary: bool,
+      cache: { type: "boolean", default: true, description: "Prompt-cache breakpoints on the static system blocks. " +
+        "Absent or true: on (the default, and the request this route always sent). false: none — for a one-shot caller, " +
+        "whose cache write would never be read." } },
+      { optional: ["includeSummary", "cache"] }),
   }, { optional: ["mode", "domainModuleKey", "roleFamily", "domain", "candidate", "profile", "claims", "employers", "options"] }),
   GenerateResponse: obj({
     html: str, domainModuleKey: str,
