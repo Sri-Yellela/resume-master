@@ -15,7 +15,7 @@
 // no option to skip it. In draft it protected draft's own users; as an API it protects every
 // caller's candidates from a résumé claiming more than their profile states.
 import { assemblePrompt } from "./promptAssembler.js";
-import { buildRuntimeInputs, MODES } from "./runtimeInputs.js";
+import { buildRuntimeInputs, MODES, JOB_CONTEXTS, validateJobKeywords, renderJobKeywords } from "./runtimeInputs.js";
 import { getDomainModuleKey } from "./domainModule.js";
 import { classify } from "./classifier.js";
 import { normalizeResumeHtml } from "../formatting/resumeFormatter.js";
@@ -50,14 +50,30 @@ export async function generateResume(client, input = {}, { env = process.env } =
   if (options.cache !== undefined && typeof options.cache !== "boolean") {
     throw new InvalidRequestError("options.cache must be a boolean");
   }
+  // D70 Phase 1: keywords instead of the posting, behind a flag. Absent is "description" — the pinned
+  // prompt, byte for byte. "keywords" without job.keywords is refused rather than quietly sending a
+  // prompt with no job context at all, and the posting's text is never a fallback in that mode.
+  const jobContext = options.jobContext ?? "description";
+  if (!JOB_CONTEXTS.includes(jobContext)) {
+    throw new InvalidRequestError(`options.jobContext must be one of ${JOB_CONTEXTS.join(", ")}`);
+  }
+  if (jobContext === "keywords" && job.keywords == null) {
+    throw new InvalidRequestError('options.jobContext "keywords" requires job.keywords — in that mode the posting\'s text is not sent, so the keywords are the only job context');
+  }
+  if (job.keywords != null) {
+    const problem = validateJobKeywords(job.keywords);
+    if (problem) throw new InvalidRequestError(problem);
+  }
   const usage = [];
 
   // Domain module: explicit key, else role family + domain, else classify (a model call).
   let domainModuleKey = input.domainModuleKey || null;
   if (!domainModuleKey && input.roleFamily) domainModuleKey = getDomainModuleKey(input.roleFamily, input.domain);
+  // In keywords mode the classifier reads the keywords block, never the posting.
+  const classifierJobText = jobContext === "keywords" ? renderJobKeywords(job.keywords) : job.description || "";
   if (!domainModuleKey) {
     try {
-      const c = await classify(client, baseResumeText, job.description || "");
+      const c = await classify(client, baseResumeText, classifierJobText);
       usage.push(c.usage);
       domainModuleKey = c.domainModuleKey;
     } catch (e) {
@@ -70,7 +86,7 @@ export async function generateResume(client, input = {}, { env = process.env } =
   // AI1. The summary is opt-in and defaults OFF. The flag reaches the PROMPT, not a post-processor,
   // so no summary is generated to strip.
   const includeSummary = options.includeSummary === true;
-  const runtimeInputs = buildRuntimeInputs({ candidate, job, baseResumeText, mode, employers, profile, claims });
+  const runtimeInputs = buildRuntimeInputs({ candidate, job, baseResumeText, mode, employers, profile, claims, jobContext });
   const { systemBlocks } = assemblePrompt(domainModuleKey, mode, runtimeInputs, { SUMMARY: includeSummary },
     { cache: options.cache !== false });
 

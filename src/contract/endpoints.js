@@ -36,8 +36,22 @@ export const DECLARED_SCHEMAS = {
       description: "seniority is the candidate's own declaration: the document may use it and may not exceed it." }),
   Claims: obj({ skills: arr(str), actionVerbs: arr(str) }, { optional: ["skills", "actionVerbs"],
     description: "Skills and verbs the CANDIDATE asserts. Never a title, level or headline." }),
-  Job: obj({ title: str, company: str, category: str, description: str, stack: nullable(str) },
-    { optional: ["company", "category", "description", "stack"] }),
+  // 1.5.0 (D70 Phase 1): job.keywords — what the caller's own scorer found, sent INSTEAD of the posting when
+  // options.jobContext is "keywords". Bounds are runtimeInputs.js KEYWORD_LIMITS (a test holds them equal).
+  JobKeywords: obj({
+    matched: { type: "array", maxItems: 60, items: { type: "string", minLength: 1, maxLength: 80 },
+      description: "Posting terms the base résumé already evidences." },
+    claimed: { type: "array", maxItems: 40, items: { type: "string", minLength: 1, maxLength: 80 },
+      description: "Posting terms the candidate has claimed. Never a term that is missing AND unclaimed." },
+    verbs: { type: "array", maxItems: 30, items: { type: "string", minLength: 1, maxLength: 80 } },
+    competencies: { type: "array", maxItems: 30, items: { type: "string", minLength: 1, maxLength: 80 } },
+    phrases: { type: "array", maxItems: 12, items: { type: "string", minLength: 1, maxLength: 80 },
+      description: "Short responsibility phrases from the posting — never its sentences." },
+    seniority: nullable({ type: "string", maxLength: 40 }),
+  }, { optional: ["matched", "claimed", "verbs", "competencies", "phrases", "seniority"] }),
+
+  Job: obj({ title: str, company: str, category: str, description: str, stack: nullable(str), keywords: ref("JobKeywords") },
+    { optional: ["company", "category", "description", "stack", "keywords"] }),
 
   GenerateRequest: obj({
     mode: enumOf("GENERATE", "A_PLUS"), domainModuleKey: str, roleFamily: str, domain: str,
@@ -47,8 +61,12 @@ export const DECLARED_SCHEMAS = {
     options: obj({ includeSummary: bool,
       cache: { type: "boolean", default: true, description: "Prompt-cache breakpoints on the static system blocks. " +
         "Absent or true: on (the default, and the request this route always sent). false: none — for a one-shot caller, " +
-        "whose cache write would never be read." } },
-      { optional: ["includeSummary", "cache"] }),
+        "whose cache write would never be read." },
+      // 1.5.0 (D70 Phase 1): which job context the prompt carries. Default "description" — the pinned prompt.
+      jobContext: { type: "string", enum: ["description", "keywords"], default: "description",
+        description: "description (default): the posting's text, as always. keywords: job.keywords instead — the posting's " +
+          "text is not sent anywhere, even if job.description is present. keywords without job.keywords is a 400." } },
+      { optional: ["includeSummary", "cache", "jobContext"] }),
   }, { optional: ["mode", "domainModuleKey", "roleFamily", "domain", "candidate", "profile", "claims", "employers", "options"] }),
   GenerateResponse: obj({
     html: str, domainModuleKey: str,

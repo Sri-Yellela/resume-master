@@ -192,6 +192,16 @@ request this route sent before the option existed. `false` sends no `cache_contr
 one-shot caller whose cache write would never be read. It changes billing only, never the prompt
 text. A non-boolean is a `400`.
 
+`options.jobContext` (1.5.0, D70 Phase 1) — `"description"` (**the default**) or `"keywords"`.
+`"description"` is the prompt this route always rendered, byte for byte. `"keywords"` renders
+`job.keywords` **instead of the posting**: the posting's text is not sent to the model at all — not to
+the generation prompt and not to the classifier — even if `job.description` is also present.
+`job.keywords` = `{ matched, claimed, verbs, competencies, phrases, seniority }`: lists of short strings
+(at most 60 / 40 / 30 / 30 / 12 items of ≤ 80 characters; `seniority` ≤ 40), computed by the caller's
+own scorer. It should never carry a term that is missing AND unclaimed. `"keywords"` without
+`job.keywords`, an unknown field or an over-long list is a `400` before any model call. The claim guard
+is unchanged.
+
 ### ATS scoring
 
 The same `@draft/ats-scorer` package draft uses, vendored with a checksum manifest. Deterministic,
