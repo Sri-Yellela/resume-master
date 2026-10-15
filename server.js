@@ -8,6 +8,8 @@ import { createMetering, parseLimits, parseFreeLimits, parseAnonymousPolicy, cre
 import { openStore, resolveStorePath } from "./src/store/db.js";
 import { configureStoreBackups, scheduleDailyBackups } from "./src/store/backups.js";
 import { purgeExpired } from "./src/accounts/artifacts.js";
+import { createModelUsageLedger } from "./src/accounts/modelUsage.js";
+import { keyFingerprint } from "./src/model/prices.js";
 
 loadAllPrompts();
 
@@ -24,6 +26,11 @@ const version = {
 // 503 model_unconfigured with retryable:false rather than pretending to be flaky.
 // D70 Phase 3: the SDK's automatic retries are capped at one (MODEL_MAX_RETRIES, src/model/anthropicCall.js).
 const anthropic = createAnthropicClient({ apiKey: process.env.ANTHROPIC_API_KEY });
+// A97: which key pays. ANTHROPIC_KEY_LABEL is the key's NAME in the Console (e.g. "tools-prod"); the
+// fingerprint is a short sha256 of the key itself, so a key shared with another process shows up as
+// the same fp in both boot lines. Neither is secret; the key never leaves this line.
+const keyLabel = process.env.ANTHROPIC_KEY_LABEL || null;
+const keyFp = keyFingerprint(process.env.ANTHROPIC_API_KEY);
 
 // Throws on a malformed entry: a typo that silently dropped a client would read, from the caller's
 // side, exactly like a revoked token. Zero clients is allowed and FAILS CLOSED (503 auth_unconfigured).
@@ -50,10 +57,13 @@ const freeLimits = parseFreeLimits(process.env.RM_FREE_LIMITS_PER_DAY);
 // D21: anonymous /mcp — ON only when RM_MCP_ANONYMOUS sets all three caps; a partial value refuses to boot.
 const anonymousPolicy = parseAnonymousPolicy(process.env.RM_MCP_ANONYMOUS);
 const anonymous = createAnonymousLimiter(anonymousPolicy);
-const metering = createMetering({ log: (e) => console.log(JSON.stringify({ t: new Date().toISOString(), ...e })), limits, freeLimits });
+// A97: with a store, every model call is also written to model_usage (src/accounts/modelUsage.js).
+const ledger = createModelUsageLedger(store, { keyLabel, keyFp });
+const metering = createMetering({ log: (e) => console.log(JSON.stringify({ t: new Date().toISOString(), ...e })), limits, freeLimits, ledger });
 createApp({ anthropic, version, clients, store, metering, anonymous, siteOptions: { backups: !!store } }).listen(port, () => {
   // Client IDS only — never a hash, never a token.
   console.log(JSON.stringify({ t: new Date().toISOString(), boot: "listening", port, model: !!anthropic,
+    modelKey: anthropic ? { label: keyLabel ?? "(unlabelled)", fp: keyFp } : null, usageLedger: !!ledger,
     clients: [...clients.keys()], accounts: !!store, backups: store ? "daily 02:00 UTC" : "off", limits: metering.limitsEnabled ? Object.fromEntries(limits) : "off",
     freeLimits: metering.freeLimitsEnabled ? Object.fromEntries(freeLimits) : "off", mcpAnonymous: anonymousPolicy ?? "off" }));
 });

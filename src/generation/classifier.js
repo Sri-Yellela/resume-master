@@ -49,7 +49,11 @@ Reply ONLY with valid JSON matching this exact schema. No markdown fences, no ex
     max_tokens: 400,
     messages: [{ role: "user", content: prompt }],
   });
-  const parsed = JSON.parse(textOf(message).replace(/```json|```/g, "").trim());
+  // A97: the call was PAID even if its reply does not parse — the error carries the usage, so the
+  // caller's degradation path (generate.js) still meters it instead of dropping a billed call.
+  let parsed;
+  try { parsed = JSON.parse(textOf(message).replace(/```json|```/g, "").trim()); }
+  catch (e) { e.usage = usage; throw e; }
   return { roleFamily: parsed.roleFamily, domain: parsed.domain,
            domainModuleKey: getDomainModuleKey(parsed.roleFamily, parsed.domain), usage };
 }

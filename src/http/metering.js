@@ -139,7 +139,12 @@ export function createAnonymousLimiter(policy, { now = () => Date.now() } = {}) 
   };
 }
 
-export function createMetering({ log, limits = null, freeLimits = null, now = () => Date.now() } = {}) {
+// ── A97 (10-14): THE DURABLE COPY ────────────────────────────────────────────────────────────────
+// `ledger` (src/accounts/modelUsage.js, given by server.js when a store is attached) receives the
+// same per-call usage records as the log line, and writes one row per model call. A request that
+// called no model (calls: 0) writes nothing. ⛔ A ledger failure is logged and swallowed: metering
+// may not turn a served request into an error, nor replace the model's own error with its own.
+export function createMetering({ log, limits = null, freeLimits = null, ledger = null, now = () => Date.now() } = {}) {
   const model = dailyCounter(limits, now);
   const free = dailyCounter(freeLimits, now);
   return {
@@ -166,6 +171,10 @@ export function createMetering({ log, limits = null, freeLimits = null, now = ()
         cache_creation_input_tokens: sum("cache_creation_input_tokens"),
         cache_read_input_tokens: sum("cache_read_input_tokens"),
       });
+      if (ledger && usage.length) {
+        try { ledger(clientId, route, usage, extra); }
+        catch (e) { log({ metering_ledger_error: e?.code || e?.name || "error", route }); }
+      }
     },
   };
 }

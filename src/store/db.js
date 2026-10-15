@@ -96,6 +96,37 @@ export const STORE_MIGRATIONS = Object.freeze([
       ALTER TABLE artifacts ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    // A97 (owner, 10-14): the model-spend ledger. ~$7 left the account with no record anywhere: the
+    // service's only ledger was a stdout line Railway may or may not still hold. ONE ROW PER MODEL
+    // CALL, from either surface — counts and price, never content and never a person: `client` is the
+    // calling client's id ("draft", "site-user"), not a user. `key_label` names the API key that paid
+    // (ANTHROPIC_KEY_LABEL, matched to the key's name in the Console) and `key_fp` is a short sha256
+    // of the key — so two processes sharing one key show the same fp. `cost_usd` is NULL for a model
+    // with no price (src/model/prices.js), which is loud rather than a silent $0.
+    id: "005_model_usage",
+    sql: `
+      CREATE TABLE IF NOT EXISTS model_usage (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+        client TEXT NOT NULL,
+        via TEXT,
+        route TEXT NOT NULL,
+        purpose TEXT,
+        model TEXT,
+        success INTEGER NOT NULL,
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_creation_input_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_read_input_tokens INTEGER NOT NULL DEFAULT 0,
+        duration_ms INTEGER,
+        cost_usd REAL,
+        key_label TEXT,
+        key_fp TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_model_usage_at ON model_usage(created_at);
+    `,
+  },
 ]);
 
 /**
@@ -108,6 +139,11 @@ export function resolveStorePath(env = process.env) {
   if (env.RM_DB_PATH) return env.RM_DB_PATH;
   if (env.RAILWAY_VOLUME_MOUNT_PATH) return path.join(env.RAILWAY_VOLUME_MOUNT_PATH, STORE_FILE);
   return null;
+}
+
+/** Open an existing store READ-ONLY, with no migration — for reports run beside the live service. */
+export function openStoreReadOnly(file) {
+  return new Database(file, { readonly: true, fileMustExist: true });
 }
 
 /** Open (and migrate) the store. Each migration and its record commit in one transaction. */
