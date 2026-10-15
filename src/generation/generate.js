@@ -24,6 +24,7 @@ import { assertResumeClaims } from "../integrity/resumeClaimGuard.js";
 import { callAnthropic, textOf, MODEL_SONNET, MODEL_HAIKU } from "../model/anthropicCall.js";
 
 import { InvalidRequestError } from "../errors.js";
+import { INPUT_LIMITS, capString, capRequest } from "./inputLimits.js";
 // Re-exported: the class moved to src/errors.js (see there); existing importers keep working.
 export { InvalidRequestError };
 
@@ -44,6 +45,10 @@ export async function generateResume(client, input = {}, { env = process.env } =
   if (!MODES.includes(mode)) throw new InvalidRequestError(`mode must be one of ${MODES.join(", ")}`);
   requireString(baseResumeText, "baseResumeText");
   requireString(job.title, "job.title");
+  // A97: size caps, before any model call (the classifier included) — refused, never truncated.
+  capString(baseResumeText, INPUT_LIMITS.baseResumeText, "baseResumeText");
+  capString(job.description, INPUT_LIMITS.jobDescription, "job.description");
+  capRequest(input, INPUT_LIMITS.generateRequestChars, "a generation request");
   // D70 Phase 3: AL6's cache lever, now on the contract. Absent is TRUE — the measured-best default,
   // and byte-for-byte the request this route sent before the option existed. Anything but a boolean
   // is refused: a string "false" read as truthy would cache while the caller believed it had not.

@@ -1,4 +1,4 @@
-# Resume Master API — v1 (contract 1.4.0)
+# Resume Master API — v1 (contract 1.6.0)
 
 Stateless résumé tools: generation, deterministic formatting, PDF text extraction, ATS scoring — over
 HTTP, and the deterministic ones also as MCP tools at `/mcp` (see [MCP](#mcp--the-deterministic-tools-as-llm-tools-e1)).
@@ -51,6 +51,15 @@ is checked **before** the body is parsed.
 
 ## Per-client accounting — built, limits OFF
 
+> ⚠ **Model limits are OFF unless `RM_LIMITS_PER_DAY` is set — and off means no client has any
+> ceiling on model spend.** That is the decided default while API tokens are issued by hand; this
+> repository does not set production config. The boot line says it in words —
+> `"limits": "OFF — RM_LIMITS_PER_DAY is unset: every client's model-backed calls are unlimited …"` —
+> and lists the caps when they are on. To turn them on, set e.g. `RM_LIMITS_PER_DAY="draft=200,*=20"`:
+> 200 model-backed calls per UTC day for `draft`, 20 for every other client (a client with no entry
+> and no `*` stays unlimited). The input caps below bound what one call can cost; the daily limit is
+> what bounds how many calls there are.
+
 Each model-backed request emits one metering line: `{ metering, client, route, calls, failed_calls,
 input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens }` — counts, never
 content. Failed calls are metered too; they can still have spent. The caller also receives the
@@ -62,8 +71,18 @@ token counts, duration, `cost_usd` (from `src/model/prices.js`; NULL for an unpr
 and which API key paid — `key_label` (`ANTHROPIC_KEY_LABEL`, the key's name in the Console) and
 `key_fp` (8 hex of the key's sha256, also in the boot line, so a key shared between processes shows).
 No request field, no user id. Read it with `node scripts/modelUsageReport.mjs [--since YYYY-MM-DD]`
-(read-only). With no store, the log line is the only ledger. ⚠ An SDK transport retry (at most one,
-`MODEL_MAX_RETRIES`) is still one row: the usage record counts logical calls.
+(read-only). With no store, the log line is the only ledger.
+
+**Retries are counted (A97, contract 1.6.0).** An SDK transport retry (at most one, `MODEL_MAX_RETRIES`)
+is still one row — the usage record counts logical calls — but the row, the usage record and the
+metering line now say how many HTTP requests the SDK sent for it: `attempts` (1 normally, 2 when the
+SDK retried, 0 when the call failed before anything was sent; the metering line also carries
+`retried_calls`). The client is built with the SDK's supported `fetch` option, set to the SDK's own
+default transport wrapped in a counter; the count is scoped per call (AsyncLocalStorage), so
+concurrent requests on the one shared client never count each other's sends. The token counts are the
+final attempt's: a failed first attempt returns no usage, so what it billed cannot be known here — the
+count is what says it happened. `attempts` is `null` for rows written before migration 006 and for a
+client this service did not build (test fakes). The retry policy itself is unchanged.
 
 Each **MCP tool call** emits one line too, with `via: "mcp"`, `route: "mcp.<tool>"` and `result`
 (`ok` | `invalid_request` | `limit_exceeded` | `internal_error`) — and every count 0, because no MCP tool
@@ -97,7 +116,7 @@ The full statement for anyone whose data passes through is [`docs/PRIVACY.md`](P
 - The only thing logged per request is: method, path, status, duration, calling client. On an
   error, the error's code and name — never its message, which can echo upstream text.
 - What the caller receives besides the result is a **usage record** per model call: purpose,
-  model, token counts, cache token counts, duration, success. Counts, never content. The caller
+  model, token counts, cache token counts, duration, success, attempts (1.6.0). Counts, never content. The caller
   meters and prices these; since 10-14 this service also keeps its own spend ledger (below).
 - Candidate data goes to exactly one model provider, Anthropic, and to nothing else.
 
@@ -155,8 +174,9 @@ message that can never be true. A 429 is always retryable.
 **Automatic retries are capped at one (1.5.0, D70 Phase 3).** The service's Anthropic client retries a
 failed model request (a connection error, 408, 409, 429 or 5xx) **at most once** before the error
 reaches you — not the SDK's default of two. A transport retry re-sends a whole generation and can
-bill it again, so any attempt beyond that one is yours to decide, from `retryable`. The `usage`
-records cover each call as the service saw it, not each transport attempt inside it.
+bill it again, so any attempt beyond that one is yours to decide, from `retryable`. Each `usage`
+record covers one call as the service saw it; since 1.6.0 (A97) its `attempts` says how many transport
+attempts were inside it (2 = the SDK retried once).
 
 ---
 
@@ -212,6 +232,28 @@ own scorer. It should never carry a term that is missing AND unclaimed. `"keywor
 `job.keywords`, an unknown field or an over-long list is a `400` before any model call. The claim guard
 is unchanged.
 
+### Input caps on the model routes (A97, contract 1.6.0)
+
+Generate and enhance send their text to Sonnet, so their inputs are capped — **refused with
+`400 invalid_request`, never truncated**, and checked before any model call (the classifier
+included). The message names the field, its length and the limit. A silently shortened résumé would
+come back missing the candidate's later roles with nothing saying why; a refusal says what to fix.
+
+| field | limit (characters) | why this number |
+|---|---|---|
+| `baseResumeText` (generate) | 100,000 | a two-page résumé is ~5–8k characters, a long academic CV ~40–60k; 100k (~25–30k tokens, about $0.06 of Sonnet input) clears both |
+| `job.description` (generate) | 50,000 | a long posting with benefits and EEO text is ~8–15k; 50k is three of those |
+| `resumeText` (enhance) | 100,000 | as `baseResumeText` |
+| `selectedAdditions` (enhance) | 100 items of ≤ 500 | short labels; must be an array |
+| the whole request (generate) | 250,000 | the named caps plus headroom, so no other field (candidate, claims, keywords) can carry the bulk |
+| the whole request (enhance) | 200,000 | as above |
+
+Characters are JavaScript string lengths (UTF-16 code units — what a caller's `.length` reports); the
+whole-request figure is the length of the body re-serialised as JSON. The caps live in
+`src/generation/inputLimits.js`, so the site's paid tools are bound by the same numbers, and the
+contract declares them as `maxLength` / `maxItems`. The 15 MB body limit still applies before them
+(`413`).
+
 ### ATS scoring
 
 The same `@draft/ats-scorer` package draft uses, vendored with a checksum manifest. Deterministic,
@@ -223,7 +265,7 @@ bands are each product's presentation decision, calibrated against its own users
 
 | status | `error` | `retryable` |
 |---|---|---|
-| 400 | `invalid_request`, `invalid_json` | — |
+| 400 | `invalid_request` (including an input over a cap, A97), `invalid_json` | — |
 | 401 | `unauthenticated` | false |
 | 429 | `limit_exceeded` — a daily cap (`RM_LIMITS_PER_DAY` model calls, A55; `RM_FREE_LIMITS_PER_DAY` free calls, D21) or, on `/mcp` without a token, an anonymous cap (`RM_MCP_ANONYMOUS`). All off unless set | true |
 | 503 | `auth_unconfigured` | false |
@@ -356,7 +398,7 @@ caller does not read "Resume Master formatted it" as "Resume Master checked it".
 | `RESUME_MASTER_CLIENT_TOKENS` | unset | `clientId:sha256hex,…` — unset fails closed (503 `auth_unconfigured`) |
 | `ANTHROPIC_API_KEY` | unset | unset is supported: deterministic routes serve, model routes answer 503 |
 | `RESUME_MASTER_LLM_FORMAT` | off | `1` adds a Haiku reformatting pass, instructed with the renderer's own stylesheet |
-| `RM_LIMITS_PER_DAY` | off | `client=N,*=N` — daily cap on MODEL-backed calls (A55) |
+| `RM_LIMITS_PER_DAY` | off — **every client's model spend uncapped**; the boot line says so | `client=N,*=N`, e.g. `draft=200,*=20` — daily cap on MODEL-backed calls (A55) |
 | `RM_FREE_LIMITS_PER_DAY` | off | `client=N,*=N` — daily cap on FREE calls: the deterministic `/v1` routes and every MCP tool call (D21) |
 | `RM_MCP_ANONYMOUS` | off | `perIpPerMinute=N,perIpPerDay=N,perDay=N` — all three, or the service refuses to boot. Setting it opens `score_ats_fit` on `/mcp` without a token (D21) |
 | `PORT` | 3100 | |

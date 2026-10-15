@@ -101,7 +101,11 @@ test("⛔ the SDK client is built with maxRetries 1 — a transport retry re-bil
   class StubSdk { constructor(opts) { built.push(opts); } }
   const client = createAnthropicClient({ apiKey: "sk-test", Sdk: StubSdk });
   assert.ok(client instanceof StubSdk);
-  assert.deepEqual(built, [{ apiKey: "sk-test", maxRetries: 1 }]);
+  assert.equal(built.length, 1);
+  assert.equal(built[0].apiKey, "sk-test");
+  assert.equal(built[0].maxRetries, 1);
+  // A97: plus the counting transport (attempts), which wraps the SDK's default and changes no policy.
+  assert.deepEqual(Object.keys(built[0]).sort(), ["apiKey", "fetch", "maxRetries"]);
   assert.equal(createAnthropicClient({ apiKey: "", Sdk: StubSdk }), null, "no key is a supported state: no client");
   assert.equal(built.length, 1);
 });

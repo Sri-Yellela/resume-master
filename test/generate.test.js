@@ -60,7 +60,7 @@ test("an honest document is returned, with the usage of every call and nothing e
   assert.ok(out.claimCheck.inspected.documentChars > 0, "the guard must have READ something");
   assert.equal(out.domainModuleKey, "engineering");
   assert.equal(out.usage.length, 1);
-  assert.deepEqual(Object.keys(out.usage[0]).sort(), ["cache_creation_input_tokens", "cache_read_input_tokens",
+  assert.deepEqual(Object.keys(out.usage[0]).sort(), ["attempts", "cache_creation_input_tokens", "cache_read_input_tokens",
     "duration_ms", "input_tokens", "model", "output_tokens", "purpose", "success"],
     "a usage record carries counts, never content");
   assert.equal(out.usage[0].purpose, "resume_generate");

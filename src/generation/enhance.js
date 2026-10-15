@@ -3,6 +3,7 @@
 // with its own weights and decides what to persist; this service persists nothing.
 import { callAnthropic, textOf, MODEL_SONNET } from "../model/anthropicCall.js";
 import { InvalidRequestError } from "./generate.js";
+import { INPUT_LIMITS, capString, capRequest } from "./inputLimits.js";
 
 export const ENHANCE_SYSTEM = `You are a professional resume writer specialising in ATS optimisation.
 Rewrite the provided resume to significantly improve its ATS score by:
@@ -18,8 +19,17 @@ Do NOT keyword-dump. Omit low-value or duplicative additions.
 Return ONLY the improved resume text with no commentary, preamble, or explanation.`;
 
 /** @returns { text, usage: UsageRecord[] } */
-export async function enhanceResume(client, { resumeText, profile = {}, selectedAdditions = [] } = {}) {
+export async function enhanceResume(client, input = {}) {
+  const { resumeText, profile = {}, selectedAdditions = [] } = input;
   if (typeof resumeText !== "string" || !resumeText.trim()) throw new InvalidRequestError("resumeText is required");
+  // A97: size caps, before the model call — refused, never truncated (src/generation/inputLimits.js).
+  capString(resumeText, INPUT_LIMITS.resumeText, "resumeText");
+  if (!Array.isArray(selectedAdditions)) throw new InvalidRequestError("selectedAdditions must be an array of strings");
+  if (selectedAdditions.length > INPUT_LIMITS.selectedAdditions) {
+    throw new InvalidRequestError(`selectedAdditions has ${selectedAdditions.length} items; the limit is ${INPUT_LIMITS.selectedAdditions}. Nothing was sent to the model.`);
+  }
+  selectedAdditions.forEach((a, i) => capString(a, INPUT_LIMITS.selectedAdditionChars, `selectedAdditions[${i}]`));
+  capRequest(input, INPUT_LIMITS.enhanceRequestChars, "an enhancement request");
   const { message, usage } = await callAnthropic(client, {
     purpose: "resume_enhance",
     model: MODEL_SONNET,

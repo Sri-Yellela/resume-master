@@ -24,10 +24,10 @@ export function createModelUsageLedger(db, { keyLabel = null, keyFp = null } = {
   const insert = db.prepare(`
     INSERT INTO model_usage (client, via, route, purpose, model, success, input_tokens, output_tokens,
                              cache_creation_input_tokens, cache_read_input_tokens, duration_ms, cost_usd,
-                             key_label, key_fp)
+                             key_label, key_fp, attempts)
     VALUES (@client, @via, @route, @purpose, @model, @success, @input_tokens, @output_tokens,
             @cache_creation_input_tokens, @cache_read_input_tokens, @duration_ms, @cost_usd,
-            @key_label, @key_fp)
+            @key_label, @key_fp, @attempts)
   `);
   const n = (v) => Number(v) || 0;
   const writeAll = db.transaction((rows) => { for (const r of rows) insert.run(r); });
@@ -47,6 +47,8 @@ export function createModelUsageLedger(db, { keyLabel = null, keyFp = null } = {
       cost_usd: costOf(u),
       key_label: keyLabel,
       key_fp: keyFp,
+      // A97: HTTP sends behind this one call (an SDK retry makes it 2); null when not observable.
+      attempts: u.attempts == null ? null : n(u.attempts),
     }));
     if (rows.length) writeAll(rows);
     return rows.length;
@@ -60,7 +62,8 @@ export function modelUsageSummary(db, { since = 0 } = {}) {
            COUNT(*) AS calls, SUM(success = 0) AS failed,
            SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens,
            SUM(cache_creation_input_tokens) AS cache_write_tokens, SUM(cache_read_input_tokens) AS cache_read_tokens,
-           ROUND(SUM(cost_usd), 4) AS cost_usd, SUM(cost_usd IS NULL) AS unpriced
+           ROUND(SUM(cost_usd), 4) AS cost_usd, SUM(cost_usd IS NULL) AS unpriced,
+           SUM(attempts) AS attempts, SUM(attempts > 1) AS retried
     FROM model_usage WHERE created_at >= ?
     GROUP BY day, client, route, model, key_label, key_fp
     ORDER BY day, client, route, model
