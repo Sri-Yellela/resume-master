@@ -127,6 +127,16 @@ export const STORE_MIGRATIONS = Object.freeze([
       CREATE INDEX IF NOT EXISTS idx_model_usage_at ON model_usage(created_at);
     `,
   },
+  {
+    // A97 (10-14), the retry gap: the SDK may send one call twice (MODEL_MAX_RETRIES = 1), and the
+    // first send can already have been billed. `attempts` is how many HTTP requests the SDK sent for
+    // this one row — 1 normally, 2 when it retried, 0 when it failed before sending. NULL for rows
+    // written before this migration, and for a client whose transport this service did not build.
+    id: "006_model_usage_attempts",
+    sql: `
+      ALTER TABLE model_usage ADD COLUMN attempts INTEGER;
+    `,
+  },
 ]);
 
 /**

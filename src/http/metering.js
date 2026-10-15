@@ -34,6 +34,18 @@ export function parseLimits(raw) {
   return out;
 }
 
+// ── A97 (10-14): "OFF" IS SAID OUT LOUD ─────────────────────────────────────────────────────────
+// Unset RM_LIMITS_PER_DAY is the decided default, and it means NO client has a ceiling on model
+// spend. The boot line used to print a bare "off", which read like a feature flag rather than an
+// open tap; it now says what off means and how to turn it on. Production config is not set here —
+// that is the owner's call (docs/API.md, "Per-client accounting").
+export function limitsBootSummary(limits) {
+  if (!limits || limits.size === 0) {
+    return "OFF — RM_LIMITS_PER_DAY is unset: every client's model-backed calls are unlimited (set e.g. \"draft=200,*=20\")";
+  }
+  return Object.fromEntries(limits);
+}
+
 // ── D21 (10-04): FREE IS NOT UNBOUNDED ───────────────────────────────────────────────────────────
 // "An assistant in a loop calls a tool far more often than a human, and a zero-model endpoint still
 // costs CPU." So the deterministic routes and every MCP tool call get their OWN daily cap, separate
@@ -170,6 +182,9 @@ export function createMetering({ log, limits = null, freeLimits = null, ledger =
         output_tokens: sum("output_tokens"),
         cache_creation_input_tokens: sum("cache_creation_input_tokens"),
         cache_read_input_tokens: sum("cache_read_input_tokens"),
+        // A97: HTTP sends behind those calls, SDK retries included, and how many calls needed one.
+        attempts: usage.some(u => u?.attempts != null) ? sum("attempts") : null,   // null: no call's sends were observable
+        retried_calls: usage.filter(u => Number(u?.attempts) > 1).length,
       });
       if (ledger && usage.length) {
         try { ledger(clientId, route, usage, extra); }

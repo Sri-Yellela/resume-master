@@ -7,7 +7,11 @@
 // (e.g. draft, which records usage_events) gets that record in the response and meters it itself.
 //
 // Candidate data is never routed off Anthropic here: this service has exactly one provider.
+import { AsyncLocalStorage } from "node:async_hooks";
 import Anthropic from "@anthropic-ai/sdk";
+// The SDK's OWN default transport (node-fetch on Node, in 0.39.x) — the module the SDK itself imports,
+// so wrapping it changes nothing about how a request is sent. See ATTEMPTS below.
+import { fetch as sdkDefaultFetch } from "@anthropic-ai/sdk/_shims/index.mjs";
 
 export const MODEL_SONNET = "claude-sonnet-5";
 
@@ -32,19 +36,62 @@ export const MODEL_MAX_RETRIES = 1;
  * still serve and the model routes answer 503 model_unconfigured.
  * @param Sdk  the SDK's constructor, injectable so the configuration is testable with no network
  */
-export function createAnthropicClient({ apiKey, Sdk = Anthropic } = {}) {
+export function createAnthropicClient({ apiKey, Sdk = Anthropic, fetchImpl = sdkDefaultFetch } = {}) {
   if (!apiKey) return null;
-  return new Sdk({ apiKey, maxRetries: MODEL_MAX_RETRIES });
+  const client = new Sdk({ apiKey, maxRetries: MODEL_MAX_RETRIES, fetch: countingFetch(fetchImpl) });
+  client[COUNTS_ATTEMPTS] = true;
+  return client;
+}
+
+// ── A97 (10-14): ATTEMPTS — A BILLED RETRY IS NO LONGER INVISIBLE ───────────────────────────────
+//
+// MODEL_MAX_RETRIES lets the SDK send a request TWICE for one callAnthropic, and the second send
+// happens inside the SDK, so a usage record that counts logical calls hid it — while the first send
+// may already have been billed (a 5xx or a dropped connection after the upstream started). The retry
+// POLICY is unchanged; this only COUNTS. How:
+//
+//   · The client is built with the SDK's supported `fetch` option (ClientOptions.fetch, 0.39.x), set
+//     to the SDK's own default transport wrapped in a counter — every HTTP request the SDK sends,
+//     first attempt or retry, passes through it exactly once (core.js fetchWithTimeout).
+//   · The counter is per CALL, not per client: the one client is shared by concurrent requests, so
+//     callAnthropic opens an AsyncLocalStorage scope and the wrapper increments that scope's count.
+//     The SDK's retry runs in the same async chain (a timer, then makeRequest again), so it lands in
+//     the scope of the call that caused it — never in a neighbour's.
+//
+// `attempts` on the usage record: 1 = sent once; 2 = the SDK retried (the record's token counts are
+// the FINAL attempt's — a failed first attempt returns no usage, so what it billed is unknowable from
+// here; the count is what says it happened); 0 = the call failed before anything was sent. NULL means
+// the client was not built by createAnthropicClient (a test fake), so its transport was not seen —
+// never a guessed 1.
+const attemptScope = new AsyncLocalStorage();
+const COUNTS_ATTEMPTS = Symbol.for("resume-master.countsAttempts");
+
+/** Count one HTTP send in the current call's scope. Exported for fakes that model a transport. */
+export function noteAttempt() {
+  const scope = attemptScope.getStore();
+  if (scope) scope.attempts++;
+}
+
+/** Mark a fake client as counting its sends (it must call noteAttempt per send). Tests and the contract's samples only. */
+export function countsAttempts(client) {
+  client[COUNTS_ATTEMPTS] = true;
+  return client;
+}
+
+function countingFetch(inner) {
+  return (url, init) => { noteAttempt(); return inner(url, init); };
 }
 export const MODEL_HAIKU = "claude-haiku-4-5-20251001";
 
 /** A usage record: what was spent, never what was said. */
-function usageRecord({ purpose, model, message, startedAt, success }) {
+function usageRecord({ purpose, model, message, startedAt, success, attempts }) {
   const u = message?.usage || {};
   return {
     purpose,
     model,
     success,
+    // A97: HTTP sends for this one call, SDK retries included (see ATTEMPTS). null = not observable.
+    attempts,
     input_tokens: u.input_tokens ?? 0,
     output_tokens: u.output_tokens ?? 0,
     // The API's own field names. `cache_creation_input_tokens` was once read under a wrong name in
@@ -64,11 +111,13 @@ export async function callAnthropic(client, { purpose, model, ...params }) {
   if (!model) throw new Error(`callAnthropic(${purpose}): no model`);
   if (!client) throw new ModelUnconfiguredError(purpose);
   const startedAt = Date.now();
+  const scope = { attempts: 0 };
+  const attempts = () => (client[COUNTS_ATTEMPTS] ? scope.attempts : null);
   try {
-    const message = await client.messages.create({ model, ...params });
-    return { message, usage: usageRecord({ purpose, model, message, startedAt, success: true }) };
+    const message = await attemptScope.run(scope, () => client.messages.create({ model, ...params }));
+    return { message, usage: usageRecord({ purpose, model, message, startedAt, success: true, attempts: attempts() }) };
   } catch (e) {
-    throw new ModelCallError(e, usageRecord({ purpose, model, message: null, startedAt, success: false }));
+    throw new ModelCallError(e, usageRecord({ purpose, model, message: null, startedAt, success: false, attempts: attempts() }));
   }
 }
 

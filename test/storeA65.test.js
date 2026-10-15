@@ -30,7 +30,7 @@ test("the store opens on the Railway volume; RM_DB_PATH stays an override; neith
 test("migrations are recorded in schema_migrations (the table draft's verify reads), 004 adds pins", () => {
   const db = openStore(":memory:");
   const ids = db.prepare("SELECT id FROM schema_migrations ORDER BY rowid").pluck().all();
-  assert.deepEqual(ids, ["001_accounts", "002_credit_ledger", "003_artifacts", "004_artifact_pins", "005_model_usage"]);
+  assert.deepEqual(ids, ["001_accounts", "002_credit_ledger", "003_artifacts", "004_artifact_pins", "005_model_usage", "006_model_usage_attempts"]);
   assert.ok(db.prepare("PRAGMA table_info(artifacts)").all().some(c => c.name === "pinned"));
 });
 
@@ -92,7 +92,7 @@ test("draft's backup policy runs against the store: a checkpointed copy, listed,
     assert.equal(listBackups()[0].walCheckpointed, true);
     const [v] = verifyBackups();
     assert.equal(v.integrity, "ok");
-    assert.equal(v.schema, "005_model_usage");
+    assert.equal(v.schema, "006_model_usage_attempts");
     const copy = openStore(path.join(dir, "backups", r.filename));
     assert.equal(copy.prepare("SELECT COUNT(*) FROM users").pluck().get(), 1, "the copy holds the data");
     copy.close(); db.close();

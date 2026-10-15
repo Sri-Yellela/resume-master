@@ -9,7 +9,7 @@
 // named for it; the envelope harness then checks real responses against the result, which is what
 // catches a variant these missed.
 import { scoreAtsLocally, buildRuntimeAtsBasis } from "@draft/ats-scorer";
-import { callAnthropic } from "../model/anthropicCall.js";
+import { callAnthropic, countsAttempts, noteAttempt } from "../model/anthropicCall.js";
 import { checkResumeClaims } from "../integrity/resumeClaimGuard.js";
 import { infer } from "./schema.js";
 
@@ -77,6 +77,10 @@ const fakeClient = (outcome) => ({ messages: { create: async () => {
 export async function usageSamples() {
   const out = [];
   const full = { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 6704, cache_read_input_tokens: 0 };
+  // A97: `attempts` is a number for the service's own client (here: a fake that reports its sends —
+  // this one was retried once) and null for a client whose transport was not observed.
+  const counted = countsAttempts({ messages: { create: async () => { noteAttempt(); noteAttempt(); return { content: [{ type: "text", text: "x" }], usage: full }; } } });
+  out.push((await callAnthropic(counted, { purpose: "p", model: "m", max_tokens: 1, messages: [] })).usage);
   out.push((await callAnthropic(fakeClient(full), { purpose: "p", model: "m", max_tokens: 1, messages: [] })).usage);
   // An upstream usage block missing the cache fields must still yield numbers, never absent keys.
   out.push((await callAnthropic(fakeClient({ input_tokens: 1, output_tokens: 1 }), { purpose: "p", model: "m", max_tokens: 1, messages: [] })).usage);

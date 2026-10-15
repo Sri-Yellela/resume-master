@@ -6,6 +6,8 @@
 // real app and drives every endpoint through every declared outcome, checking every key and every
 // value type a real response carries against what is declared here.
 import { str, num, bool, arr, obj, ref, nullable, enumOf } from "./schema.js";
+import { INPUT_LIMITS } from "../generation/inputLimits.js";
+const capped = (maxLength, description) => ({ type: "string", maxLength, description });
 
 // 1.1.0 (E1): additive — the /mcp routes, the JSON-RPC envelopes, the MCP tool result shapes and
 // the generated tool table (`x-mcp`). No 1.0.0 shape changed.
@@ -18,7 +20,12 @@ import { str, num, bool, arr, obj, ref, nullable, enumOf } from "./schema.js";
 // depth, Job.description included (src/contract/build.js shapeOf). Hashes recorded for 1.0.0–1.4.0
 // in VERSIONS.json were computed the old way and stay as recorded — append-only; nothing re-hashes
 // a version a consumer already holds. No 1.4.0 shape changed.
-export const CONTRACT_VERSION = "1.5.0";
+// 1.6.0 (A97): additive — UsageRecord.attempts (number | null: HTTP sends behind the call, SDK retry
+// included), and the model routes' input caps declared as maxLength / maxItems (baseResumeText,
+// job.description, resumeText, selectedAdditions). A request over a cap was already accepted by the
+// 1.5.0 shape and is now a 400 invalid_request — the caps are stated here so a caller can check first.
+// No 1.5.0 response shape changed.
+export const CONTRACT_VERSION = "1.6.0";
 
 const usage = arr(ref("UsageRecord"));
 
@@ -50,13 +57,15 @@ export const DECLARED_SCHEMAS = {
     seniority: nullable({ type: "string", maxLength: 40 }),
   }, { optional: ["matched", "claimed", "verbs", "competencies", "phrases", "seniority"] }),
 
-  Job: obj({ title: str, company: str, category: str, description: str, stack: nullable(str), keywords: ref("JobKeywords") },
+  Job: obj({ title: str, company: str, category: str, description: capped(INPUT_LIMITS.jobDescription, "The posting. Over the cap on a model route is a 400 — refused, never truncated (A97)."), stack: nullable(str), keywords: ref("JobKeywords") },
     { optional: ["company", "category", "description", "stack", "keywords"] }),
 
   GenerateRequest: obj({
     mode: enumOf("GENERATE", "A_PLUS"), domainModuleKey: str, roleFamily: str, domain: str,
     candidate: ref("Candidate"), profile: nullable(ref("JobProfile")), claims: nullable(ref("Claims")),
-    employers: arr(str), job: ref("Job"), baseResumeText: str,
+    employers: arr(str), job: ref("Job"),
+    baseResumeText: capped(INPUT_LIMITS.baseResumeText, "Over the cap is a 400 — refused, never truncated. The whole request is also capped at " +
+      `${INPUT_LIMITS.generateRequestChars} characters (A97).`),
     // 1.5.0 (D70 Phase 3): `cache` — prompt-cache breakpoints on the system blocks. Default true.
     options: obj({ includeSummary: bool,
       cache: { type: "boolean", default: true, description: "Prompt-cache breakpoints on the static system blocks. " +
@@ -74,8 +83,10 @@ export const DECLARED_SCHEMAS = {
     usage,
   }, { description: "Only ever returned for a document that PASSED the claim guard." }),
 
-  EnhanceRequest: obj({ resumeText: str, profile: obj({ name: str, roleFamily: str, domain: str }, { optional: ["name", "roleFamily", "domain"] }),
-    selectedAdditions: arr(str) }, { optional: ["profile", "selectedAdditions"] }),
+  EnhanceRequest: obj({ resumeText: capped(INPUT_LIMITS.resumeText, "Over the cap is a 400 — refused, never truncated. The whole request is also capped at " +
+      `${INPUT_LIMITS.enhanceRequestChars} characters (A97).`), profile: obj({ name: str, roleFamily: str, domain: str }, { optional: ["name", "roleFamily", "domain"] }),
+    selectedAdditions: { type: "array", maxItems: INPUT_LIMITS.selectedAdditions, items: { type: "string", maxLength: INPUT_LIMITS.selectedAdditionChars } } },
+    { optional: ["profile", "selectedAdditions"] }),
   EnhanceResponse: obj({ text: str, usage }),
   ParsePdfRequest: obj({ pdfBase64: str }, { description: "A PDF of at most 10 MB, base64-encoded." }),
   ParsePdfResponse: obj({ text: str, chars: num, usage }),

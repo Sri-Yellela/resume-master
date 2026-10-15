@@ -120,7 +120,8 @@ test("per-client accounting: one metering line per model request, counts only, k
     const m = s.logs.filter(l => l.metering);
     assert.equal(m.length, 1);
     assert.deepEqual(m[0], { metering: true, client: "draft", route: "resumes.enhance", calls: 1, failed_calls: 0,
-      input_tokens: 120, output_tokens: 30, cache_creation_input_tokens: 6704, cache_read_input_tokens: 0 });
+      input_tokens: 120, output_tokens: 30, cache_creation_input_tokens: 6704, cache_read_input_tokens: 0,
+      attempts: null, retried_calls: 0 });   // A97: null — a fake client's sends are not observed
     const req = s.logs.find(l => l.path === "/v1/resumes/enhance");
     assert.equal(req.client, "draft", "the request log names the client");
     assert.ok(!JSON.stringify(s.logs).includes("SECRET-RESUME-BODY"), "content reached a log line");
