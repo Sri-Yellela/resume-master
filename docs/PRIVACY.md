@@ -1,6 +1,6 @@
 # Resume Master — privacy
 
-**Effective:** October 4, 2026 (was October 2, 2026)
+**Effective:** October 14, 2026 (was October 4, 2026)
 
 Resume Master **processes what it is sent and returns the result.** Called through its API by another
 product, it retains nothing. **Since October 2, 2026 it also has its own site, `resumemaster.one`,
@@ -25,8 +25,12 @@ that way.
 
 ## What it keeps — nothing
 
-- **No database.** There is no store of any kind. Requests are processed in memory and the result is
-  returned.
+- **Nothing you send is stored.** Requests are processed in memory and the result is returned.
+- **One record of cost, with nothing about you in it (since October 14, 2026).** Each model call
+  writes one row to a spend ledger: which client called (for example, the product that called the
+  API), the route, the model, token counts, duration, the price, and a label for the API key that
+  paid. It holds no part of the request or response and no account or person, and it is kept so
+  the service's spending can be accounted for.
 - **No content is logged.** Each request produces one log line: method, path, status, duration and
   the calling client's id. Each model-backed request, and each MCP tool call, produces one metering
   line: the client, the route, and token counts. Never a request body, a prompt, a résumé, a generated document or a model

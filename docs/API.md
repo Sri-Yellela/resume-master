@@ -53,8 +53,17 @@ is checked **before** the body is parsed.
 
 Each model-backed request emits one metering line: `{ metering, client, route, calls, failed_calls,
 input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens }` — counts, never
-content. Failed calls are metered too; they can still have spent. With no database, that log line
-is the ledger, and the caller also receives the per-call usage records in the response.
+content. Failed calls are metered too; they can still have spent. The caller also receives the
+per-call usage records in the response.
+
+**The spend ledger (A97, 10-14).** With a store attached, every model call — token API and site alike
+— is also written as one row of `model_usage`: client id, route, purpose, model, success, the four
+token counts, duration, `cost_usd` (from `src/model/prices.js`; NULL for an unpriced model, never $0),
+and which API key paid — `key_label` (`ANTHROPIC_KEY_LABEL`, the key's name in the Console) and
+`key_fp` (8 hex of the key's sha256, also in the boot line, so a key shared between processes shows).
+No request field, no user id. Read it with `node scripts/modelUsageReport.mjs [--since YYYY-MM-DD]`
+(read-only). With no store, the log line is the only ledger. ⚠ An SDK transport retry (at most one,
+`MODEL_MAX_RETRIES`) is still one row: the usage record counts logical calls.
 
 Each **MCP tool call** emits one line too, with `via: "mcp"`, `route: "mcp.<tool>"` and `result`
 (`ok` | `invalid_request` | `limit_exceeded` | `internal_error`) — and every count 0, because no MCP tool
@@ -83,12 +92,13 @@ The full statement for anyone whose data passes through is [`docs/PRIVACY.md`](P
 
 - A request is processed and answered. **No request body, prompt, résumé, generated document or
   model response is written to disk, to a database, or to a log.** The service has a database since
-  10-02, for the SITE's accounts (see the note at the top) — a token request never reads or writes it.
+  10-02, for the SITE's accounts (see the note at the top) — a token request never reads it, and
+  writes to it only the spend ledger below (since 10-14): counts, never content, never a person.
 - The only thing logged per request is: method, path, status, duration, calling client. On an
   error, the error's code and name — never its message, which can echo upstream text.
 - What the caller receives besides the result is a **usage record** per model call: purpose,
   model, token counts, cache token counts, duration, success. Counts, never content. The caller
-  meters and prices these; this service keeps no ledger.
+  meters and prices these; since 10-14 this service also keeps its own spend ledger (below).
 - Candidate data goes to exactly one model provider, Anthropic, and to nothing else.
 
 *Enforced by:* `test/http.test.js` (sentinel PII sent down every path — success, refusal,
