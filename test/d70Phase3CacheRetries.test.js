@@ -112,7 +112,8 @@ test("⛔ the SDK client is built with maxRetries 1 — a transport retry re-bil
 
 test("the server builds its one client through the capped factory, not the SDK's defaults", () => {
   const server = fs.readFileSync("server.js", "utf8");
-  assert.match(server, /createAnthropicClient\(\{ apiKey: process\.env\.ANTHROPIC_API_KEY \}\)/);
+  // T19 hardening (10-30): the factory also takes the optional workspace id — still the one capped construction
+  assert.match(server, /createAnthropicClient\(\{ apiKey: process\.env\.ANTHROPIC_API_KEY(, workspaceId: process\.env\.ANTHROPIC_WORKSPACE_ID)? \}\)/);
   assert.doesNotMatch(server, /new Anthropic\(/, "a second construction would inherit the SDK default of 2 retries");
   const src = fs.readFileSync("src/model/anthropicCall.js", "utf8");
   assert.match(src, /re-bill|bill the input/i, "the reason for the cap must sit beside it");

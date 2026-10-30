@@ -36,9 +36,12 @@ export const MODEL_MAX_RETRIES = 1;
  * still serve and the model routes answer 503 model_unconfigured.
  * @param Sdk  the SDK's constructor, injectable so the configuration is testable with no network
  */
-export function createAnthropicClient({ apiKey, Sdk = Anthropic, fetchImpl = sdkDefaultFetch } = {}) {
+export function createAnthropicClient({ apiKey, workspaceId = null, Sdk = Anthropic, fetchImpl = sdkDefaultFetch } = {}) {
   if (!apiKey) return null;
-  const client = new Sdk({ apiKey, maxRetries: MODEL_MAX_RETRIES, fetch: countingFetch(fetchImpl) });
+  // T19 hardening (draft's G1, 10-30): ANTHROPIC_WORKSPACE_ID, when set, sends `anthropic-workspace-id` on every request —
+  // a key created outside a workspace is refused without it (10-15). A malformed id is never sent as a header.
+  const defaultHeaders = workspaceHeaderFor(workspaceId);
+  const client = new Sdk({ apiKey, maxRetries: MODEL_MAX_RETRIES, fetch: countingFetch(fetchImpl), ...(defaultHeaders ? { defaultHeaders } : {}) });
   client[COUNTS_ATTEMPTS] = true;
   return client;
 }
@@ -76,6 +79,12 @@ export function noteAttempt() {
 export function countsAttempts(client) {
   client[COUNTS_ATTEMPTS] = true;
   return client;
+}
+
+/** { "anthropic-workspace-id": id } for a well-formed id, else null. */
+export function workspaceHeaderFor(workspaceId) {
+  const id = String(workspaceId || "").trim();
+  return /^[A-Za-z0-9_-]{1,128}$/.test(id) ? { "anthropic-workspace-id": id } : null;
 }
 
 function countingFetch(inner) {
