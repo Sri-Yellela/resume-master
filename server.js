@@ -1,6 +1,7 @@
 // Resume Master — stateless résumé tools. See README.md and docs/API.md.
 import fs from "node:fs";
-import { createAnthropicClient } from "./src/model/anthropicCall.js";
+import { createAnthropicClient, workspaceHeaderFor } from "./src/model/anthropicCall.js";
+import { checkModelKey, KEY_CHECK_EVERY_MS } from "./src/model/keyCheck.js";
 import { createApp } from "./src/http/app.js";
 import { loadAllPrompts } from "./src/generation/promptAssembler.js";
 import { parseClientTokens } from "./src/http/auth.js";
@@ -25,7 +26,8 @@ const version = {
 // No key is a supported state: the deterministic routes still serve, and model routes answer
 // 503 model_unconfigured with retryable:false rather than pretending to be flaky.
 // D70 Phase 3: the SDK's automatic retries are capped at one (MODEL_MAX_RETRIES, src/model/anthropicCall.js).
-const anthropic = createAnthropicClient({ apiKey: process.env.ANTHROPIC_API_KEY });
+// T19 hardening: ANTHROPIC_WORKSPACE_ID (optional) puts `anthropic-workspace-id` on every request.
+const anthropic = createAnthropicClient({ apiKey: process.env.ANTHROPIC_API_KEY, workspaceId: process.env.ANTHROPIC_WORKSPACE_ID });
 // A97: which key pays. ANTHROPIC_KEY_LABEL is the key's NAME in the Console (e.g. "tools-prod"); the
 // fingerprint is a short sha256 of the key itself, so a key shared with another process shows up as
 // the same fp in both boot lines. Neither is secret; the key never leaves this line.
@@ -64,7 +66,17 @@ const metering = createMetering({ log: (e) => console.log(JSON.stringify({ t: ne
 createApp({ anthropic, version, clients, store, metering, anonymous, siteOptions: { backups: !!store } }).listen(port, () => {
   // Client IDS only — never a hash, never a token.
   console.log(JSON.stringify({ t: new Date().toISOString(), boot: "listening", port, model: !!anthropic,
-    modelKey: anthropic ? { label: keyLabel ?? "(unlabelled)", fp: keyFp } : null, usageLedger: !!ledger,
+    modelKey: anthropic ? { label: keyLabel ?? "(unlabelled)", fp: keyFp, workspaceHeader: !!workspaceHeaderFor(process.env.ANTHROPIC_WORKSPACE_ID) } : null, usageLedger: !!ledger,
     clients: [...clients.keys()], accounts: !!store, backups: store ? "daily 02:00 UTC" : "off", limits: limitsBootSummary(limits),
     freeLimits: metering.freeLimitsEnabled ? Object.fromEntries(freeLimits) : "off", mcpAnonymous: anonymousPolicy ?? "off" }));
 });
+
+// T19 hardening: is the key ACCEPTED — at boot and daily (src/model/keyCheck.js; no tokens, nothing billed). The boot line
+// above says which key; this says whether Anthropic takes it, before a user's generation finds out.
+const runKeyCheck = async () => {
+  if (!anthropic) return;
+  const r = await checkModelKey(anthropic).catch((e) => ({ state: "unreachable", reason: String(e?.message || e).slice(0, 200) }));
+  (r.state === "failed" ? console.error : console.log)(JSON.stringify({ t: new Date().toISOString(), boot: "model_key_check", state: r.state, reason: r.reason ?? null }));
+};
+void runKeyCheck();
+setInterval(() => { void runKeyCheck(); }, KEY_CHECK_EVERY_MS).unref();
