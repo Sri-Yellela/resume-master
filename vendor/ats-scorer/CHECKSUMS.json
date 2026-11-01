@@ -1,14 +1,14 @@
 {
   "name": "@draft/ats-scorer",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "normalisation": "LF",
   "algorithm": "sha256",
   "files": {
-    "README.md": "a13ba7108625314b3dd640867a20931b3aba6e670f6a3aa5c921cade36349256",
-    "data/DOMAIN_METADATA_REGISTRY.json": "a2adc0cee863a3b42fe406cec3813a1497ab4db3b26ff66d5fe90e9dd2f7ee03",
+    "README.md": "e2f93faa480507302a90a1f413044a1abaef10737d6e7c3529fd19f465e12f0c",
+    "data/DOMAIN_METADATA_REGISTRY.json": "05e4b552cae11e6224d59f8dc133e140b880fbd7d975b068d0bff714ae6e73f8",
     "data/DOMAIN_TOOL_REGISTRY.json": "6551baa688cde8fd2a5bacdc58edffec2c64ca72b2235b5f13fc889b9e02c7f2",
     "index.d.ts": "b70f35451350657d65dba1e526e0dfb8e4c441939f83deff7a2cbf0bf97b4b7f",
-    "package.json": "8f1111ebd82a9974bded64f0e4cbe44f31e4e384aeecb5c7ef72f0a20a12d446",
+    "package.json": "2baeb4a5e5a8ee6f989c507712757323d9c60f027e3d07d565a28c5cdbcd4b97",
     "scripts/checksums.mjs": "3d53d92f1fcc7cbeb4283db942f83909016c8b2b838d3309035c5ac798cb37cd",
     "src/index.js": "f75a7b192f5d98ec96056ccf2ef4ea9cfdded323afc2697391f72971377905b7",
     "src/scorer.js": "ad0a87d7e78959df554fe482d64e45c4762be008f2209fee3752228a61b4f62e",

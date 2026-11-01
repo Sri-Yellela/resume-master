@@ -527,5 +527,203 @@
       "Slack", "Zoom", "Jira", "Asana",
       "Notion", "Confluence", "Tableau", "SQL"
     ]
+  },
+  "mechanical_engineering": {
+    "label": "Mechanical Engineering",
+    "roleFamily": "engineering",
+    "suggestedTitles": [
+      "Mechanical Engineer", "Mechanical Design Engineer",
+      "Product Design Engineer", "Thermal Engineer",
+      "Manufacturing Engineer", "Test Engineer",
+      "Reliability Engineer", "Senior Mechanical Engineer"
+    ],
+    "keywords": [
+      "GD&T", "tolerance stack-up", "tolerance analysis", "DFMEA", "PFMEA", "design for manufacturing",
+      "DFM", "DFA", "FEA", "finite element analysis", "CFD", "heat transfer", "thermodynamics", "fluid mechanics",
+      "machine design", "injection molding", "sheet metal", "CNC machining", "castings", "HVAC", "root cause analysis",
+      "8D", "first article inspection", "PPAP", "engineering change orders", "BOM", "DOE",
+      "vibration analysis", "fatigue analysis", "mechanisms", "actuators", "ASME Y14.5"
+    ],
+    "actionVerbs": [
+      "Designed", "Modeled", "Simulated", "Prototyped", "Tested", "Validated", "Analyzed",
+      "Optimized", "Reduced", "Released", "Specified", "Machined", "Iterated", "Qualified", "Improved"
+    ],
+    "tools": [
+      "SolidWorks", "Creo", "CATIA", "Siemens NX", "AutoCAD", "Inventor", "Fusion 360", "ANSYS",
+      "ANSYS Fluent", "Abaqus", "COMSOL", "MATLAB", "Simulink", "Teamcenter", "Windchill", "Minitab",
+      "LabVIEW", "Nastran", "HyperMesh", "STAR-CCM+"
+    ]
+  },
+  "electrical_engineering": {
+    "label": "Electrical and Electronics Engineering",
+    "roleFamily": "engineering",
+    "suggestedTitles": [
+      "Electrical Engineer", "Electronics Engineer",
+      "Power Electronics Engineer", "Hardware Engineer",
+      "Power Systems Engineer", "Controls Engineer",
+      "Electrical Design Engineer", "Test Engineer"
+    ],
+    "keywords": [
+      "schematic capture", "PCB layout", "circuit design", "analog circuit design", "power electronics",
+      "DC-DC converters", "motor control", "power systems", "protective relaying", "load flow", "short circuit analysis",
+      "arc flash", "single-line diagrams", "signal integrity", "power integrity", "EMC", "EMI", "board bring-up",
+      "embedded C", "microcontrollers", "FPGA", "PLC programming", "SCADA", "high voltage", "battery management systems",
+      "NEC", "IEEE 1547", "UL certification", "oscilloscope", "design verification"
+    ],
+    "actionVerbs": [
+      "Designed", "Simulated", "Laid out", "Brought up", "Debugged", "Tested", "Validated",
+      "Specified", "Commissioned", "Analyzed", "Optimized", "Reduced", "Integrated", "Characterized", "Qualified"
+    ],
+    "tools": [
+      "Altium Designer", "OrCAD", "Cadence Allegro", "KiCad", "LTspice", "PSpice", "ETAP", "SKM PowerTools",
+      "PSCAD", "PSS/E", "AutoCAD Electrical", "EPLAN", "MATLAB", "Simulink", "PLECS", "LabVIEW",
+      "Mentor Graphics", "Keil", "STM32"
+    ]
+  },
+  "civil_engineering": {
+    "label": "Civil and Structural Engineering",
+    "roleFamily": "engineering",
+    "suggestedTitles": [
+      "Civil Engineer", "Structural Engineer",
+      "Project Engineer", "Geotechnical Engineer",
+      "Transportation Engineer", "Water Resources Engineer",
+      "Site Engineer", "Design Engineer"
+    ],
+    "keywords": [
+      "structural analysis", "structural design", "reinforced concrete", "steel design", "foundation design",
+      "geotechnical engineering", "site development", "grading and drainage", "stormwater management", "hydrology",
+      "hydraulic modeling", "roadway design", "traffic engineering", "transportation planning", "utility design",
+      "construction documents", "plan sets", "permitting", "ACI 318", "AISC", "IBC", "ASCE 7", "PE license", "EIT",
+      "construction administration", "quantity takeoffs"
+    ],
+    "actionVerbs": [
+      "Designed", "Analyzed", "Calculated", "Drafted", "Reviewed", "Inspected", "Permitted",
+      "Coordinated", "Specified", "Estimated", "Modeled", "Surveyed", "Managed", "Prepared", "Delivered"
+    ],
+    "tools": [
+      "AutoCAD Civil 3D", "AutoCAD", "Revit", "MicroStation", "OpenRoads", "SAP2000", "ETABS", "RISA",
+      "STAAD.Pro", "SAFE", "HEC-RAS", "HEC-HMS", "StormCAD", "SewerCAD", "ArcGIS", "Synchro", "Bluebeam",
+      "Procore", "Primavera P6"
+    ]
+  },
+  "chemical_engineering": {
+    "label": "Chemical and Process Engineering",
+    "roleFamily": "engineering",
+    "suggestedTitles": [
+      "Chemical Engineer", "Process Engineer",
+      "Process Development Engineer", "Manufacturing Engineer",
+      "Process Safety Engineer", "Production Engineer",
+      "Scale-up Engineer", "Senior Process Engineer"
+    ],
+    "keywords": [
+      "process design", "process optimization", "process simulation", "mass balance", "energy balance", "P&IDs",
+      "PFDs", "unit operations", "distillation", "reactor design", "heat exchangers", "scale-up", "process safety",
+      "HAZOP", "PSM", "SPC", "Six Sigma", "batch processing", "continuous processing", "GMP", "cGMP",
+      "process validation", "yield improvement", "root cause analysis", "MOC", "chemical handling"
+    ],
+    "actionVerbs": [
+      "Designed", "Optimized", "Scaled", "Simulated", "Commissioned", "Troubleshot", "Validated",
+      "Improved", "Reduced", "Analyzed", "Implemented", "Ran", "Qualified", "Monitored", "Increased"
+    ],
+    "tools": [
+      "Aspen Plus", "Aspen HYSYS", "CHEMCAD", "MATLAB", "JMP", "Minitab", "DeltaV", "PI System",
+      "SAP", "AutoCAD Plant 3D", "COMSOL", "LIMS", "Excel"
+    ]
+  },
+  "industrial_engineering": {
+    "label": "Industrial and Manufacturing Engineering",
+    "roleFamily": "engineering",
+    "suggestedTitles": [
+      "Industrial Engineer", "Manufacturing Engineer",
+      "Process Engineer", "Quality Engineer",
+      "Continuous Improvement Engineer", "Production Engineer",
+      "Supply Chain Engineer", "Lean Engineer"
+    ],
+    "keywords": [
+      "lean manufacturing", "Six Sigma", "kaizen", "value stream mapping", "5S", "SMED", "OEE", "time studies",
+      "line balancing", "capacity planning", "facility layout", "ergonomics", "SPC", "process capability", "Cpk",
+      "PFMEA", "control plans", "work instructions", "root cause analysis", "8D", "ISO 9001", "IATF 16949",
+      "AS9100", "discrete event simulation", "MES"
+    ],
+    "actionVerbs": [
+      "Improved", "Reduced", "Streamlined", "Implemented", "Standardized", "Analyzed", "Optimized",
+      "Designed", "Led", "Eliminated", "Balanced", "Increased", "Qualified", "Launched", "Audited"
+    ],
+    "tools": [
+      "Minitab", "JMP", "AutoCAD", "SolidWorks", "Arena", "Simio", "FlexSim", "Tableau", "Power BI",
+      "SAP", "MES", "Excel", "Visio"
+    ]
+  },
+  "aerospace_engineering": {
+    "label": "Aerospace Engineering",
+    "roleFamily": "engineering",
+    "suggestedTitles": [
+      "Aerospace Engineer", "Structures Engineer",
+      "Propulsion Engineer", "Avionics Engineer",
+      "Flight Test Engineer", "Systems Engineer",
+      "Stress Engineer", "Guidance Navigation and Control Engineer"
+    ],
+    "keywords": [
+      "stress analysis", "structural analysis", "composites", "aerodynamics", "propulsion", "flight dynamics",
+      "guidance navigation and control", "GN&C", "avionics", "flight test", "thermal analysis", "vibration testing",
+      "fatigue and damage tolerance", "airworthiness", "DO-178C", "DO-254", "AS9100", "FAA certification",
+      "requirements verification", "MBSE", "spacecraft", "launch vehicles", "orbital mechanics"
+    ],
+    "actionVerbs": [
+      "Designed", "Analyzed", "Simulated", "Tested", "Verified", "Validated", "Certified",
+      "Integrated", "Flew", "Qualified", "Optimized", "Modeled", "Reduced", "Developed", "Delivered"
+    ],
+    "tools": [
+      "CATIA", "Siemens NX", "Nastran", "Patran", "FEMAP", "Abaqus", "ANSYS", "HyperMesh", "MATLAB",
+      "Simulink", "STK", "Thermal Desktop", "Cameo", "DOORS", "Python", "Star-CCM+"
+    ]
+  },
+  "biomedical_engineering": {
+    "label": "Biomedical and Medical Device Engineering",
+    "roleFamily": "engineering",
+    "suggestedTitles": [
+      "Biomedical Engineer", "Medical Device Engineer",
+      "R&D Engineer", "Quality Engineer",
+      "Design Quality Engineer", "Clinical Engineer",
+      "Process Engineer", "Verification and Validation Engineer"
+    ],
+    "keywords": [
+      "medical devices", "design controls", "ISO 13485", "FDA 21 CFR 820", "ISO 14971", "DHF",
+      "verification and validation", "V&V", "biocompatibility", "sterilization", "IEC 60601", "510(k)",
+      "design history file", "CAPA", "complaint investigation", "test method validation", "usability engineering",
+      "catheters", "implants", "biomaterials", "clinical studies", "process validation", "IQ OQ PQ"
+    ],
+    "actionVerbs": [
+      "Designed", "Developed", "Verified", "Validated", "Tested", "Documented", "Transferred",
+      "Investigated", "Qualified", "Prototyped", "Improved", "Reduced", "Submitted", "Analyzed", "Characterized"
+    ],
+    "tools": [
+      "SolidWorks", "Creo", "MATLAB", "Minitab", "JMP", "LabVIEW", "ANSYS", "COMSOL", "Agile PLM",
+      "MasterControl", "Arena PLM", "ImageJ"
+    ]
+  },
+  "hardware_engineering": {
+    "label": "Hardware and Semiconductor Engineering",
+    "roleFamily": "engineering",
+    "suggestedTitles": [
+      "Hardware Engineer", "ASIC Design Engineer",
+      "Design Verification Engineer", "Physical Design Engineer",
+      "Silicon Validation Engineer", "FPGA Engineer",
+      "Signal Integrity Engineer", "Hardware Test Engineer"
+    ],
+    "keywords": [
+      "RTL design", "Verilog", "SystemVerilog", "VHDL", "UVM", "design verification", "functional verification",
+      "logic synthesis", "static timing analysis", "physical design", "place and route", "DFT", "ATPG", "post-silicon validation",
+      "silicon bring-up", "FPGA", "ASIC", "SoC", "PCIe", "DDR", "high-speed design", "signal integrity", "power integrity",
+      "board design", "schematic capture", "low-power design", "formal verification", "emulation"
+    ],
+    "actionVerbs": [
+      "Designed", "Verified", "Synthesized", "Validated", "Debugged", "Characterized", "Taped out",
+      "Brought up", "Implemented", "Optimized", "Closed", "Simulated", "Integrated", "Reduced", "Automated"
+    ],
+    "tools": [
+      "Cadence Virtuoso", "Cadence Innovus", "Cadence Allegro", "Synopsys Design Compiler", "Synopsys PrimeTime",
+      "Synopsys VCS", "Mentor Questa", "Vivado", "Quartus", "Altium Designer", "HyperLynx", "JTAG", "Tcl", "Perl", "Python"
+    ]
   }
 }
