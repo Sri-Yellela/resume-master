@@ -25,7 +25,10 @@ const capped = (maxLength, description) => ({ type: "string", maxLength, descrip
 // job.description, resumeText, selectedAdditions). A request over a cap was already accepted by the
 // 1.5.0 shape and is now a 400 invalid_request — the caps are stated here so a caller can check first.
 // No 1.5.0 response shape changed.
-export const CONTRACT_VERSION = "1.6.0";
+// 1.7.0 (D123 P2): additive — GenerateRequest.options.tailoring ("full" default | "lean"), job.keywords.placements
+// ({ term, employer }: a posting term the caller's knowledge base shows in one of the candidate's employers' stacks;
+// read by the lean path only), and GenerateResponse.tailoring (present on a lean answer). No 1.6.0 shape changed.
+export const CONTRACT_VERSION = "1.7.0";
 
 const usage = arr(ref("UsageRecord"));
 
@@ -55,7 +58,11 @@ export const DECLARED_SCHEMAS = {
     phrases: { type: "array", maxItems: 12, items: { type: "string", minLength: 1, maxLength: 80 },
       description: "Short responsibility phrases from the posting — never its sentences." },
     seniority: nullable({ type: "string", maxLength: 40 }),
-  }, { optional: ["matched", "claimed", "verbs", "competencies", "phrases", "seniority"] }),
+    placements: { type: "array", maxItems: 30, items: obj({ term: { type: "string", minLength: 1, maxLength: 80 },
+      employer: { type: "string", minLength: 1, maxLength: 120 } }),
+      description: "1.7.0 · lean tailoring only: a posting term the résumé does not show, which the caller's knowledge base " +
+        "shows in `employer`'s stack. It may be named only in a bullet of that employer. Sent with any other tailoring is a 400." },
+  }, { optional: ["matched", "claimed", "verbs", "competencies", "phrases", "seniority", "placements"] }),
 
   Job: obj({ title: str, company: str, category: str, description: capped(INPUT_LIMITS.jobDescription, "The posting. Over the cap on a model route is a 400 — refused, never truncated (A97)."), stack: nullable(str), keywords: ref("JobKeywords") },
     { optional: ["company", "category", "description", "stack", "keywords"] }),
@@ -74,14 +81,23 @@ export const DECLARED_SCHEMAS = {
       // 1.5.0 (D70 Phase 1): which job context the prompt carries. Default "description" — the pinned prompt.
       jobContext: { type: "string", enum: ["description", "keywords"], default: "description",
         description: "description (default): the posting's text, as always. keywords: job.keywords instead — the posting's " +
-          "text is not sent anywhere, even if job.description is present. keywords without job.keywords is a 400." } },
-      { optional: ["includeSummary", "cache", "jobContext"] }),
+          "text is not sent anywhere, even if job.description is present. keywords without job.keywords is a 400." },
+      // 1.7.0 (D123 P2): the lean path — the model returns changes to bullets and skills only; code builds the document.
+      tailoring: { type: "string", enum: ["full", "lean"], default: "full",
+        description: "full (default): the whole résumé is written by the model, as always. lean: Haiku edits bullets and skills " +
+          "from job.keywords (required; the posting's text is not sent), one repair call on Sonnet after a failed check, " +
+          "refused edits reverted to the candidate's own text. mode GENERATE only." } },
+      { optional: ["includeSummary", "cache", "jobContext", "tailoring"] }),
   }, { optional: ["mode", "domainModuleKey", "roleFamily", "domain", "candidate", "profile", "claims", "employers", "options"] }),
   GenerateResponse: obj({
     html: str, domainModuleKey: str,
     claimCheck: obj({ ok: { type: "boolean", enum: [true] }, inspected: ref("ClaimInspection") }),
+    tailoring: obj({ mode: enumOf("lean"), model: str, repaired: bool, changed: num,
+      refused: arr(obj({ id: str, kind: str })) }, { description: "1.7.0 · present on a lean answer only. `refused`: edits " +
+      "the checks reverted to the candidate's own text (kinds: number_not_in_bullet, term_wrong_employer, skill_not_supported, " +
+      "bullet_too_long, unreadable_answer)." }),
     usage,
-  }, { description: "Only ever returned for a document that PASSED the claim guard." }),
+  }, { optional: ["tailoring"], description: "Only ever returned for a document that PASSED the claim guard." }),
 
   EnhanceRequest: obj({ resumeText: capped(INPUT_LIMITS.resumeText, "Over the cap is a 400 — refused, never truncated. The whole request is also capped at " +
       `${INPUT_LIMITS.enhanceRequestChars} characters (A97).`), profile: obj({ name: str, roleFamily: str, domain: str }, { optional: ["name", "roleFamily", "domain"] }),

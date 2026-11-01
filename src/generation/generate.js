@@ -23,10 +23,13 @@ import { FORMATTING_SYSTEM } from "../formatting/formattingSystem.js";
 import { assertResumeClaims } from "../integrity/resumeClaimGuard.js";
 import { callAnthropic, textOf, MODEL_SONNET, MODEL_HAIKU } from "../model/anthropicCall.js";
 
+import { tailorResume } from "./tailor.js";
 import { InvalidRequestError } from "../errors.js";
 import { INPUT_LIMITS, capString, capRequest } from "./inputLimits.js";
 // Re-exported: the class moved to src/errors.js (see there); existing importers keep working.
 export { InvalidRequestError };
+
+export const TAILORINGS = Object.freeze(["full", "lean"]);
 
 function requireString(v, name) {
   if (typeof v !== "string" || !v.trim()) throw new InvalidRequestError(`${name} is required`);
@@ -68,6 +71,32 @@ export async function generateResume(client, input = {}, { env = process.env } =
   if (job.keywords != null) {
     const problem = validateJobKeywords(job.keywords);
     if (problem) throw new InvalidRequestError(problem);
+  }
+  // D123 P2: the lean path. The model edits bullets and skills only, from job.keywords; code builds the document.
+  // Absent is "full" — this route's request, byte for byte, as before 1.7.0.
+  const tailoring = options.tailoring ?? "full";
+  if (!TAILORINGS.includes(tailoring)) throw new InvalidRequestError(`options.tailoring must be one of ${TAILORINGS.join(", ")}`);
+  if (tailoring === "lean") {
+    if (mode !== "GENERATE") throw new InvalidRequestError('options.tailoring "lean" is for mode GENERATE only');
+    if (job.keywords == null) throw new InvalidRequestError('options.tailoring "lean" requires job.keywords — the posting text is not sent in that mode');
+    const lean = await tailorResume(client, { baseResumeText, job, keywords: job.keywords, claims, includeSummary: options.includeSummary === true });
+    let claimResult;
+    try {
+      claimResult = assertResumeClaims({
+        html: lean.html,
+        profile: { years_of_experience: candidate.yearsOfExperience ?? null },
+        baseResumeText,
+        domainProfile: profile ? { seniority: profile.seniority ?? null } : null,
+      });
+    } catch (e) {
+      throw Object.assign(e, { usageSoFar: lean.usage });
+    }
+    return { html: lean.html, domainModuleKey: "lean", claimCheck: { ok: true, inspected: claimResult.checked.inspected },
+             tailoring: lean.tailoring, usage: lean.usage };
+  }
+  if (job.keywords?.placements !== undefined) {
+    // placements are read by the lean path only; refused elsewhere rather than silently ignored.
+    throw new InvalidRequestError('job.keywords.placements is read only with options.tailoring "lean"');
   }
   const usage = [];
 
