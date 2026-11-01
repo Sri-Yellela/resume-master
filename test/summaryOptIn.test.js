@@ -255,8 +255,8 @@ test("a term the summary was the ONLY carrier of is lost with it — which is wh
   // scorer penalising an absent section — it is a keyword that had one home. The no-summary prompt
   // rule exists precisely for this, so the assertion is on the rule.
   const rules = fs.readFileSync("prompts/layer1_global_rules.md", "utf8");
-  const noSummaryBlock = rules.slice(at(rules, "## NO SUMMARY SECTION"), at(rules, "<!--ENDIF--><!--IF:SUMMARY-->"));
-  assert.match(noSummaryBlock, /Every honestly claimable Tier 1 term still appears verbatim in TECHNICAL SKILLS or in a bullet/,
+  const noSummaryBlock = rules.slice(at(rules, "## NO SUMMARY SECTION"), at(rules, "## ACADEMIC PROJECTS") /* D123 P6f: the SUMMARY block that followed moved to bullet_craft.md */);
+  assert.match(noSummaryBlock, /Every honestly claimable must-have term still appears verbatim in TECHNICAL SKILLS or in a bullet/ /* D123 P6e: "Tier 1" became "must-have" with the Tier extraction removed */,
     "with no summary, the terms it used to carry must be required somewhere that remains");
 
   // AK1: the scorer declines below MIN_SCORABLE_TERMS rather than fabricating a number, and a

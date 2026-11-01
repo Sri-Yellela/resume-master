@@ -22,6 +22,7 @@
 
 Healthcare project managers deliver clinical, operational, or technology initiatives within regulated environments. Success requires on-time delivery, regulatory compliance, clinical stakeholder alignment, and patient safety preservation. The vocabulary is compliance-heavy: HIPAA, HITECH, CMS, Joint Commission standards, clinical workflow design, EHR implementation, interdisciplinary coordination, and quality improvement (QI/PI).
 
+<!--IF:A_PLUS-->
 ### B. CANONICAL TOOL REGISTRY
 
 - **Health systems (Mayo Clinic, Cleveland Clinic, HCA):** Epic, Cerner, MS Project, ServiceNow, SharePoint, Lean/Six Sigma tools, Joint Commission readiness
@@ -29,6 +30,8 @@ Healthcare project managers deliver clinical, operational, or technology initiat
 - **Pharma/biotech (Pfizer, Merck, J&J):** Veeva, CTMS, MS Project, 21 CFR Part 11, IRB management, clinical trial project management
 - **Healthcare IT vendors (Epic, Cerner, Meditech):** Epic implementation methodology, go-live readiness, training programme delivery, interface specifications
 - **Public health (CDC, state health depts):** REDCap, SAS, SPSS, SharePoint, grant management, community health needs assessment
+
+<!--ENDIF-->
 
 ### C. TIER 1 KEYWORD CLASSES
 

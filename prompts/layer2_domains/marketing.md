@@ -21,6 +21,7 @@
 
 Marketing professionals plan, execute, and measure campaigns, product launches, and growth programmes to drive customer acquisition, retention, and brand awareness. Success is measured by CAC, LTV, conversion rate, ROAS, MQL/SQL pipeline, and brand metrics. The vocabulary is channel-specific and metric-driven: paid media, SEO/SEM, email automation, CRM, attribution modelling, and go-to-market strategy.
 
+<!--IF:A_PLUS-->
 ### B. CANONICAL TOOL REGISTRY
 
 - **Enterprise marketing (Salesforce, HubSpot, Adobe):** Salesforce Marketing Cloud, HubSpot, Marketo, Adobe Analytics, Adobe Experience Manager, Tableau, Google Analytics
@@ -29,6 +30,8 @@ Marketing professionals plan, execute, and measure campaigns, product launches, 
 - **E-commerce (Shopify, Wayfair, eBay):** Google Analytics, GA4, Klaviyo, Google Ads, Meta Ads, Attentive, Looker, SQL
 - **AdTech/media (The Trade Desk, Criteo, IPG, WPP):** DSPs (DV360, The Trade Desk), IAS, DoubleVerify, Nielsen, Comscore, DCM/CM360
 - **Content/SEO (HubSpot, Contently, Semrush):** Semrush, Ahrefs, Moz, Google Search Console, WordPress, Contentful, Screaming Frog
+
+<!--ENDIF-->
 
 ### C. TIER 1 KEYWORD CLASSES
 

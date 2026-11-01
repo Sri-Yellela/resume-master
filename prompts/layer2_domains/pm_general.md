@@ -22,6 +22,7 @@
 
 Product managers translate business strategy into product roadmaps and work across engineering, design, data, and business stakeholders to ship features that solve user problems. Success is measured by product adoption, revenue impact, user engagement metrics, and on-time delivery. The vocabulary is outcome-oriented: PMs write in terms of OKRs, user stories, A/B tests, conversion rates, churn, NPS, sprint velocity, and roadmap prioritisation.
 
+<!--IF:A_PLUS-->
 ### B. CANONICAL TOOL REGISTRY
 
 - **Consumer tech (Airbnb, Lyft, DoorDash, Snap):** Jira, Confluence, Figma, Amplitude, Mixpanel, Looker, SQL, Python (basic), A/B testing frameworks, growth experimentation
@@ -30,6 +31,8 @@ Product managers translate business strategy into product roadmaps and work acro
 - **Fintech (Stripe, PayPal, Square):** Jira, Confluence, Tableau, SQL, Mixpanel, regulatory compliance tracking, payment flow optimisation
 - **Healthcare tech (Epic, Optum):** Jira, SQL, FHIR, EHR workflow mapping, clinical user research, HIPAA compliance tracking
 - **B2B SaaS general:** ProductBoard, Jira, Intercom, HubSpot, Salesforce, Pendo, cohort analysis
+
+<!--ENDIF-->
 
 ### C. TIER 1 KEYWORD CLASSES
 

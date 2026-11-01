@@ -21,12 +21,15 @@
 
 Legal professionals advise on regulatory compliance, negotiate and draft contracts, manage disputes, and govern risk. Success is measured by deal quality, compliance record, litigation outcomes, and the efficiency of legal operations. The vocabulary is jurisdiction-specific and document-driven: due diligence, regulatory filings, material adverse change (MAC), representations and warranties, discovery, privilege, indemnification, and corporate governance.
 
+<!--IF:A_PLUS-->
 ### B. CANONICAL TOOL REGISTRY
 
 - **Law firms (Latham, Skadden, Kirkland, Cravath):** Relativity (e-discovery), Westlaw, LexisNexis, iManage, NetDocuments, Kira (contract review), MS Excel (for deal modelling)
 - **In-house counsel (Fortune 500 legal departments):** Ironclad, Icertis, Agiloft (CLM), DocuSign, Ironclad, Salesforce (contract tracking), SimpleLegal, Brightflag
 - **Compliance (banks, regulated industries):** Compliance training LMS, RiskConnect, NICE Actimize, Archer GRC, Thomson Reuters Accelus
 - **IP/Patent firms:** Dockmaster, Anaqua, CPI (patent management), USPTO Patent Center
+
+<!--ENDIF-->
 
 ### C. TIER 1 KEYWORD CLASSES
 

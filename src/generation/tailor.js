@@ -26,13 +26,15 @@
 import { buildStructuredResume, renderStructuredResume } from "../formatting/resumeFormatter.js";
 import { callAnthropic, textOf, MODEL_HAIKU, MODEL_SONNET } from "../model/anthropicCall.js";
 import { tailorRoute } from "../model/modelClient.js";
+import { applyPromptConditionals } from "./promptAssembler.js";
+import { bulletCraftText } from "./bulletCraft.js";
 
 export const TAILOR_MODEL = MODEL_HAIKU;
 export const TAILOR_REPAIR_MODEL = MODEL_SONNET;
 export const TAILOR_MAX_TOKENS = 2000;
 export const BULLET_MAX_CHARS = 320;
 
-export const LEAN_SYSTEM = `You tailor an existing resume to one job posting so it scores as high as honestly possible in an applicant tracking system (ATS). You EDIT; you do not write a new resume.
+const LEAN_RULES = `You tailor an existing resume to one job posting so it scores as high as honestly possible in an applicant tracking system (ATS). You EDIT; you do not write a new resume.
 
 INPUT: the target job and its keywords, then the resume's bullets (each with an id like e1b2) and its skills rows.
 
@@ -42,17 +44,21 @@ GOAL: every keyword the resume can honestly carry appears VERBATIM (exact spelli
 - A keyword no bullet can honestly carry is left out. Never force one.
 
 HARD RULES (code checks them; a broken rule is reverted):
-- Never add a number. Keep every number exactly as the bullet states it. No new metrics, counts, percentages, team sizes, years or durations.
+- Never add a number, and never drop one: every number a bullet states stays in it.
 - Never change employers, titles, dates, levels or seniority, and never claim sole ownership the bullet does not state.
-- One accomplishment per bullet; start with a strong past-tense verb (present tense is fine for a current role); at most 30 words.
-- No em or en dashes. No filler: passionate, results-driven, dynamic, cutting-edge, world-class, best-in-class, synergy, leverage, spearheaded.
-- Wrap each posting keyword you use in a bullet in **double asterisks**. Never bold a whole bullet.
 - Skills: keep every existing skill; put posting keywords first in each row; add only evidenced, claimed or placeable terms.
 - Leave a bullet OUT of your answer when it gains nothing. Fewer, better edits beat rewriting everything.
 
 OUTPUT: JSON only, no prose, no code fence:
 {"bullets":{"e1b1":"new text"},"skills":[{"label":"Languages","values":"Python, SQL"}]}
-"skills" holds the full rows in their new order, or is omitted when nothing changes.`;
+"skills" holds the full rows in their new order, or is omitted when nothing changes.
+Bullet order is set by code (most must-have terms first within each employer); edit a bullet's text, never its place.`;
+
+// D123 P6f: the owner's craft (prompts/bullet_craft.md) is the bullet half of this prompt — the same file the full call
+// reads. The lean call never rewrites a summary, so the craft's SUMMARY rules are resolved off.
+export const LEAN_SYSTEM = `${LEAN_RULES}
+
+${applyPromptConditionals(bulletCraftText(), { SUMMARY: false }).trim()}`;
 
 const norm = (s) => String(s ?? "").toLowerCase().replace(/\*\*/g, "").replace(/\s+/g, " ").trim();
 const plain = (s) => String(s ?? "").replace(/\*\*/g, "");
@@ -125,8 +131,17 @@ export function parseChanges(text) {
 }
 
 // Standalone numbers only: "40,000", "2.5", "78%" count; "S3", "EC2", "p95", "OAuth 2.0" do not (a letter touches them).
-const NUMBER_RE = /(?<![A-Za-z0-9.])\d[\d,]*(?:\.\d+)?(?![A-Za-z0-9])/g;
-const numbersOf = (s) => new Set((plain(s).match(NUMBER_RE) || []).map(n => n.replace(/,/g, "")));
+// One k / M / B suffix is read as a multiplier (D123 P6e, the audit's R8): "40,000" and "40k" are the same number, so
+// rewording one as the other is neither an added nor a dropped number.
+const NUMBER_RE = /(?<![A-Za-z0-9.])(\d[\d,]*(?:\.\d+)?)([kKmMbB])?(?![A-Za-z0-9])/g;
+const MULT = { k: 1e3, m: 1e6, b: 1e9 };
+const numbersOf = (s) => new Set([...plain(s).matchAll(NUMBER_RE)].map(([, n, x]) => {
+  const v = Number(n.replace(/,/g, "")) * (x ? MULT[x.toLowerCase()] : 1);
+  return String(Math.round(v * 1000) / 1000);
+}));
+// D123 P6f (3): words that claim sole ownership. A rewrite may use one only when the candidate's own bullet does.
+const SOLE_OWNERSHIP_RE = /\b(led|owned|spearheaded|single[- ]handedly|solely|headed)\b/gi;
+const ownershipWords = (s) => new Set((plain(s).match(SOLE_OWNERSHIP_RE) || []).map(w => w.toLowerCase().replace(/[- ]/, "-")));
 const splitValues = (v) => String(v || "").split(/\s*[,|·;]\s*/).map(x => x.trim()).filter(Boolean);
 const termIn = (text, term) => {
   const t = norm(term);
@@ -160,6 +175,12 @@ export function checkLeanChanges({ structure, baseResumeText = "", changes, keyw
     const before = numbersOf(b.text);
     const added = [...numbersOf(text)].filter(n => !before.has(n));
     if (added.length) { violations.push({ kind: "number_not_in_bullet", id, evidence: added, message: `${id} adds ${added.join(", ")}, which the original bullet does not state. Keep the bullet's own numbers and add none.` }); continue; }
+    const after = numbersOf(text);
+    const dropped = [...before].filter(n => !after.has(n));
+    if (dropped.length) { violations.push({ kind: "number_dropped", id, evidence: dropped, message: `${id} drops ${dropped.join(", ")}, which the original bullet states. Keep every number the candidate gave and bring it into the result.` }); continue; }
+    const ownBefore = ownershipWords(b.text);
+    const claimed = [...ownershipWords(text)].filter(w => !ownBefore.has(w));
+    if (claimed.length) { violations.push({ kind: "sole_ownership_claimed", id, evidence: claimed, message: `${id} says "${claimed.join(", ")}", a claim of sole ownership the original bullet does not make. Use a contribution verb from the BULLET CRAFT instead.` }); continue; }
     const misplaced = placements.filter(p => termIn(text, p.term) && !termIn(b.text, p.term) && !supported(p.term) && !atEmployer(b.entry, p.employer));
     if (misplaced.length) { violations.push({ kind: "term_wrong_employer", id, evidence: misplaced.map(p => p.term), message: `${id} names ${misplaced.map(p => `${p.term} (placeable only at ${p.employer})`).join(", ")} in "${entryHeader(b.entry) || "another entry"}".` }); continue; }
     if (/[–—]/.test(text)) text = text.replace(/\s*[–—]\s*/g, ", ");
@@ -187,11 +208,30 @@ export function checkLeanChanges({ structure, baseResumeText = "", changes, keyw
   return { violations, bullets, skills };
 }
 
-/** A new structure with the accepted changes applied; the input is not mutated. */
-export function applyChanges(structure, { bullets = {}, skills = null } = {}, { includeSummary = false } = {}) {
+/** The posting's terms a bullet carries (D123 P6f (4)): evidenced, claimed and placeable keywords, counted once each. */
+export function mustHaveCount(text, keywords = {}) {
+  const terms = new Set([...(keywords.matched || []), ...(keywords.claimed || []), ...(keywords.placements || []).map(p => p.term)]
+    .filter(Boolean).map(norm));
+  let n = 0;
+  for (const t of terms) if (termIn(text, t)) n++;
+  return n;
+}
+
+/**
+ * A new structure with the accepted changes applied; the input is not mutated.
+ * D123 P6f (4) ORDER FOR RELEVANCE: within each entry, bullets are ordered by how many of the posting's terms they carry
+ * (a stable sort — ties keep the candidate's order). Entries themselves never move: employers stay in date order.
+ */
+export function applyChanges(structure, { bullets = {}, skills = null } = {}, { includeSummary = false, keywords = null } = {}) {
   const next = JSON.parse(JSON.stringify(structure));
   const ids = indexBullets(next);
   for (const b of ids) if (bullets[b.id]) b.entry.bullets[b.index] = bullets[b.id];
+  if (keywords) {
+    for (const entry of new Set(ids.map(b => b.entry))) {
+      entry.bullets = entry.bullets.map((text, i) => ({ text, i, n: mustHaveCount(text, keywords) }))
+        .sort((a, b) => b.n - a.n || a.i - b.i).map(x => x.text);
+    }
+  }
   if (skills) { const s = skillsSection(next); if (s) s.rows = skills; }
   if (!includeSummary) next.sections = next.sections.filter(s => s.type !== "summary");
   return next;
@@ -246,7 +286,7 @@ export async function tailorResume(client, { baseResumeText, job = {}, keywords 
     }
     // Anything still refused stays the candidate's own text: checkLeanChanges already left it out of `bullets`.
     const accepted = checked || { bullets: {}, skills: null, violations: [{ kind: "unreadable_answer", id: "*", message: "no readable answer" }] };
-    const html = renderStructuredResume(applyChanges(structure, accepted, { includeSummary }));
+    const html = renderStructuredResume(applyChanges(structure, accepted, { includeSummary, keywords }));
     return {
       html,
       tailoring: { mode: "lean", model, repaired, changed: Object.keys(accepted.bullets).length + (accepted.skills ? 1 : 0),

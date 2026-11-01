@@ -21,6 +21,7 @@
 
 Data professionals build pipelines, models, and platforms that enable data-driven decisions. Roles include data engineering (pipelines, warehouses), data science (modelling, experimentation), data analytics (dashboards, reporting), and ML engineering (production model deployment). Success is measured by pipeline reliability, model accuracy, dashboard adoption, and decision impact. The vocabulary is platform-specific: dbt, Spark, Airflow, feature stores, A/B testing frameworks, and semantic layers.
 
+<!--IF:A_PLUS-->
 ### B. CANONICAL TOOL REGISTRY
 
 - **Cloud analytics (Snowflake, Databricks, dbt Labs):** Snowflake, dbt, Databricks, Spark, Airflow, Fivetran, Great Expectations, Delta Lake, Python/SQL
@@ -29,6 +30,8 @@ Data professionals build pipelines, models, and platforms that enable data-drive
 - **Fintech data (Stripe, PayPal, Square):** BigQuery, dbt, Airflow, Looker, Python, SQL, fraud feature engineering, risk modelling
 - **Health data (Optum, CVS, Epic):** FHIR, SQL, Python, SAS, HIPAA-compliant pipelines, claims data modelling, HL7
 - **Startup/mid-market:** dbt, Fivetran, Snowflake/BigQuery/Redshift, Looker/Metabase, Python, SQL, Airflow
+
+<!--ENDIF-->
 
 ### C. TIER 1 KEYWORD CLASSES
 
