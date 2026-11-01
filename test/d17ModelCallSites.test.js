@@ -24,6 +24,8 @@ const ALLOWED = new Map([
   ["resume_format",   "src/generation/generate.js — the optional LLM formatting pass, off unless RESUME_MASTER_LLM_FORMAT=1"],
   ["resume_enhance",  "src/generation/enhance.js — the A+ base-résumé enhancement, generation's sibling"],
   ["classifier",      "src/generation/classifier.js — picks generate's domain module when the caller sent none"],
+  ["resume_tailor",        "src/generation/tailor.js — D123 P2's lean tailoring: bullet and skills edits as JSON (Haiku)"],
+  ["resume_tailor_repair", "src/generation/tailor.js — its one repair after a failed check (Sonnet), never a third call"],
 ]);
 
 function srcFiles(dir = "src") {

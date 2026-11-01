@@ -34,6 +34,9 @@ export const KEYWORD_LIMITS = Object.freeze({
   maxLength: 80,                 // one term, verb or phrase
   seniorityMaxLength: 40,
   maxItems: Object.freeze({ matched: 60, claimed: 40, verbs: 30, competencies: 30, phrases: 12 }),
+  // 1.7.0 (D123 P2): { term, employer } — read only by the lean tailoring path (src/generation/tailor.js).
+  placementsMaxItems: 30,
+  employerMaxLength: 120,
 });
 export const KEYWORD_LISTS = Object.freeze(Object.keys(KEYWORD_LIMITS.maxItems));
 
@@ -41,7 +44,20 @@ export const KEYWORD_LISTS = Object.freeze(Object.keys(KEYWORD_LIMITS.maxItems))
 export function validateJobKeywords(keywords) {
   if (!keywords || typeof keywords !== "object" || Array.isArray(keywords)) return "job.keywords must be an object";
   for (const k of Object.keys(keywords)) {
-    if (!KEYWORD_LISTS.includes(k) && k !== "seniority") return `job.keywords.${k} is not a known field`;
+    if (!KEYWORD_LISTS.includes(k) && k !== "seniority" && k !== "placements") return `job.keywords.${k} is not a known field`;
+  }
+  const pl = keywords.placements;
+  if (pl !== undefined) {
+    if (!Array.isArray(pl)) return "job.keywords.placements must be an array of { term, employer }";
+    if (pl.length > KEYWORD_LIMITS.placementsMaxItems) return `job.keywords.placements has more than ${KEYWORD_LIMITS.placementsMaxItems} items`;
+    for (const p of pl) {
+      if (!p || typeof p !== "object" || typeof p.term !== "string" || !p.term.trim() || typeof p.employer !== "string" || !p.employer.trim()) {
+        return "job.keywords.placements must hold { term, employer } with non-empty strings";
+      }
+      if (p.term.length > KEYWORD_LIMITS.maxLength) return `job.keywords.placements has a term longer than ${KEYWORD_LIMITS.maxLength} characters`;
+      if (p.employer.length > KEYWORD_LIMITS.employerMaxLength) return `job.keywords.placements has an employer longer than ${KEYWORD_LIMITS.employerMaxLength} characters`;
+      if (Object.keys(p).some(k => k !== "term" && k !== "employer")) return "job.keywords.placements items carry only term and employer";
+    }
   }
   for (const k of KEYWORD_LISTS) {
     const list = keywords[k];
