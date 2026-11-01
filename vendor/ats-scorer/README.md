@@ -54,6 +54,15 @@ cannot earn: they do not see whether the role fits. A **shortfall** still costs,
 short; unknown years still score the incomplete-profile rate. The measurement is in `src/scorer.js`
 at `MEETS_EXPERIENCE_RATIO`. Scores move only where years are known and met (or far exceeded), by 1 to 4 points down.
 
+## Vocabulary: eight engineering disciplines (1.3.0, D126 P3)
+
+The closed vocabulary (data/DOMAIN_METADATA_REGISTRY.json) gains mechanical, electrical, civil, chemical, industrial,
+aerospace, biomedical and hardware engineering — their tools as postings name them (seeded from O*NET 30.0 Technology
+Skills for SOC 17-2xxx, vendor prefixes dropped) and the named practices a posting asks for (GD&T, DFMEA, HAZOP, UVM …).
+Before it a mechanical posting yielded 0 scorable terms and every non-software engineering score was declined. Terms
+generic enough to appear in software postings were left out, so computing scores do not move (the graded corpus's ρ
+is unchanged; see draft's test/d126AtsDisciplines.test.js).
+
 ## How a repository consumes it
 
 - **draft** holds the source of truth and depends on it as `"file:packages/ats-scorer"`.
