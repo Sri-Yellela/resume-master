@@ -79,7 +79,7 @@ export async function generateResume(client, input = {}, { env = process.env } =
   if (tailoring === "lean") {
     if (mode !== "GENERATE") throw new InvalidRequestError('options.tailoring "lean" is for mode GENERATE only');
     if (job.keywords == null) throw new InvalidRequestError('options.tailoring "lean" requires job.keywords — the posting text is not sent in that mode');
-    const lean = await tailorResume(client, { baseResumeText, job, keywords: job.keywords, claims, includeSummary: options.includeSummary === true });
+    const lean = await tailorResume(client, { baseResumeText, job, keywords: job.keywords, claims, includeSummary: options.includeSummary === true, env });
     let claimResult;
     try {
       claimResult = assertResumeClaims({
