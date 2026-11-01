@@ -25,6 +25,7 @@
 // added to Skills. The caller decides the placements; the model words them; the guard holds them to their employer.
 import { buildStructuredResume, renderStructuredResume } from "../formatting/resumeFormatter.js";
 import { callAnthropic, textOf, MODEL_HAIKU, MODEL_SONNET } from "../model/anthropicCall.js";
+import { tailorRoute } from "../model/modelClient.js";
 
 export const TAILOR_MODEL = MODEL_HAIKU;
 export const TAILOR_REPAIR_MODEL = MODEL_SONNET;
@@ -197,9 +198,11 @@ export function applyChanges(structure, { bullets = {}, skills = null } = {}, { 
 }
 
 // Two call sites, each with its literal purpose (test/d17ModelCallSites.test.js reads them).
-async function askTailor(client, user, usage) {
-  const r = await callAnthropic(client, {
-    purpose: "resume_tailor", model: TAILOR_MODEL, max_tokens: TAILOR_MAX_TOKENS,
+// D123 P3: the tailoring call's client and model come from configuration (src/model/modelClient.js tailorRoute) — Anthropic's
+// Haiku unless RM_TAILOR_PROVIDER names another; the repair below always stays on Anthropic's Sonnet.
+async function askTailor(route, user, usage) {
+  const r = await callAnthropic(route.client, {
+    purpose: "resume_tailor", model: route.model, max_tokens: TAILOR_MAX_TOKENS,
     system: LEAN_SYSTEM, messages: [{ role: "user", content: user }],
   }).catch(e => { if (e?.usage) usage.push(e.usage); throw e; });
   usage.push(r.usage);
@@ -221,13 +224,14 @@ async function askRepair(client, user, usage) {
  * @returns { html, tailoring: { mode: "lean", model, repaired, changed, refused: [{ id, kind }] }, usage }
  * Throws a ModelCallError (with `usageSoFar`) when a call fails.
  */
-export async function tailorResume(client, { baseResumeText, job = {}, keywords = {}, claims = null, includeSummary = false }) {
+export async function tailorResume(client, { baseResumeText, job = {}, keywords = {}, claims = null, includeSummary = false, env = process.env }) {
   const usage = [];
+  const route = tailorRoute(env, { anthropicClient: client, defaultModel: TAILOR_MODEL });
   const structure = buildStructuredResume(baseResumeText);
   const user = renderTailorInput({ structure, job, keywords });
-  let model = TAILOR_MODEL;
+  let model = route.model;
   try {
-    let changes = parseChanges(await askTailor(client, user, usage));
+    let changes = parseChanges(await askTailor(route, user, usage));
     let checked = changes ? checkLeanChanges({ structure, baseResumeText, changes, keywords, claims }) : null;
     let repaired = false;
     if (!changes || checked.violations.length) {

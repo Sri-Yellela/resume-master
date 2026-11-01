@@ -151,3 +151,53 @@ test("d123SummaryToggle: with the summary off, a base résumé's summary is not 
   const on = await generateResume(client, { ...INPUT, baseResumeText: withSummary, options: { tailoring: "lean", includeSummary: true } });
   assert.ok(on.html.includes("Engineer who builds APIs."));
 });
+
+// ── D123 P3 · the provider-neutral client ───────────────────────────────────────────────────────
+import { createOpenAiCompatibleClient, tailorRoute } from "../src/model/modelClient.js";
+
+test("d123ModelClientProviderNeutral: an OpenAI-compatible endpoint wears the SDK's shape; the lean call goes there only when configured", async () => {
+  const sent = [];
+  const fetchImpl = async (url, init) => {
+    sent.push({ url, body: JSON.parse(init.body), auth: init.headers.authorization });
+    return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: JSON.stringify({ bullets: { e2b1: "Wrote **Python** ETL jobs that load sales data into PostgreSQL" } }) } }],
+      usage: { prompt_tokens: 900, completion_tokens: 120 } }) };
+  };
+  const env = { RM_TAILOR_PROVIDER: "openai-compatible", RM_TAILOR_MODEL: "nvidia/nemotron-test", RM_OPENAI_COMPAT_BASE_URL: "https://compat.example/v1", RM_OPENAI_COMPAT_API_KEY: "k-test" };
+  const anthropic = fakeClient([{}]);
+  // the route is read inside tailorResume; inject the fetch through a client built here and confirm the wiring separately
+  const route = tailorRoute(env, { anthropicClient: anthropic, defaultModel: "x", fetchImpl });
+  assert.equal(route.provider, "openai-compatible");
+  assert.equal(route.model, "nvidia/nemotron-test");
+  const msg = await route.client.messages.create({ model: route.model, max_tokens: 50, system: [{ type: "text", text: "SYS" }], messages: [{ role: "user", content: "hi" }] });
+  assert.equal(sent[0].url, "https://compat.example/v1/chat/completions");
+  assert.equal(sent[0].auth, "Bearer k-test");
+  assert.deepEqual(sent[0].body.messages, [{ role: "system", content: "SYS" }, { role: "user", content: "hi" }]);
+  assert.deepEqual(msg.usage, { input_tokens: 900, output_tokens: 120 });
+  assert.equal(msg.content[0].type, "text");
+  // Default: Anthropic, Haiku — the request as before.
+  assert.equal(tailorRoute({}, { anthropicClient: anthropic, defaultModel: MODEL_HAIKU }).client, anthropic);
+  // A broken configuration is an error, never a silent fallback to another provider.
+  assert.throws(() => tailorRoute({ RM_TAILOR_PROVIDER: "openai-compatible" }, {}), /RM_TAILOR_MODEL is required/);
+  assert.throws(() => tailorRoute({ RM_TAILOR_PROVIDER: "openai-compatible", RM_TAILOR_MODEL: "m", RM_OPENAI_COMPAT_BASE_URL: "http://evil.example", RM_OPENAI_COMPAT_API_KEY: "k" }, {}), /must be https/);
+  assert.throws(() => tailorRoute({ RM_TAILOR_PROVIDER: "bedrock" }, {}), /must be one of/);
+  assert.throws(() => createOpenAiCompatibleClient({ baseUrl: "https://x" }), /API_KEY is not set/);
+});
+
+test("d123ModelClientWiredIntoLean: with the provider configured, generateResume's lean call reaches the configured endpoint and the repair stays on Anthropic", async () => {
+  const realFetch = globalThis.fetch;
+  const hits = [];
+  globalThis.fetch = async (url, init) => {
+    hits.push(url);
+    return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: JSON.stringify({ bullets: { e1b1: "Built a REST API in Java serving 90,000 requests a day" } }) } }], usage: { prompt_tokens: 10, completion_tokens: 5 } }) };
+  };
+  try {
+    const anthropic = fakeClient([{ bullets: {} }]);
+    const env = { RM_TAILOR_PROVIDER: "openai-compatible", RM_TAILOR_MODEL: "nvidia/nemotron-test", RM_OPENAI_COMPAT_BASE_URL: "https://compat.example/v1", RM_OPENAI_COMPAT_API_KEY: "k" };
+    const out = await generateResume(anthropic, INPUT, { env });
+    assert.deepEqual(hits, ["https://compat.example/v1/chat/completions"], "the first call went to the configured provider");
+    assert.equal(anthropic.calls.length, 1, "the number it invented sent the repair to Anthropic");
+    assert.equal(anthropic.calls[0].model, MODEL_SONNET);
+    assert.deepEqual(out.usage.map(u => [u.purpose, u.model]), [["resume_tailor", "nvidia/nemotron-test"], ["resume_tailor_repair", MODEL_SONNET]]);
+    assert.equal(out.usage[0].attempts, 1, "the other provider's sends are counted too");
+  } finally { globalThis.fetch = realFetch; }
+});
