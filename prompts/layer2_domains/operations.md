@@ -21,6 +21,7 @@
 
 Operations professionals design and manage processes, supply chains, logistics networks, and quality systems that enable an organisation to deliver at scale reliably and efficiently. Success is measured by throughput, cost per unit, defect rate, on-time delivery, and inventory turns. The vocabulary is process-driven: Six Sigma, Lean, OEE, COGS, SLA, 3PL, SKU rationalisation, demand sensing, and network optimisation.
 
+<!--IF:A_PLUS-->
 ### B. CANONICAL TOOL REGISTRY
 
 - **Retail and e-commerce ops (Amazon, Walmart, Target):** SAP SCM, Oracle SCM, JDA/Blue Yonder, Manhattan Associates, Kinaxis, Tableau, SQL, Excel
@@ -28,6 +29,8 @@ Operations professionals design and manage processes, supply chains, logistics n
 - **Logistics and 3PL (FedEx, UPS, XPO, Flexport):** TMS (MercuryGate, Oracle TM), WMS (Manhattan, JDA), Salesforce (customer ops), Tableau, SQL
 - **Healthcare operations (hospital systems):** Epic, Lean/Six Sigma, capacity planning tools, HCAHPS, Press Ganey, OR scheduling systems
 - **Consulting (McKinsey, BCG, Deloitte ops):** Excel (advanced), Tableau, Alteryx, process mapping tools (Visio, Miro), Lean/Six Sigma methodology
+
+<!--ENDIF-->
 
 ### C. TIER 1 KEYWORD CLASSES
 

@@ -20,6 +20,7 @@
 
 HR professionals design and operate people systems: talent acquisition, performance management, compensation, learning and development, employee relations, and organisational design. Success is measured by time-to-fill, offer acceptance rate, retention rate, employee engagement scores, and compliance record. The vocabulary is process-oriented: headcount planning, HRBP, job architecture, total rewards, DEI metrics, HRIS, and workforce analytics.
 
+<!--IF:A_PLUS-->
 ### B. CANONICAL TOOL REGISTRY
 
 - **Enterprise HR (Fortune 500):** Workday HCM, SAP SuccessFactors, Oracle HCM, ServiceNow HR Service Delivery, Tableau, Power BI, LinkedIn Recruiter
@@ -27,6 +28,8 @@ HR professionals design and operate people systems: talent acquisition, performa
 - **Tech company HR (Google, Meta, Amazon):** Workday, Greenhouse, Lever, Culture Amp, Lattice, Tableau, SQL (basic), Qualtrics
 - **Consulting (Mercer, Aon, Willis Towers Watson):** Mercer Total Rewards, compensation benchmarking tools, Korn Ferry Hay methodology, MS Excel (advanced)
 - **Mid-market (Gusto, Rippling, BambooHR users):** Gusto, Rippling, BambooHR, Greenhouse, Indeed, LinkedIn Recruiter, Lever
+
+<!--ENDIF-->
 
 ### C. TIER 1 KEYWORD CLASSES
 

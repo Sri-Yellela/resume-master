@@ -23,9 +23,12 @@
 
 This domain module applies when the role does not clearly map to a specific domain. It is intentionally domain-agnostic and works equally well for a social worker, logistics coordinator, teacher, chemist, or any other professional role. Language and vocabulary are drawn entirely from the JD — this module provides structure and rules without domain-specific assumptions.
 
+<!--IF:A_PLUS-->
 ### B. CANONICAL TOOL REGISTRY
 
 No domain-specific tools are assumed. For company-authentic placement, use only information available in the JD or job posting to infer what tools the hiring organisation actually uses. When tool information is unavailable, omit tool placement entirely and write process- and outcome-focused bullets. Do not fabricate tool names.
+
+<!--ENDIF-->
 
 ### C. TIER 1 KEYWORD CLASSES
 

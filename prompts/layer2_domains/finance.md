@@ -21,6 +21,7 @@
 
 Finance professionals model, analyse, forecast, and communicate financial performance to support business decisions, investor relations, or risk management. Success is measured by forecast accuracy, cost reduction, revenue growth attribution, and deal or transaction outcomes. The vocabulary is precise: EBITDA, DCF, LBO, IRR, variance analysis, FP&A, capital allocation, working capital, covenant compliance, credit risk, regulatory capital, and SOX compliance.
 
+<!--IF:A_PLUS-->
 ### B. CANONICAL TOOL REGISTRY
 
 - **Investment banking (Goldman Sachs, JPMorgan, Morgan Stanley, Lazard):** Excel (advanced), Bloomberg, FactSet, Capital IQ, Pitchbook, PowerPoint, Dealogic, SecDB (Goldman-specific)
@@ -30,6 +31,8 @@ Finance professionals model, analyse, forecast, and communicate financial perfor
 - **Commercial banking (Wells Fargo, Bank of America, Citi):** Moody's, S&P, SQL, SAS, Python, AML/BSA compliance systems, credit origination platforms
 - **Accounting/audit (Deloitte, PwC, EY, KPMG):** CCH ProSystem, Thomson Reuters Checkpoint, TeamMate, Caseware, Excel, SAP, Oracle
 - **Fintech (Stripe, PayPal, Square):** Python, SQL, dbt, Looker, Airflow, Snowflake, Databricks, risk modelling
+
+<!--ENDIF-->
 
 ### C. TIER 1 KEYWORD CLASSES
 

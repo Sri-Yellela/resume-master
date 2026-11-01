@@ -13,6 +13,7 @@
 import fs   from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { bulletCraftText } from "./bulletCraft.js";
 
 const __dirname   = path.dirname(fileURLToPath(import.meta.url));
 const PROMPTS_DIR = path.join(__dirname, "..", "..", "prompts");
@@ -140,8 +141,12 @@ export function assemblePrompt(domainModuleKey, mode, runtimeInputs, flags = {},
   //
   // Prompt caching still works: SUMMARY has two values, so there are two stable variants of each
   // block rather than one, and each is byte-identical call to call.
-  const resolvedFlags = { SUMMARY: flags.SUMMARY === true };
-  const layer1Resolved = applyPromptConditionals(_layer1Cache.text, resolvedFlags);
+  //
+  // D123 P6e: A_PLUS is the mode, never a caller's flag — the rules only A+ needs (company selection, exclusions, the
+  // FAANG limit, the tool registries) reach the model only in A+. In Generate the employers are the candidate's own.
+  // D123 P6f: the owner's bullet craft (prompts/bullet_craft.md, the ONE copy) rides at the end of Layer 1's block.
+  const resolvedFlags = { SUMMARY: flags.SUMMARY === true, A_PLUS: modeKey === "A_PLUS" };
+  const layer1Resolved = applyPromptConditionals(`${_layer1Cache.text}\n\n${bulletCraftText()}`, resolvedFlags);
   const layer2Resolved = applyPromptConditionals(layer2Text, resolvedFlags);
   const layer3Resolved = applyPromptConditionals(layer3Text, resolvedFlags);
 

@@ -24,6 +24,7 @@
 
 Construction project managers plan, budget, schedule, and coordinate multi-trade projects from pre-construction through closeout. Success is measured by on-budget delivery, schedule adherence, safety record, and subcontractor performance. The vocabulary is trade-specific and schedule-driven: RFIs, submittals, change orders, CPM scheduling, punch lists, lien waivers, bid levelling, value engineering, and commissioning.
 
+<!--IF:A_PLUS-->
 ### B. CANONICAL TOOL REGISTRY
 
 - **General contractors (Turner, Skanska, Gilbane, McCarthy, Hensel Phelps):** Procore, Primavera P6, Bluebeam Revu, Autodesk Build, Microsoft Project, PlanGrid, BIM 360, Textura, SharePoint
@@ -32,6 +33,8 @@ Construction project managers plan, budget, schedule, and coordinate multi-trade
 - **Civil and infrastructure (AECOM, Jacobs, WSP):** Primavera P6, BIM 360, Oracle Aconex, HCSS, Trimble
 - **Design-build firms (DPR, Mortenson):** BIM 360, Procore, Autodesk Construction Cloud, RIB iTWO
 - **Public sector/transit (MTA, MBTA capital programs):** Oracle Aconex, Primavera P6, SharePoint, Unifier
+
+<!--ENDIF-->
 
 ### C. TIER 1 KEYWORD CLASSES
 

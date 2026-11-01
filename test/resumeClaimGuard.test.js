@@ -391,7 +391,8 @@ test("extractSeniorityClaims reports the phrase it matched, for a reviewable mes
 // ── The wiring (AF2 requirements 2, 3, 4) ────────────────────────────────────
 
 test("the prompt names the profile as the authority and forbids the JD setting a quantity", () => {
-  const rules = fs.readFileSync("prompts/layer1_global_rules.md", "utf8");
+  // D123 P6f moved the SUMMARY rules into prompts/bullet_craft.md, which rides on Layer 1's block; read both.
+  const rules = fs.readFileSync("prompts/layer1_global_rules.md", "utf8") + fs.readFileSync("prompts/bullet_craft.md", "utf8");
   assert.match(rules, /The years figure comes from `Candidate years of experience`/,
     "the summary rule must name its source");
   assert.match(rules, /Never from the JD\./);
@@ -450,7 +451,8 @@ test("no domain module sources the summary's title or years from the JD", () => 
 });
 
 test("the prompt tells the model to keep the honest figure rather than blur or omit it", () => {
-  const rules = fs.readFileSync("prompts/layer1_global_rules.md", "utf8");
+  // D123 P6f moved the SUMMARY rules into prompts/bullet_craft.md, which rides on Layer 1's block; read both.
+  const rules = fs.readFileSync("prompts/layer1_global_rules.md", "utf8") + fs.readFileSync("prompts/bullet_craft.md", "utf8");
   // Dodging the gap is the other way to mislead: a vague summary reads as compliance.
   assert.match(rules, /Do not write a range, "N\+", or a vaguer phrasing to blur the gap/);
   assert.match(rules, /do not omit the figure to avoid stating it/);

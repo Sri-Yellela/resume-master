@@ -24,6 +24,7 @@
 
 Software engineers design, build, validate, debug, and operate systems that process data, serve users, coordinate workflows, or control hardware. Success is measured by system reliability, latency, throughput, correctness, observability, and the velocity at which the team ships quality code. The vocabulary is technical and precise: engineers name specific languages, frameworks, cloud services, operating systems, hardware interfaces, debug tools, and operational practices. Seniority signals in resumes include system scale (users served, data volume, request rate), low-level ownership (drivers, kernels, firmware, bring-up, validation), cross-team influence, and ownership of critical infrastructure or product decisions.
 
+<!--IF:A_PLUS-->
 ### B. CANONICAL TOOL REGISTRY
 
 Use this registry to verify company-authentic tool placement. Only assign a tool to a company if it appears in that company's entry below.
@@ -60,6 +61,8 @@ Use this registry to verify company-authentic tool placement. Only assign a tool
 - **Intel:** C/C++, Linux kernel, compiler/toolchain work, firmware, platform software, CPU architecture, performance engineering, hardware/software debug
 - **AMD:** C/C++, Linux, GPU drivers, firmware, graphics and compute stacks, performance profiling, silicon bring-up, validation workflows
 - **Tesla:** C/C++, Python, embedded Linux, RTOS, robotics/autonomy systems, hardware/software co-debug, diagnostics, test automation, board bring-up
+
+<!--ENDIF-->
 
 ### C. TIER 1 KEYWORD CLASSES
 

@@ -21,12 +21,15 @@
 
 Designers create interfaces, systems, and experiences that help users accomplish goals. Success is measured by task completion rate, user satisfaction, conversion uplift, and the quality of handoff to engineering. The vocabulary is research-driven and systems-oriented: user research, usability testing, design systems, component libraries, accessibility (WCAG), interaction design, prototyping, and design critiques.
 
+<!--IF:A_PLUS-->
 ### B. CANONICAL TOOL REGISTRY
 
 - **Consumer tech (Airbnb, Uber, Lyft, Meta, Google):** Figma, Sketch, Principle, Framer, InVision, Zeplin, Google Material Design, user research repos (Dovetail, EnjoyHQ), Maze, Hotjar
 - **Enterprise SaaS (Salesforce, ServiceNow, Workday):** Figma, Salesforce Lightning Design System, Storybook, component library governance, accessibility testing
 - **E-commerce (Shopify, Wayfair):** Figma, Polaris design system (Shopify), A/B testing, heatmaps (Hotjar, FullStory), Optimizely
 - **Agencies and consultancies (IDEO, frog, Accenture Song):** Service design tools, Miro, FigJam, stakeholder co-design workshops, design sprint facilitation
+
+<!--ENDIF-->
 
 ### C. TIER 1 KEYWORD CLASSES
 

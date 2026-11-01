@@ -23,6 +23,7 @@
 
 IT project managers deliver technology initiatives: system implementations, migrations, infrastructure upgrades, software rollouts, and vendor integrations. Success is measured by on-time, on-budget delivery with stakeholder acceptance and minimal production incidents. The vocabulary is governance-oriented: change management, ITIL, PRINCE2, PMP, risk registers, RAID logs, SLAs, SDLC phases, UAT, and go-live readiness.
 
+<!--IF:A_PLUS-->
 ### B. CANONICAL TOOL REGISTRY
 
 - **Enterprise IT (JPMorgan, UnitedHealth, CVS Health):** ServiceNow, Jira, MS Project, SharePoint, Confluence, ITSM, Change Management, SDLC, ITIL
@@ -30,6 +31,8 @@ IT project managers deliver technology initiatives: system implementations, migr
 - **Healthcare IT (Epic, Cerner implementations):** Epic, MS Project, ServiceNow, SharePoint, HIPAA, EHR implementation methodology
 - **Government/public sector:** MS Project, SharePoint, JIRA, FedRAMP, FISMA, ITIL, change advisory board (CAB)
 - **SaaS company IT:** Jira, Confluence, Okta, Slack, Workday, Salesforce, automated provisioning
+
+<!--ENDIF-->
 
 ### C. TIER 1 KEYWORD CLASSES
 
