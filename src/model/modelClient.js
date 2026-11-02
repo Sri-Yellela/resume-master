@@ -12,6 +12,7 @@
 //   RM_TAILOR_MODEL           the model id on that provider (required with openai-compatible)
 //   RM_OPENAI_COMPAT_BASE_URL e.g. https://integrate.api.nvidia.com/v1 — https only
 //   RM_OPENAI_COMPAT_API_KEY  that provider's own key (never an Anthropic key, never logged)
+//   RM_OPEN_MODEL             the model id served when a request names options.model "open" (contract 1.8.0)
 // The repair call (after a failed check) stays on Anthropic's stronger model: D123 P3, "falling back to the Sonnet tier".
 //
 // ⛔ D123 P5's terms note: a candidate's résumé goes to this provider when it is configured — the privacy policy must
@@ -19,6 +20,13 @@
 import { noteAttempt } from "./anthropicCall.js";
 
 export const PROVIDERS = Object.freeze(["anthropic", "openai-compatible"]);
+/** The per-request model choices a caller may send as options.model (contract 1.8.0). */
+export const MODEL_CHOICES = Object.freeze(["haiku", "sonnet", "open"]);
+
+/** Whether the "open" choice can be served: the OpenAI-compatible endpoint, its key and a model id are all set. */
+export function openConfigured(env = process.env) {
+  return !!(env.RM_OPENAI_COMPAT_BASE_URL && env.RM_OPENAI_COMPAT_API_KEY && env.RM_OPEN_MODEL);
+}
 
 function systemText(system) {
   if (!system) return "";
@@ -78,7 +86,17 @@ export function createOpenAiCompatibleClient({ baseUrl, apiKey, fetchImpl = fetc
  * RM_TAILOR_PROVIDER says otherwise. A broken configuration is an ERROR at the first call, never a silent fallback to
  * another provider (that would send a résumé somewhere nobody chose).
  */
-export function tailorRoute(env = process.env, { anthropicClient, defaultModel, fetchImpl } = {}) {
+export function tailorRoute(env = process.env, { anthropicClient, defaultModel, fetchImpl, choice = null, models = {} } = {}) {
+  // D123 (owner 11-01, contract 1.8.0): the CALLER may name the model per request — "haiku" | "sonnet" | "open". A named
+  // choice overrides RM_TAILOR_PROVIDER for that request; "open" is the OpenAI-compatible provider configured here
+  // (RM_OPENAI_COMPAT_BASE_URL / _API_KEY + RM_OPEN_MODEL) and is refused when it is not configured.
+  if (choice) {
+    if (!MODEL_CHOICES.includes(choice)) throw new Error(`options.model must be one of ${MODEL_CHOICES.join(", ")}`);
+    if (choice === "haiku" || choice === "sonnet") return { provider: "anthropic", client: anthropicClient, model: models[choice], choice };
+    if (!openConfigured(env)) throw Object.assign(new Error('options.model "open" is not configured on this service'), { code: "model_not_available" });
+    const client = createOpenAiCompatibleClient({ baseUrl: env.RM_OPENAI_COMPAT_BASE_URL, apiKey: env.RM_OPENAI_COMPAT_API_KEY, fetchImpl });
+    return { provider: "openai-compatible", client, model: env.RM_OPEN_MODEL, choice };
+  }
   const provider = String(env.RM_TAILOR_PROVIDER || "anthropic").trim();
   if (!PROVIDERS.includes(provider)) throw new Error(`RM_TAILOR_PROVIDER must be one of ${PROVIDERS.join(", ")}`);
   if (provider === "anthropic") return { provider, client: anthropicClient, model: env.RM_TAILOR_MODEL || defaultModel };

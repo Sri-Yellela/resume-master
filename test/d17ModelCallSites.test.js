@@ -26,6 +26,7 @@ const ALLOWED = new Map([
   ["classifier",      "src/generation/classifier.js — picks generate's domain module when the caller sent none"],
   ["resume_tailor",        "src/generation/tailor.js — D123 P2's lean tailoring: bullet and skills edits as JSON (Haiku)"],
   ["resume_tailor_repair", "src/generation/tailor.js — its one repair after a failed check (Sonnet), never a third call"],
+  ["resume_gist",          "src/generation/tailor.js — D123 P6g (2): the per-employer gists, once per base résumé (Sonnet), POST /v1/resumes/gists"],
 ]);
 
 function srcFiles(dir = "src") {

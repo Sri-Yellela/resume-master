@@ -23,13 +23,38 @@ import { FORMATTING_SYSTEM } from "../formatting/formattingSystem.js";
 import { assertResumeClaims } from "../integrity/resumeClaimGuard.js";
 import { callAnthropic, textOf, MODEL_SONNET, MODEL_HAIKU } from "../model/anthropicCall.js";
 
-import { tailorResume } from "./tailor.js";
+import { tailorResume, buildGists, GIST_MAX_CHARS } from "./tailor.js";
+import { MODEL_CHOICES, openConfigured } from "../model/modelClient.js";
 import { InvalidRequestError } from "../errors.js";
 import { INPUT_LIMITS, capString, capRequest } from "./inputLimits.js";
 // Re-exported: the class moved to src/errors.js (see there); existing importers keep working.
 export { InvalidRequestError };
 
-export const TAILORINGS = Object.freeze(["full", "lean"]);
+export const TAILORINGS = Object.freeze(["full", "lean", "payload", "code"]);
+const EDITING = new Set(["lean", "payload", "code"]);
+// 1.8.0 bounds (D123 P6a / P6d): what the payload's candidate block may carry.
+export const GIST_LIMITS = Object.freeze({ maxItems: 12, employerMaxLength: 200, textMaxLength: GIST_MAX_CHARS });
+export const COURSEWORK_LIMITS = Object.freeze({ maxItems: 20, maxLength: 80 });
+
+function validateGists(gists) {
+  if (!Array.isArray(gists)) return "gists must be an array of { employer, text }";
+  if (gists.length > GIST_LIMITS.maxItems) return `gists has more than ${GIST_LIMITS.maxItems} items`;
+  for (const g of gists) {
+    if (!g || typeof g !== "object" || typeof g.employer !== "string" || !g.employer.trim() || typeof g.text !== "string"
+        || g.employer.length > GIST_LIMITS.employerMaxLength || g.text.length > GIST_LIMITS.textMaxLength || Object.keys(g).some(k => k !== "employer" && k !== "text")) {
+      return `gists must hold { employer, text }: employer at most ${GIST_LIMITS.employerMaxLength} characters, text at most ${GIST_LIMITS.textMaxLength}`;
+    }
+  }
+  return null;
+}
+
+function validateCoursework(list) {
+  if (!Array.isArray(list) || list.length > COURSEWORK_LIMITS.maxItems
+      || list.some(c => typeof c !== "string" || !c.trim() || c.length > COURSEWORK_LIMITS.maxLength)) {
+    return `coursework must be at most ${COURSEWORK_LIMITS.maxItems} non-empty strings of at most ${COURSEWORK_LIMITS.maxLength} characters`;
+  }
+  return null;
+}
 
 function requireString(v, name) {
   if (typeof v !== "string" || !v.trim()) throw new InvalidRequestError(`${name} is required`);
@@ -76,10 +101,31 @@ export async function generateResume(client, input = {}, { env = process.env } =
   // Absent is "full" — this route's request, byte for byte, as before 1.7.0.
   const tailoring = options.tailoring ?? "full";
   if (!TAILORINGS.includes(tailoring)) throw new InvalidRequestError(`options.tailoring must be one of ${TAILORINGS.join(", ")}`);
-  if (tailoring === "lean") {
-    if (mode !== "GENERATE") throw new InvalidRequestError('options.tailoring "lean" is for mode GENERATE only');
-    if (job.keywords == null) throw new InvalidRequestError('options.tailoring "lean" requires job.keywords — the posting text is not sent in that mode');
-    const lean = await tailorResume(client, { baseResumeText, job, keywords: job.keywords, claims, includeSummary: options.includeSummary === true, env });
+  // 1.8.0 (D123): the caller may name the model of an editing tailoring; gists (payload) and coursework (payload, code).
+  if (options.model !== undefined) {
+    if (!MODEL_CHOICES.includes(options.model)) throw new InvalidRequestError(`options.model must be one of ${MODEL_CHOICES.join(", ")}`);
+    if (tailoring !== "lean" && tailoring !== "payload") throw new InvalidRequestError('options.model is read only with options.tailoring "lean" or "payload"');
+    if (options.model === "open" && !openConfigured(env)) throw new InvalidRequestError('options.model "open" is not configured on this service');
+  }
+  if (input.gists !== undefined) {
+    if (tailoring !== "payload") throw new InvalidRequestError('gists are read only with options.tailoring "payload"');
+    const problem = validateGists(input.gists);
+    if (problem) throw new InvalidRequestError(problem);
+  }
+  if (input.coursework !== undefined) {
+    if (tailoring !== "payload" && tailoring !== "code") throw new InvalidRequestError('coursework is read only with options.tailoring "payload" or "code"');
+    const problem = validateCoursework(input.coursework);
+    if (problem) throw new InvalidRequestError(problem);
+  }
+  if (tailoring === "lean" && (job.keywords?.mustHave || job.keywords?.niceToHave || job.keywords?.broader)) {
+    // The lean call stays 1.7.0's; the payload's fields are refused there rather than silently ignored.
+    throw new InvalidRequestError('job.keywords.mustHave, niceToHave and broader are read only with options.tailoring "payload" or "code"');
+  }
+  if (EDITING.has(tailoring)) {
+    if (mode !== "GENERATE") throw new InvalidRequestError(`options.tailoring "${tailoring}" is for mode GENERATE only`);
+    if (job.keywords == null) throw new InvalidRequestError(`options.tailoring "${tailoring}" requires job.keywords — the posting text is not sent in that mode`);
+    const lean = await tailorResume(client, { baseResumeText, job, keywords: job.keywords, claims, includeSummary: options.includeSummary === true, env,
+                                              variant: tailoring, model: options.model ?? null, gists: input.gists || [], coursework: input.coursework || [] });
     let claimResult;
     try {
       claimResult = assertResumeClaims({
@@ -91,12 +137,15 @@ export async function generateResume(client, input = {}, { env = process.env } =
     } catch (e) {
       throw Object.assign(e, { usageSoFar: lean.usage });
     }
-    return { html: lean.html, domainModuleKey: "lean", claimCheck: { ok: true, inspected: claimResult.checked.inspected },
+    return { html: lean.html, domainModuleKey: tailoring, claimCheck: { ok: true, inspected: claimResult.checked.inspected },
              tailoring: lean.tailoring, usage: lean.usage };
   }
-  if (job.keywords?.placements !== undefined) {
-    // placements are read by the lean path only; refused elsewhere rather than silently ignored.
-    throw new InvalidRequestError('job.keywords.placements is read only with options.tailoring "lean"');
+  if (["placements", "broader", "mustHave", "niceToHave"].some(k => job.keywords?.[k] !== undefined)) {
+    // read by the editing paths only; refused elsewhere rather than silently ignored.
+    throw new InvalidRequestError('job.keywords.placements is read only with an editing tailoring (lean, payload or code); so are broader, mustHave and niceToHave');
+  }
+  if (options.model !== undefined || input.gists !== undefined || input.coursework !== undefined) {
+    throw new InvalidRequestError("options.model, gists and coursework are read only by an editing tailoring");
   }
   const usage = [];
 
@@ -177,4 +226,14 @@ export async function generateResume(client, input = {}, { env = process.env } =
     claimCheck: { ok: true, inspected: claimResult.checked.inspected },
     usage,
   };
+}
+
+/**
+ * 1.8.0 (D123 P6g (2)) · POST /v1/resumes/gists — the per-employer gists of a base résumé, built once on the Sonnet tier.
+ * Stateless like every route here: the caller stores the answer with its résumé and sends it back as `gists`.
+ */
+export async function generateGists(client, input = {}) {
+  requireString(input.baseResumeText, "baseResumeText");
+  capString(input.baseResumeText, INPUT_LIMITS.baseResumeText, "baseResumeText");
+  return buildGists(client, { baseResumeText: input.baseResumeText });
 }

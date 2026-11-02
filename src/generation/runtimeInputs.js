@@ -33,9 +33,12 @@ export const JOB_CONTEXTS = Object.freeze(["description", "keywords"]);
 export const KEYWORD_LIMITS = Object.freeze({
   maxLength: 80,                 // one term, verb or phrase
   seniorityMaxLength: 40,
-  maxItems: Object.freeze({ matched: 60, claimed: 40, verbs: 30, competencies: 30, phrases: 12 }),
+  // 1.8.0 (D123 P6a / P6d): mustHave + niceToHave (the posting's own split), read by the payload and code tailorings.
+  maxItems: Object.freeze({ matched: 60, claimed: 40, verbs: 30, competencies: 30, phrases: 12, mustHave: 40, niceToHave: 30 }),
   // 1.7.0 (D123 P2): { term, employer } — read only by the lean tailoring path (src/generation/tailor.js).
   placementsMaxItems: 30,
+  // 1.8.0 (D123 P6d): { term, from } — a posting term the caller's KB says one of the résumé's own skills implies.
+  broaderMaxItems: 30,
   employerMaxLength: 120,
 });
 export const KEYWORD_LISTS = Object.freeze(Object.keys(KEYWORD_LIMITS.maxItems));
@@ -44,7 +47,18 @@ export const KEYWORD_LISTS = Object.freeze(Object.keys(KEYWORD_LIMITS.maxItems))
 export function validateJobKeywords(keywords) {
   if (!keywords || typeof keywords !== "object" || Array.isArray(keywords)) return "job.keywords must be an object";
   for (const k of Object.keys(keywords)) {
-    if (!KEYWORD_LISTS.includes(k) && k !== "seniority" && k !== "placements") return `job.keywords.${k} is not a known field`;
+    if (!KEYWORD_LISTS.includes(k) && k !== "seniority" && k !== "placements" && k !== "broader") return `job.keywords.${k} is not a known field`;
+  }
+  const br = keywords.broader;
+  if (br !== undefined) {
+    if (!Array.isArray(br)) return "job.keywords.broader must be an array of { term, from }";
+    if (br.length > KEYWORD_LIMITS.broaderMaxItems) return `job.keywords.broader has more than ${KEYWORD_LIMITS.broaderMaxItems} items`;
+    for (const b of br) {
+      if (!b || typeof b !== "object" || typeof b.term !== "string" || !b.term.trim() || typeof b.from !== "string" || !b.from.trim()
+          || b.term.length > KEYWORD_LIMITS.maxLength || b.from.length > KEYWORD_LIMITS.maxLength || Object.keys(b).some(k => k !== "term" && k !== "from")) {
+        return `job.keywords.broader must hold { term, from }, non-empty strings of at most ${KEYWORD_LIMITS.maxLength} characters`;
+      }
+    }
   }
   const pl = keywords.placements;
   if (pl !== undefined) {

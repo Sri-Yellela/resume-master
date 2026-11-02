@@ -28,7 +28,12 @@ const capped = (maxLength, description) => ({ type: "string", maxLength, descrip
 // 1.7.0 (D123 P2): additive — GenerateRequest.options.tailoring ("full" default | "lean"), job.keywords.placements
 // ({ term, employer }: a posting term the caller's knowledge base shows in one of the candidate's employers' stacks;
 // read by the lean path only), and GenerateResponse.tailoring (present on a lean answer). No 1.6.0 shape changed.
-export const CONTRACT_VERSION = "1.7.0";
+// 1.8.0 (D123 P6a / P6d / P6g, and the owner's model choice 11-01): additive — options.tailoring gains "payload" (the job
+// block + per-employer gists; the model may write a new bullet a gist supports) and "code" (no model: Skills, coursework and
+// bullet order by code); options.model ("haiku" | "sonnet" | "open") names the model of a lean or payload call;
+// GenerateRequest.gists and .coursework; job.keywords.mustHave, .niceToHave and .broader; GenerateResponse.tailoring gains
+// `added` and `modelCalled`; and POST /v1/resumes/gists (the gists, built once per base résumé). No 1.7.0 shape changed.
+export const CONTRACT_VERSION = "1.8.0";
 
 const usage = arr(ref("UsageRecord"));
 
@@ -62,7 +67,14 @@ export const DECLARED_SCHEMAS = {
       employer: { type: "string", minLength: 1, maxLength: 120 } }),
       description: "1.7.0 · lean tailoring only: a posting term the résumé does not show, which the caller's knowledge base " +
         "shows in `employer`'s stack. It may be named only in a bullet of that employer. Sent with any other tailoring is a 400." },
-  }, { optional: ["matched", "claimed", "verbs", "competencies", "phrases", "seniority", "placements"] }),
+    mustHave: { type: "array", maxItems: 40, items: { type: "string", minLength: 1, maxLength: 80 },
+      description: "1.8.0 · payload / code only: the posting's required terms, in the posting's spelling." },
+    niceToHave: { type: "array", maxItems: 30, items: { type: "string", minLength: 1, maxLength: 80 },
+      description: "1.8.0 · payload / code only: the posting's preferred / bonus terms." },
+    broader: { type: "array", maxItems: 30, items: obj({ term: { type: "string", minLength: 1, maxLength: 80 },
+      from: { type: "string", minLength: 1, maxLength: 80 } }),
+      description: "1.8.0 · payload / code only: a posting term one of the résumé's own skills (`from`) implies. Code places it in Skills beside `from`." },
+  }, { optional: ["matched", "claimed", "verbs", "competencies", "phrases", "seniority", "placements", "mustHave", "niceToHave", "broader"] }),
 
   Job: obj({ title: str, company: str, category: str, description: capped(INPUT_LIMITS.jobDescription, "The posting. Over the cap on a model route is a 400 — refused, never truncated (A97)."), stack: nullable(str), keywords: ref("JobKeywords") },
     { optional: ["company", "category", "description", "stack", "keywords"] }),
@@ -71,6 +83,10 @@ export const DECLARED_SCHEMAS = {
     mode: enumOf("GENERATE", "A_PLUS"), domainModuleKey: str, roleFamily: str, domain: str,
     candidate: ref("Candidate"), profile: nullable(ref("JobProfile")), claims: nullable(ref("Claims")),
     employers: arr(str), job: ref("Job"),
+    gists: { type: "array", maxItems: 12, items: obj({ employer: { type: "string", minLength: 1, maxLength: 200 }, text: { type: "string", maxLength: 400 } }),
+      description: "1.8.0 · payload only: the per-employer gists POST /v1/resumes/gists returned (or the candidate's edit of them), keyed by the entry's header line." },
+    coursework: { type: "array", maxItems: 20, items: { type: "string", minLength: 1, maxLength: 80 },
+      description: "1.8.0 · payload / code only: the candidate's own courses; code picks the most posting-relevant for a Relevant Coursework row." },
     baseResumeText: capped(INPUT_LIMITS.baseResumeText, "Over the cap is a 400 — refused, never truncated. The whole request is also capped at " +
       `${INPUT_LIMITS.generateRequestChars} characters (A97).`),
     // 1.5.0 (D70 Phase 3): `cache` — prompt-cache breakpoints on the system blocks. Default true.
@@ -83,19 +99,26 @@ export const DECLARED_SCHEMAS = {
         description: "description (default): the posting's text, as always. keywords: job.keywords instead — the posting's " +
           "text is not sent anywhere, even if job.description is present. keywords without job.keywords is a 400." },
       // 1.7.0 (D123 P2): the lean path — the model returns changes to bullets and skills only; code builds the document.
-      tailoring: { type: "string", enum: ["full", "lean"], default: "full",
+      tailoring: { type: "string", enum: ["full", "lean", "payload", "code"], default: "full",
         description: "full (default): the whole résumé is written by the model, as always. lean: Haiku edits bullets and skills " +
           "from job.keywords (required; the posting's text is not sent), one repair call on Sonnet after a failed check, " +
-          "refused edits reverted to the candidate's own text. mode GENERATE only." } },
-      { optional: ["includeSummary", "cache", "jobContext", "tailoring"] }),
-  }, { optional: ["mode", "domainModuleKey", "roleFamily", "domain", "candidate", "profile", "claims", "employers", "options"] }),
+          "refused edits reverted to the candidate's own text. payload (1.8.0): lean's checks plus the job block and the gists; " +
+          "the model rewords first and may write a new bullet a gist supports; no model is called when no bullet can gain. " +
+          "code (1.8.0): no model — Skills order, broader terms, coursework and bullet order by code. mode GENERATE only." },
+      model: { type: "string", enum: ["haiku", "sonnet", "open"],
+        description: "1.8.0 · lean / payload only: the tailoring call's model for this request. open = the service's configured " +
+          "OpenAI-compatible model; a 400 when it is not configured. Absent: the service's configured default." } },
+      { optional: ["includeSummary", "cache", "jobContext", "tailoring", "model"] }),
+  }, { optional: ["mode", "domainModuleKey", "roleFamily", "domain", "candidate", "profile", "claims", "employers", "options", "gists", "coursework"] }),
   GenerateResponse: obj({
     html: str, domainModuleKey: str,
     claimCheck: obj({ ok: { type: "boolean", enum: [true] }, inspected: ref("ClaimInspection") }),
-    tailoring: obj({ mode: enumOf("lean"), model: str, repaired: bool, changed: num,
-      refused: arr(obj({ id: str, kind: str })) }, { description: "1.7.0 · present on a lean answer only. `refused`: edits " +
-      "the checks reverted to the candidate's own text (kinds: number_not_in_bullet, term_wrong_employer, skill_not_supported, " +
-      "bullet_too_long, unreadable_answer)." }),
+    tailoring: obj({ mode: enumOf("lean", "payload", "code"), model: str, repaired: bool, changed: num, added: num, modelCalled: bool,
+      refused: arr(obj({ id: str, kind: str })) }, { optional: ["added", "modelCalled"], description: "1.7.0 · present on an " +
+      "editing answer only. `refused`: edits the checks reverted to the candidate's own text (kinds: number_not_in_bullet, " +
+      "number_dropped, sole_ownership_claimed, term_wrong_employer, skill_not_supported, bullet_too_long, unreadable_answer; " +
+      "1.8.0 adds new_bullet_without_gist, too_many_new_bullets, new_bullet_no_must_have, outside_gist, term_overused). " +
+      "1.8.0: `added` new bullets (payload), `modelCalled` false when code alone tailored (payload / code); model \"none\" then." }),
     usage,
   }, { optional: ["tailoring"], description: "Only ever returned for a document that PASSED the claim guard." }),
 
@@ -104,6 +127,12 @@ export const DECLARED_SCHEMAS = {
     selectedAdditions: { type: "array", maxItems: INPUT_LIMITS.selectedAdditions, items: { type: "string", maxLength: INPUT_LIMITS.selectedAdditionChars } } },
     { optional: ["profile", "selectedAdditions"] }),
   EnhanceResponse: obj({ text: str, usage }),
+  GistsRequest: obj({ baseResumeText: capped(INPUT_LIMITS.baseResumeText, "Over the cap is a 400 — refused, never truncated.") }),
+  GistsResponse: obj({
+    gists: arr(obj({ employer: str, text: str })),
+    numberless: arr(obj({ employer: str, bullet: str })),
+    usage,
+  }, { description: "1.8.0 · `gists`: one per EXPERIENCE entry, keyed by its header line, no numbers; `numberless`: that entry's bullets that state no number, for the caller's optional prompt to add a real one." }),
   ParsePdfRequest: obj({ pdfBase64: str }, { description: "A PDF of at most 10 MB, base64-encoded." }),
   ParsePdfResponse: obj({ text: str, chars: num, usage }),
   FormatRequest: obj({ html: str }),
@@ -166,6 +195,9 @@ export const ENDPOINTS = [
     responses: { 200: ref("GenerateResponse"), 422: E, ...modelErrors } },
   { method: "post", path: "/v1/resumes/enhance", auth: true, cost: "metered", request: ref("EnhanceRequest"),
     responses: { 200: ref("EnhanceResponse"), ...modelErrors } },
+  // 1.8.0 (D123 P6g): the per-employer gists — one Sonnet call, once per base résumé.
+  { method: "post", path: "/v1/resumes/gists", auth: true, cost: "metered", request: ref("GistsRequest"),
+    responses: { 200: ref("GistsResponse"), ...modelErrors } },
   // 1.2.0 (D17): read from the PDF's text layer — free, no model; a scan is a 400.
   { method: "post", path: "/v1/resumes/parse-pdf", auth: true, cost: "free", request: ref("ParsePdfRequest"),
     responses: { 200: ref("ParsePdfResponse"), 400: E, 413: E, ...authErrors, ...limited } },
