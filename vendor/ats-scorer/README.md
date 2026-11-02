@@ -63,6 +63,21 @@ Before it a mechanical posting yielded 0 scorable terms and every non-software e
 generic enough to appear in software postings were left out, so computing scores do not move (the graded corpus's ρ
 is unchanged; see draft's test/d126AtsDisciplines.test.js).
 
+## Vocabulary: every professional field (1.4.0, A111 P2)
+
+Twenty more domains for the fields beyond computing and engineering: accounting and audit, FP&A, consulting, business
+analysis, procurement, compliance (BSA/AML), HR and recruiting, operations, project and general management, digital
+marketing, sales, legal practice, contracts, graphic / visual / product design, writing and editing, PR and
+communications, life-sciences research, laboratory chemistry / QC, and economics. Tools are seeded from O*NET 30.0
+Technology Skills for each SOC group (vendor prefixes dropped; office software used by more than 60 occupations left
+out), practices are the named ones postings ask for (US GAAP, ASC 842, BSA/AML, MEDDIC, AP style, qPCR, HPLC, Stata …).
+Before it, an accountant, compliance, sales, writing, life-sciences or economics posting yielded fewer than 4 scorable
+terms and was declined. ⛔ The vocabulary is ONE pooled set, so a new term that a software posting also uses would move
+that posting's score: every new term was measured against 1,241 real computing postings, 43 engineering postings and
+the graded 30 and kept only when it occurs in none of them, and every new domain's verbs are verbs the registry already
+had. Measured: 0 of 1,284 computing / engineering reports changed in any field; the graded 30 score identically
+(see draft's test/a111ProfessionalVocabulary.test.js).
+
 ## How a repository consumes it
 
 - **draft** holds the source of truth and depends on it as `"file:packages/ats-scorer"`.

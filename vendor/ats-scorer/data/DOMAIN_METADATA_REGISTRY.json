@@ -725,5 +725,460 @@
       "Cadence Virtuoso", "Cadence Innovus", "Cadence Allegro", "Synopsys Design Compiler", "Synopsys PrimeTime",
       "Synopsys VCS", "Mentor Questa", "Vivado", "Quartus", "Altium Designer", "HyperLynx", "JTAG", "Tcl", "Perl", "Python"
     ]
+  },
+  "accounting_audit": {
+    "label": "Accounting and Audit",
+    "roleFamily": "finance",
+    "suggestedTitles": [
+      "Accountant", "Senior Accountant", "Staff Accountant", "Auditor", "Internal Auditor", "Audit Associate",
+      "Tax Accountant", "Accounting Manager", "Controller"
+    ],
+    "keywords": [
+      "US GAAP", "account reconciliations", "balance sheet reconciliations", "journal entries", "accruals",
+      "fixed assets", "ASC 842", "SOX controls", "SOX testing", "external audit", "audit workpapers", "intercompany",
+      "sales and use tax", "tax provision", "tax returns", "cost accounting", "CPA", "accounts payable",
+      "accounts receivable", "prepaids", "PBC", "close process", "bank reconciliations", "lease accounting",
+      "audit fieldwork", "ASC 606", "payroll", "indirect tax", "revenue accounting", "VAT", "GST", "audit support",
+      "accounting close"
+    ],
+    "actionVerbs": [
+      "Reconciled", "Prepared", "Reviewed", "Audited", "Closed", "Analyzed", "Documented", "Tested", "Implemented",
+      "Reduced", "Managed", "Improved", "Reported", "Streamlined", "Led"
+    ],
+    "tools": [
+      "BlackLine", "NetSuite", "QuickBooks", "Sage Intacct", "FloQast", "Avalara", "CaseWare", "AuditBoard", "Workiva",
+      "Oracle Financials", "SAP FICO"
+    ]
+  },
+  "financial_analysis": {
+    "label": "Financial Planning and Analysis",
+    "roleFamily": "finance",
+    "suggestedTitles": [
+      "Financial Analyst", "Senior Financial Analyst", "FP&A Analyst", "FP&A Manager", "Investment Analyst",
+      "Credit Analyst", "Equity Research Analyst", "Corporate Development Analyst", "Treasury Analyst"
+    ],
+    "keywords": [
+      "driver-based forecasting", "driver-based models", "rolling forecast", "annual operating plan",
+      "budget-to-actual", "variance analysis", "management reporting", "three-statement model", "NPV", "IRR",
+      "capital budgeting", "scenario analysis", "sensitivity analysis", "comparable company analysis",
+      "precedent transactions", "DCF", "LBO", "valuation", "credit analysis", "equity research", "working capital",
+      "CFA", "financial modelling", "monthly forecast", "cash flow forecasting", "financial models",
+      "corporate finance", "long-range plan", "opex", "capex", "unit economics", "board reporting",
+      "headcount forecasting", "budgeting and forecasting"
+    ],
+    "actionVerbs": [
+      "Analyzed", "Modeled", "Forecasted", "Built", "Presented", "Evaluated", "Reported", "Quantified", "Identified",
+      "Reduced", "Improved", "Partnered", "Delivered", "Automated", "Led"
+    ],
+    "tools": [
+      "Anaplan", "Adaptive Insights", "Planful", "Vena", "Hyperion", "Essbase", "FactSet", "PitchBook", "Capital IQ",
+      "Bloomberg", "Power BI", "Tableau"
+    ]
+  },
+  "consulting_strategy": {
+    "label": "Management Consulting and Strategy",
+    "roleFamily": "operations",
+    "suggestedTitles": [
+      "Management Consultant", "Strategy Consultant", "Associate Consultant", "Senior Consultant", "Strategy Analyst",
+      "Engagement Manager", "Corporate Strategy Manager", "Business Consultant"
+    ],
+    "keywords": [
+      "market sizing", "issue trees", "operating model design", "cost transformation", "commercial due diligence",
+      "post-merger integration", "synergy analysis", "customer interviews", "proposal writing", "corporate strategy",
+      "case teams", "strategy engagements", "client executives", "competitive landscape analysis",
+      "profitability analysis", "storylines", "competitive analysis", "executive presentations",
+      "operational due diligence", "client deliverables", "executive readouts", "strategy consulting",
+      "transformation programs", "client relationships", "MBA"
+    ],
+    "actionVerbs": [
+      "Analyzed", "Structured", "Synthesized", "Presented", "Advised", "Led", "Built", "Identified", "Delivered",
+      "Facilitated", "Quantified", "Developed", "Managed", "Improved", "Researched"
+    ],
+    "tools": [
+      "Alteryx", "think-cell", "Capital IQ", "PitchBook", "Tableau", "Power BI", "Mekko Graphics", "Statista",
+      "Euromonitor", "IBISWorld", "Qualtrics"
+    ]
+  },
+  "business_analysis": {
+    "label": "Business Analysis",
+    "roleFamily": "operations",
+    "suggestedTitles": [
+      "Business Analyst", "Senior Business Analyst", "Business Systems Analyst", "Process Analyst",
+      "Requirements Analyst", "Functional Analyst", "Business Process Analyst", "Lead Business Analyst"
+    ],
+    "keywords": [
+      "requirements elicitation", "business requirements documents", "BRD", "process mapping", "BPMN", "gap analysis",
+      "stakeholder interviews", "business process modeling", "CBAP", "ECBA", "process maps", "requirements workshops",
+      "as-is and to-be", "functional specifications", "user acceptance testing", "process improvement", "user stories",
+      "current-state", "traceability matrix", "swimlane diagrams", "SIPOC", "to-be processes"
+    ],
+    "actionVerbs": [
+      "Documented", "Analyzed", "Facilitated", "Coordinated", "Identified", "Validated", "Tested", "Educated",
+      "Improved", "Delivered", "Led", "Defined", "Prioritised", "Aligned", "Streamlined"
+    ],
+    "tools": [
+      "Visio", "Lucidchart", "Balsamiq", "Jira", "Confluence", "Power BI", "Tableau"
+    ]
+  },
+  "procurement_purchasing": {
+    "label": "Procurement and Purchasing",
+    "roleFamily": "operations",
+    "suggestedTitles": [
+      "Buyer", "Senior Buyer", "Purchasing Agent", "Procurement Specialist", "Sourcing Manager", "Category Manager",
+      "Purchasing Manager", "Strategic Sourcing Manager", "Procurement Manager"
+    ],
+    "keywords": [
+      "RFQ", "RFP", "RFx", "supplier negotiation", "spend analysis", "purchase orders", "category management", "MRO",
+      "indirect procurement", "direct materials", "approved supplier list", "should-cost", "CPSM", "CPIM", "CSCP",
+      "MRP", "procurement", "vendor management", "supplier business reviews", "cost savings initiatives",
+      "total cost of ownership", "procurement process", "demand planning"
+    ],
+    "actionVerbs": [
+      "Procured", "Negotiated", "Reduced", "Managed", "Evaluated", "Qualified", "Analyzed", "Led", "Implemented",
+      "Improved", "Delivered", "Specified", "Monitored", "Tracked", "Standardized"
+    ],
+    "tools": [
+      "SAP Ariba", "Ariba", "Coupa", "Jaggaer", "Ivalua", "Zycus", "GEP SMART", "SAP", "Oracle Procurement"
+    ]
+  },
+  "compliance_risk": {
+    "label": "Compliance and Financial Crimes",
+    "roleFamily": "finance",
+    "suggestedTitles": [
+      "Compliance Analyst", "Compliance Officer", "AML Analyst", "KYC Analyst", "Compliance Manager",
+      "Sanctions Analyst", "Risk and Compliance Analyst"
+    ],
+    "keywords": [
+      "BSA/AML", "CDD", "EDD", "customer due diligence", "SAR filing", "SAR narratives", "OFAC sanctions",
+      "Bank Secrecy Act", "USA PATRIOT Act", "FINRA", "regulatory exams", "compliance testing",
+      "compliance monitoring", "CAMS", "CRCM", "FCPA", "anti-bribery", "unusual activity", "high-risk customers",
+      "alert review", "regulatory compliance", "transaction monitoring", "SAR", "alert investigations",
+      "watchlist screening", "SAR decisioning", "risk ratings"
+    ],
+    "actionVerbs": [
+      "Investigated", "Reviewed", "Escalated", "Monitored", "Drafted", "Documented", "Tested", "Assessed", "Reported",
+      "Implemented", "Educated", "Identified", "Mitigated", "Resolved", "Led"
+    ],
+    "tools": [
+      "Actimize", "Verafin", "World-Check", "Bridger", "ComplyAdvantage", "MetricStream", "Hummingbird", "Alessa",
+      "Unit21", "Abrigo"
+    ]
+  },
+  "hr_generalist_talent": {
+    "label": "HR Generalist and Talent Acquisition",
+    "roleFamily": "hr",
+    "suggestedTitles": [
+      "HR Generalist", "HR Business Partner", "HR Specialist", "Recruiter", "Talent Acquisition Specialist",
+      "Benefits Specialist", "Compensation Analyst", "HR Coordinator", "People Partner", "HR Manager"
+    ],
+    "keywords": [
+      "employee relations", "workplace investigations", "performance management", "leave administration",
+      "leaves of absence", "FMLA", "ADA", "FLSA", "candidate sourcing", "talent acquisition", "compensation analysis",
+      "open enrollment", "SHRM-CP", "SHRM-SCP", "PHR", "SPHR", "payroll processing", "exit interviews",
+      "workers' compensation", "onboarding", "HRIS", "employment law", "succession planning", "benefits enrollment",
+      "recruiting strategy", "talent pipeline", "technical recruiting", "closing candidates",
+      "recruiting coordination", "full-cycle recruitment", "end-to-end recruiting", "Boolean search",
+      "interview scheduling", "instructional design", "training programs"
+    ],
+    "actionVerbs": [
+      "Recruited", "Advised", "Counselled", "Administered", "Investigated", "Resolved", "Partnered", "Implemented",
+      "Reduced", "Educated", "Managed", "Improved", "Led", "Coordinated", "Facilitated"
+    ],
+    "tools": [
+      "Workday", "ADP", "UKG", "Paycom", "Paylocity", "iCIMS", "Taleo", "Gusto", "Rippling", "Dayforce", "BambooHR",
+      "SuccessFactors"
+    ]
+  },
+  "operations_management": {
+    "label": "Operations Management",
+    "roleFamily": "operations",
+    "suggestedTitles": [
+      "Operations Manager", "Senior Operations Manager", "Director of Operations", "Plant Manager",
+      "Distribution Center Manager", "Warehouse Manager", "Fulfillment Center Manager"
+    ],
+    "keywords": [
+      "warehouse operations", "distribution center", "fulfillment operations", "labor planning", "inventory control",
+      "cycle counts", "OSHA", "OSHA compliance", "kaizen", "5S", "units per hour", "S&OP", "order fulfillment",
+      "plant operations", "Lean Six Sigma", "Green Belt", "Black Belt", "OEE", "SMED", "lean", "six sigma",
+      "inventory management", "logistics", "safety culture"
+    ],
+    "actionVerbs": [
+      "Managed", "Led", "Reduced", "Improved", "Streamlined", "Implemented", "Increased", "Optimized", "Coordinated",
+      "Standardized", "Planned", "Educated", "Delivered", "Launched", "Oversaw"
+    ],
+    "tools": [
+      "Manhattan WMS", "Blue Yonder", "WMS", "SAP EWM", "Kronos", "UKG", "SAP", "NetSuite"
+    ]
+  },
+  "project_management": {
+    "label": "Project and Program Management",
+    "roleFamily": "pm",
+    "suggestedTitles": [
+      "Project Manager", "Senior Project Manager", "Program Manager", "Project Coordinator", "PMO Analyst",
+      "Project Lead", "Portfolio Manager", "Project Management Specialist"
+    ],
+    "keywords": [
+      "PMP", "PMBOK", "PMI", "earned value management", "critical path method", "work breakdown structure", "WBS",
+      "RAID logs", "stage-gate", "project charter", "project closeout", "steering committee", "steering committees",
+      "scope management", "schedule management", "budget management", "CAPM", "PgMP", "PRINCE2", "change requests",
+      "project portfolio", "PMO", "integrated schedules"
+    ],
+    "actionVerbs": [
+      "Managed", "Led", "Delivered", "Coordinated", "Planned", "Tracked", "Reported", "Facilitated", "Escalated",
+      "Resolved", "Aligned", "Implemented", "Reduced", "Launched", "Oversaw"
+    ],
+    "tools": [
+      "MS Project", "Microsoft Project", "Smartsheet", "Primavera P6", "Wrike", "Clarity PPM", "Planview",
+      "Monday.com"
+    ]
+  },
+  "general_management": {
+    "label": "General and Business Management",
+    "roleFamily": "operations",
+    "suggestedTitles": [
+      "General Manager", "Assistant General Manager", "Branch Manager", "Regional Manager", "Hotel General Manager",
+      "Practice Manager", "Executive Director", "Business Manager"
+    ],
+    "keywords": [
+      "P&L management", "P&L responsibility", "guest satisfaction", "multi-site operations", "branch operations",
+      "brand standards", "food and beverage", "front office", "RevPAR", "labor costs", "hospitality management", "P&L",
+      "department heads", "guest satisfaction scores", "operating budget", "inventory shrink", "labor scheduling",
+      "franchise operations", "clinic operations", "practice management", "store operations", "sales growth"
+    ],
+    "actionVerbs": [
+      "Led", "Managed", "Grew", "Reduced", "Improved", "Recruited", "Delivered", "Increased", "Built", "Launched",
+      "Oversaw", "Executed", "Planned", "Drove", "Aligned"
+    ],
+    "tools": [
+      "Opera PMS", "Toast", "OpenTable", "Delphi", "Square POS", "Aloha POS", "HotSOS", "Kronos", "ADP", "Toast POS"
+    ]
+  },
+  "digital_marketing": {
+    "label": "Digital and Growth Marketing",
+    "roleFamily": "marketing",
+    "suggestedTitles": [
+      "Digital Marketing Manager", "Growth Marketing Manager", "Performance Marketing Manager", "Marketing Manager",
+      "SEO Specialist", "Lifecycle Marketing Manager", "Brand Manager", "Product Marketing Manager",
+      "Marketing Coordinator"
+    ],
+    "keywords": [
+      "paid social", "keyword research", "CPA", "media buying", "media planning", "brand management",
+      "market segmentation", "influencer marketing", "affiliate marketing", "programmatic advertising",
+      "display advertising", "retargeting", "on-page SEO", "SEO", "SEM", "email marketing", "content marketing",
+      "marketing attribution", "product marketing", "paid media", "lifecycle campaigns", "email flows",
+      "landing page tests", "GA4", "conversion rate optimization", "brand awareness"
+    ],
+    "actionVerbs": [
+      "Launched", "Grew", "Managed", "Optimized", "Increased", "Reduced", "Built", "Ran", "Tested", "Planned",
+      "Executed", "Analyzed", "Drove", "Led", "Scaled"
+    ],
+    "tools": [
+      "Google Ads", "Meta Ads", "Google Analytics 4", "Klaviyo", "Marketo", "Pardot", "HubSpot", "Semrush", "Ahrefs",
+      "Moz", "Screaming Frog", "Hootsuite", "Sprout Social", "LinkedIn Ads", "Salesforce Marketing Cloud", "Mailchimp"
+    ]
+  },
+  "sales": {
+    "label": "Sales and Business Development",
+    "roleFamily": "sales",
+    "suggestedTitles": [
+      "Account Executive", "Senior Account Executive", "Enterprise Account Executive", "Sales Representative",
+      "Territory Sales Representative", "Inside Sales Representative", "Sales Development Representative",
+      "Business Development Representative", "Account Manager", "Sales Manager", "Business Development Manager"
+    ],
+    "keywords": [
+      "cold calling", "quota attainment", "outside sales", "inside sales", "solution selling", "consultative selling",
+      "MEDDIC", "MEDDPICC", "SPIN selling", "Challenger Sale", "value selling", "new business development",
+      "lead qualification", "upselling", "cross-selling", "President's Club", "mutual action plans", "sales calls",
+      "sales targets", "pipeline generation", "booked meetings", "closing experience", "prospecting",
+      "sales methodology", "closing deals", "sales forecasting", "product demos", "product demonstrations",
+      "discovery calls", "cold outreach", "full-cycle sales", "territory management"
+    ],
+    "actionVerbs": [
+      "Closed", "Grew", "Negotiated", "Built", "Managed", "Qualified", "Presented", "Delivered", "Increased",
+      "Launched", "Secured", "Partnered", "Drove", "Executed", "Led"
+    ],
+    "tools": [
+      "Salesforce", "Salesloft", "LinkedIn Sales Navigator", "ZoomInfo", "Clari", "Seismic", "Highspot", "Pipedrive",
+      "HubSpot"
+    ]
+  },
+  "legal_practice": {
+    "label": "Legal Practice and Litigation",
+    "roleFamily": "legal",
+    "suggestedTitles": [
+      "Attorney", "Associate Attorney", "Paralegal", "Litigation Paralegal", "Legal Assistant", "Corporate Counsel",
+      "Senior Counsel", "Associate General Counsel"
+    ],
+    "keywords": [
+      "civil litigation", "commercial litigation", "e-discovery", "eDiscovery", "privilege logs",
+      "document productions", "depositions", "pleadings", "motion practice", "legal writing", "trial preparation",
+      "e-filing", "cite-checking", "Bluebook", "subpoenas", "interrogatories", "docketing", "bar admission", "J.D.",
+      "venture capital financings", "entity formation", "board resolutions", "disclosure schedules",
+      "purchase agreements", "corporate transactions", "litigation", "legal research", "corporate governance", "M&A",
+      "merger agreements", "discovery requests", "trial binders", "litigation calendar", "litigation support",
+      "legal drafting"
+    ],
+    "actionVerbs": [
+      "Drafted", "Negotiated", "Advised", "Researched", "Reviewed", "Prepared", "Submitted", "Managed", "Counselled",
+      "Coordinated", "Led", "Resolved", "Assessed", "Documented", "Secured"
+    ],
+    "tools": [
+      "Westlaw", "LexisNexis", "Relativity", "PACER", "iManage", "NetDocuments", "Clio", "Everlaw", "CaseMap",
+      "Practical Law", "Bloomberg Law"
+    ]
+  },
+  "contracts_management": {
+    "label": "Contracts and Legal Operations",
+    "roleFamily": "legal",
+    "suggestedTitles": [
+      "Contracts Manager", "Contract Administrator", "Contracts Specialist", "Legal Operations Manager",
+      "Commercial Counsel", "Senior Contracts Manager"
+    ],
+    "keywords": [
+      "contract drafting", "contract review", "contract negotiation", "redlining", "master services agreements",
+      "MSAs", "NDAs", "clause library", "contract templates", "indemnification", "limitation of liability",
+      "contract administration", "DFARS", "data processing agreements", "licensing agreements",
+      "clinical trial agreements", "commercial agreements", "obligations and renewals", "contract terms",
+      "legal drafting"
+    ],
+    "actionVerbs": [
+      "Drafted", "Negotiated", "Reviewed", "Managed", "Administered", "Tracked", "Escalated", "Standardized",
+      "Reduced", "Educated", "Advised", "Built", "Implemented", "Led", "Documented"
+    ],
+    "tools": [
+      "Ironclad", "DocuSign", "Icertis", "Agiloft", "Conga", "LinkSquares", "Evisort", "SpotDraft", "ContractWorks"
+    ]
+  },
+  "graphic_visual_design": {
+    "label": "Graphic, Visual and Product Design",
+    "roleFamily": "design",
+    "suggestedTitles": [
+      "Graphic Designer", "Senior Graphic Designer", "Visual Designer", "Brand Designer", "Product Designer",
+      "UX Designer", "UI/UX Designer", "Art Director", "Motion Designer", "Production Designer"
+    ],
+    "keywords": [
+      "brand identity", "layout design", "print production", "motion graphics", "logo design", "art direction",
+      "photo retouching", "brand guidelines", "storyboarding", "wireframes", "high-fidelity mockups",
+      "journey mapping", "heuristic evaluation", "WCAG", "interaction design", "visual design", "usability testing",
+      "design systems", "user research", "design critiques", "graphic design", "UX research", "illustration"
+    ],
+    "actionVerbs": [
+      "Designed", "Created", "Prototyped", "Researched", "Tested", "Iterated", "Launched", "Partnered", "Presented",
+      "Built", "Improved", "Led", "Defined", "Delivered", "Developed"
+    ],
+    "tools": [
+      "Figma", "Illustrator", "InDesign", "After Effects", "Premiere Pro", "Adobe Creative Suite",
+      "Adobe Creative Cloud", "Lightroom", "Cinema 4D", "Procreate", "Sketch", "Maze"
+    ]
+  },
+  "writing_content": {
+    "label": "Writing, Editing and Content",
+    "roleFamily": "marketing",
+    "suggestedTitles": [
+      "Content Writer", "Copywriter", "Senior Copywriter", "Content Strategist", "Editor", "Copy Editor",
+      "Content Marketing Manager", "Managing Editor"
+    ],
+    "keywords": [
+      "copywriting", "content writing", "long-form content", "editorial calendar", "AP style",
+      "Chicago Manual of Style", "proofreading", "copyediting", "copy editing", "content strategy", "brand voice",
+      "ghostwriting", "fact-checking", "SEO writing", "long-form blog posts", "customer case studies",
+      "content marketing", "published articles", "line editing", "developmental editing", "editorial standards",
+      "freelance writers", "bylined articles", "thought leadership content"
+    ],
+    "actionVerbs": [
+      "Created", "Researched", "Planned", "Reported", "Increased", "Grew", "Managed", "Launched", "Led", "Delivered",
+      "Developed", "Presented", "Reviewed", "Documented", "Coordinated"
+    ],
+    "tools": [
+      "WordPress", "Grammarly", "Clearscope", "MarketMuse", "Surfer SEO", "Semrush", "HubSpot", "InDesign",
+      "Contently", "Yoast"
+    ]
+  },
+  "public_relations_communications": {
+    "label": "Public Relations and Communications",
+    "roleFamily": "marketing",
+    "suggestedTitles": [
+      "Communications Manager", "PR Manager", "Public Relations Specialist", "Media Relations Manager",
+      "Corporate Communications Manager", "Communications Specialist", "Internal Communications Manager"
+    ],
+    "keywords": [
+      "media relations", "public relations", "press releases", "crisis communications", "internal communications",
+      "corporate communications", "media pitching", "earned media", "speechwriting", "talking points", "press kits",
+      "media monitoring", "share of voice", "community relations", "social media strategy", "reputation management",
+      "bylines", "AP style", "PR campaigns", "press release"
+    ],
+    "actionVerbs": [
+      "Created", "Secured", "Managed", "Led", "Developed", "Executed", "Advised", "Launched", "Grew", "Planned",
+      "Coordinated", "Delivered", "Presented", "Increased", "Partnered"
+    ],
+    "tools": [
+      "Meltwater", "Muck Rack", "Hootsuite", "Sprout Social", "PR Newswire", "Business Wire", "Brandwatch",
+      "Talkwalker"
+    ]
+  },
+  "life_sciences_research": {
+    "label": "Life Sciences Research",
+    "roleFamily": "science",
+    "suggestedTitles": [
+      "Scientist", "Senior Scientist", "Associate Scientist", "Research Associate", "Postdoctoral Fellow",
+      "Principal Scientist", "Staff Scientist", "Research Scientist, Biology"
+    ],
+    "keywords": [
+      "cell culture", "flow cytometry", "ELISA", "qPCR", "PCR", "Western blot", "assay development",
+      "cell-based assays", "molecular cloning", "CRISPR", "protein purification", "immunohistochemistry",
+      "confocal microscopy", "next-generation sequencing", "NGS", "RNA-seq", "mammalian cell culture", "primary cells",
+      "in vivo studies", "animal models", "electronic lab notebook", "peer-reviewed publications", "grant writing",
+      "IACUC", "aseptic technique", "cell lines", "assays", "mass spectrometry", "lab notebook"
+    ],
+    "actionVerbs": [
+      "Designed", "Developed", "Characterized", "Optimized", "Analyzed", "Presented", "Validated", "Identified", "Led",
+      "Collaborated", "Researched", "Quantified", "Documented", "Evaluated", "Prepared"
+    ],
+    "tools": [
+      "GraphPad Prism", "FlowJo", "ImageJ", "Fiji", "Benchling", "SnapGene", "Geneious", "ChemDraw", "BioRender"
+    ]
+  },
+  "laboratory_chemistry_qc": {
+    "label": "Laboratory, Chemistry and Quality Control",
+    "roleFamily": "science",
+    "suggestedTitles": [
+      "QC Chemist", "Analytical Chemist", "Chemist", "Lab Scientist", "Formulation Scientist", "Research Chemist"
+    ],
+    "keywords": [
+      "HPLC", "UPLC", "GC-MS", "LC-MS", "dissolution testing", "stability testing", "method validation",
+      "method development", "method transfer", "OOS investigations", "OOS", "OOT", "GLP", "GMP", "cGMP", "USP",
+      "ICH guidelines", "good documentation practices", "wet chemistry", "titration", "Karl Fischer", "FTIR", "UV-Vis",
+      "NMR", "spectroscopy", "chromatography", "analytical chemistry", "sample preparation", "sterility testing",
+      "endotoxin testing", "instrument calibration", "ISO 17025", "release testing", "gas chromatography"
+    ],
+    "actionVerbs": [
+      "Analyzed", "Tested", "Validated", "Investigated", "Documented", "Developed", "Transferred", "Reviewed",
+      "Prepared", "Educated", "Reduced", "Qualified", "Characterized", "Verified", "Resolved"
+    ],
+    "tools": [
+      "ChemStation", "OpenLab", "Chromeleon", "LabWare", "STARLIMS", "LIMS", "MassHunter", "TopSpin"
+    ]
+  },
+  "economics_research": {
+    "label": "Economics and Policy Research",
+    "roleFamily": "science",
+    "suggestedTitles": [
+      "Economist", "Senior Economist", "Research Economist", "Labor Economist", "Staff Economist",
+      "Principal Economist", "Economist, Litigation Consulting"
+    ],
+    "keywords": [
+      "applied econometrics", "econometric analysis", "panel data", "structural estimation", "damages estimation",
+      "industrial organization", "labor economics", "macroeconomics", "microeconomics", "economic forecasting",
+      "antitrust economics", "general equilibrium", "economic impact analysis", "expert reports",
+      "economic consulting", "estimate damages", "time series econometrics", "economic research", "microdata",
+      "merger simulation", "price indices", "labor markets"
+    ],
+    "actionVerbs": [
+      "Estimated", "Analyzed", "Modeled", "Presented", "Designed", "Forecasted", "Quantified", "Advised", "Researched",
+      "Built", "Led", "Evaluated", "Oversaw", "Developed", "Reviewed"
+    ],
+    "tools": [
+      "Stata", "EViews", "SPSS", "Dynare", "Haver Analytics", "MATLAB", "R", "Python", "GAMS", "GAUSS", "IPUMS"
+    ]
   }
 }
