@@ -190,6 +190,7 @@ attempts were inside it (2 = the SDK retried once).
 | `POST /v1/ats/score` | `{ job, resumeText, signalProfile?, domainProfile?, claims?, termWeights?, synonyms? }` → `{ report }` — with no `signalProfile`, years (dated roles) and a stated clearance are read from `resumeText` and `report.facts_from_text` says what was read; citizenship never is (1.4.0, A81) | no | free |
 | `POST /v1/resumes/generate` | see below → `{ html, domainModuleKey, claimCheck, usage[] }` | yes | metered |
 | `POST /v1/resumes/enhance` | `{ resumeText, profile: { name, roleFamily, domain }, selectedAdditions[] }` → `{ text, usage[] }` | yes | metered |
+| `POST /v1/resumes/gists` | `{ baseResumeText }` → `{ gists: [{ employer, text }], numberless: [{ employer, bullet }], usage[] }` — the per-employer gists (1.8.0, D123 P6g), one Sonnet call; the caller stores them and sends them back | yes | metered |
 | `POST /v1/resumes/parse-pdf` | `{ pdfBase64 }` (≤ 10 MB) → `{ text, chars, usage[] }` — the PDF's own text layer (`usage` always empty); a scan, with no text layer, is a `400` | no (since 1.2.0, D17) | free |
 | `POST /mcp` | JSON-RPC 2.0 — MCP Streamable HTTP, stateless; tools below | no | free |
 | `GET` / `DELETE /mcp` | `405` — no SSE stream, no session | no | free |
@@ -231,6 +232,21 @@ the generation prompt and not to the classifier — even if `job.description` is
 own scorer. It should never carry a term that is missing AND unclaimed. `"keywords"` without
 `job.keywords`, an unknown field or an over-long list is a `400` before any model call. The claim guard
 is unchanged.
+
+`options.tailoring` (1.7.0 / 1.8.0, D123) — `"full"` (**the default**: the whole résumé from the model, as always),
+`"lean"` (the model returns JSON edits to bullets and skills; code builds the document), `"payload"` (lean's checks plus a
+job block — `job.keywords.mustHave`, `niceToHave`, the posting's verbs ranked, its level, up to 8 responsibilities — and the
+caller's per-employer `gists`; the model rewords the candidate's own bullets first and may write a NEW bullet only for a
+must-have term the employer's gist covers, with no number; at most 2 bold terms per bullet, no term in more than 2 bullets;
+no model is called when no bullet can gain) or `"code"` (no model at all: Skills rows ordered by what the posting stresses,
+`job.keywords.broader` terms placed beside the skill that implies them, claimed terms added, a Relevant Coursework row from
+`coursework`, bullets ordered by relevance). The editing modes need `job.keywords` and mode `GENERATE`; the answer carries
+`tailoring: { mode, model, repaired, changed, refused[], added?, modelCalled? }`.
+
+`options.model` (1.8.0) — `"haiku" | "sonnet" | "open"`, lean or payload only: the tailoring call's model for this
+request. `open` is the OpenAI-compatible model this service is configured with (`RM_OPENAI_COMPAT_BASE_URL`,
+`RM_OPENAI_COMPAT_API_KEY`, `RM_OPEN_MODEL`); unconfigured, it is a `400` before any call. Absent: the configured default.
+A failed check is still repaired once on Sonnet.
 
 ### Input caps on the model routes (A97, contract 1.6.0)
 

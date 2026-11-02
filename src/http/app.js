@@ -11,7 +11,7 @@
 // client — never a body, a query string or a header value. The error handler logs the error's code
 // and name, never the request, and never express's JSON parse error `body`, which echoes the input.
 import express from "express";
-import { generateResume, InvalidRequestError } from "../generation/generate.js";
+import { generateResume, generateGists, InvalidRequestError } from "../generation/generate.js";
 import { enhanceResume } from "../generation/enhance.js";
 import { extractPdfText } from "../parsing/extractPdfText.js";
 import { scoreAts, formatResume } from "../tools/deterministic.js";
@@ -132,6 +132,8 @@ export function createApp({ anthropic = null, version = {}, log = defaultLog, en
   // ── model-backed ─────────────────────────────────────────────────────────────────────────────
   app.post("/v1/resumes/generate", client, json, metered("resumes.generate", req => generateResume(anthropic, req.body || {}, { env })));
   app.post("/v1/resumes/enhance", client, json, metered("resumes.enhance", req => enhanceResume(anthropic, req.body || {})));
+  // 1.8.0 (D123 P6g): the per-employer gists, built once per base résumé.
+  app.post("/v1/resumes/gists", client, json, metered("resumes.gists", req => generateGists(anthropic, req.body || {})));
 
   // ── the site (A54) and a person's routes (A57) ──────────────────────────────────────────────
   app.use("/v1/site", siteRoutes({ store, anthropic, env, metering, ...siteOptions }));

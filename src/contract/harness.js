@@ -152,6 +152,17 @@ export const SCENARIOS = [
   { name: "enhance: upstream failure", route: "POST /v1/resumes/enhance", body: { resumeText: "x" }, model: permanent, status: 502 },
   { name: "enhance: no model key", route: "POST /v1/resumes/enhance", body: { resumeText: "x" }, model: "none", status: 503 },
 
+  // gists — metered (1.8.0, D123 P6g): one Sonnet call per base résumé.
+  { name: "gists", route: "POST /v1/resumes/gists", body: { baseResumeText: BASE_RESUME }, model: '{"e1":"Built backend services for an online store."}', status: 200,
+    expect: b => (Array.isArray(b.gists) && Array.isArray(b.numberless) && Array.isArray(b.usage)) || "expected gists, numberless and usage" },
+  { name: "gists: REAL", route: "POST /v1/resumes/gists", body: { baseResumeText: BASE_RESUME }, status: 200, live: true, metered: true, inProcess: false },
+  { name: "gists: missing baseResumeText", route: "POST /v1/resumes/gists", body: {}, status: 400, live: true },
+  { name: "gists: no token", route: "POST /v1/resumes/gists", auth: "none", body: {}, status: 401, live: true },
+  { name: "gists: oversize", route: "POST /v1/resumes/gists", raw: JSON.stringify({ baseResumeText: OVERSIZE }), status: 413 },
+  { name: "gists: limit refused", route: "POST /v1/resumes/gists", service: "refuse-limits", body: { baseResumeText: BASE_RESUME }, status: 429 },
+  { name: "gists: upstream failure", route: "POST /v1/resumes/gists", body: { baseResumeText: BASE_RESUME }, model: permanent, status: 502 },
+  { name: "gists: no model key", route: "POST /v1/resumes/gists", body: { baseResumeText: BASE_RESUME }, model: "none", status: 503 },
+
   // parse-pdf — free since 1.2.0 (D17): the PDF's own text layer, no model. The model-failure cases
   // (upstream failure, a rejected document, no key, the client limit) went with the model.
   { name: "parse-pdf reads the text layer", route: "POST /v1/resumes/parse-pdf", body: { pdfBase64: TINY_PDF_BASE64 }, status: 200, live: true,
