@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Résumé editor — Resume Master</title>
+  <meta name="description" content="Edit a résumé section by section in your browser: fonts, size, spacing and margins, each section edited in place and reordered by dragging. Nothing is uploaded.">
+  <link rel="canonical" href="https://resumemaster.one/editor/">
+  <link rel="stylesheet" href="/editor/editor.css">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <script type="module" src="/editor/editor.js"></script>
+</head>
+<body>
+  <!-- D157: the tool is borderless — only its options and the résumé, on the theme's background. -->
+  <div class="bar" role="toolbar" aria-label="Résumé tools" hidden>
+    <div class="grp"><select id="font" aria-label="Font"></select></div>
+    <span class="sep" aria-hidden="true"></span>
+    <div class="grp" aria-label="Text size">
+      <button id="size-down" class="ib" aria-label="Smaller text" title="Smaller"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button>
+      <span class="v" id="size-value" aria-live="polite">8.5</span>
+      <button id="size-up" class="ib" aria-label="Larger text" title="Larger"><svg viewBox="0 0 24 24"><path d="M6 12h12M12 6v12"/></svg></button>
+    </div>
+    <span class="sep" aria-hidden="true"></span>
+    <div class="grp" aria-label="Line spacing">
+      <button data-spacing="tight" class="ib" title="Tight lines" aria-label="Tight lines"><svg viewBox="0 0 24 24"><path d="M5 9h14M5 12h14M5 15h14"/></svg></button>
+      <button data-spacing="normal" class="ib" title="Normal lines" aria-label="Normal lines"><svg viewBox="0 0 24 24"><path d="M5 7.5h14M5 12h14M5 16.5h14"/></svg></button>
+      <button data-spacing="airy" class="ib" title="Airy lines" aria-label="Airy lines"><svg viewBox="0 0 24 24"><path d="M5 6h14M5 12h14M5 18h14"/></svg></button>
+    </div>
+    <span class="sep" aria-hidden="true"></span>
+    <div class="grp" aria-label="Margins">
+      <button data-margin="narrow" class="ib" title="Narrow margins" aria-label="Narrow margins"><svg viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="16" rx="1.5"/><path d="M7 8h10M7 11h10M7 14h10"/></svg></button>
+      <button data-margin="normal" class="ib" title="Normal margins" aria-label="Normal margins"><svg viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="16" rx="1.5"/><path d="M8.5 8h7M8.5 11h7M8.5 14h7"/></svg></button>
+      <button data-margin="wide" class="ib" title="Wide margins" aria-label="Wide margins"><svg viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="16" rx="1.5"/><path d="M10 8h4M10 11h4M10 14h4"/></svg></button>
+    </div>
+    <span class="sep" aria-hidden="true"></span>
+    <div class="grp">
+      <button id="cmd-bold" class="ib" aria-label="Bold" title="Bold"><b>B</b></button>
+      <button id="cmd-italic" class="ib" aria-label="Italic" title="Italic"><i class="serif-i">I</i></button>
+      <button id="cmd-bullets" class="ib" aria-label="Bullets" title="Bullets"><svg viewBox="0 0 24 24"><circle cx="6" cy="8" r="1"/><circle cx="6" cy="12" r="1"/><circle cx="6" cy="16" r="1"/><path d="M10 8h9M10 12h9M10 16h9"/></svg></button>
+    </div>
+    <span class="sep" aria-hidden="true"></span>
+    <div class="grp"><button id="review-changes" aria-pressed="false" class="txt">Review changes</button></div>
+    <span class="saved" id="saved" role="status">Saved</span>
+    <div class="grp"><button id="download-html" class="txt">HTML</button></div>
+    <div class="grp cta"><button id="download-pdf">Download PDF</button></div>
+  </div>
+
+  <div class="wrap" hidden>
+    <aside class="menu" aria-label="Sections">
+      <p class="eb" id="eyebrow">Your résumé</p>
+      <h2 class="mt" id="menu-title">Résumé editor</h2>
+      <p class="ms" id="menu-sub"></p>
+      <h3>Sections</h3>
+      <ul class="sl" id="section-list"></ul>
+      <details class="add" id="add">
+        <summary>+ Add a section</summary>
+        <div class="add__list" id="add-list"></div>
+      </details>
+      <p class="hint">Drag a section to move it on the page, or use the arrows (Alt + ↑ / ↓). Name and contact stay at the top.</p>
+    </aside>
+    <main class="stage"><div class="paper" id="paper" aria-label="The résumé"></div></main>
+  </div>
+
+  <!-- On resumemaster.one by itself: open a résumé from this browser — nothing is uploaded. -->
+  <section class="start" id="start" hidden>
+    <p class="eb">Résumé editor</p>
+    <h1 class="mt">Edit your résumé, section by section</h1>
+    <p class="ms">Open an HTML résumé (for example one you downloaded from Format or Tailor). It stays in your browser — nothing is uploaded.</p>
+    <div class="start__row">
+      <label class="btnlike cta"><input type="file" id="open-file" accept=".html,.htm,text/html" hidden>Open an HTML résumé</label>
+      <button class="btnlike" id="open-sample">Start from a sample</button>
+    </div>
+    <p class="err" id="start-error" role="alert"></p>
+  </section>
+
+  <p class="refused" id="refused" hidden>This editor can be embedded only by draft. Open it at <a href="/editor/">resumemaster.one/editor</a>.</p>
+</body>
+</html>

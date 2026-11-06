@@ -1,0 +1,125 @@
+/* D157 · the résumé editor (draft's approved sketch, "resume editor", in Dusk).
+ *
+ * ⛔ EVERY COLOUR COMES FROM THE THEME. The only colour literals in this file are the defaults in the first :root block
+ * below — Resume Master's own theme, used on resumemaster.one by itself. Embedded in draft, the host sends its live
+ * theme tokens (rm-editor/1 `theme`) and the editor sets these same variables, so the accent changes with the site.
+ * Tints are derived from the tokens (color-mix), never written down. The résumé page stays white: it is the document
+ * that is sent, and its colours are the document's (--paper*). test/d157Editor.test.js holds this.
+ */
+:root {
+  color-scheme: dark;
+  --bg: #00131f; --card: #0a2233; --raise: #123045; --raise2: #1a3a52; --line: #1a3a52;
+  --ink: #f5f5f5; --body: #c3ccd3; --muted: #93a3ae;
+  --accent: #a8d8ea; --accent2: #8fc6db; --on-accent: #0f0f0f;
+  --font: "DM Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --serif: "Instrument Serif", Georgia, serif;
+  --radius: 28px;
+  --paper: #ffffff; --paper-ink: #111111;
+  --ok: #8fd6a8;
+  --shade: rgba(0, 0, 0, 0.35);
+}
+/* ── derived, never literal ─────────────────────────────────────────────────────────── */
+:root {
+  --glow: color-mix(in srgb, var(--accent) 16%, transparent);
+  --on: color-mix(in srgb, var(--accent) 14%, transparent);
+  --chg: color-mix(in srgb, var(--accent) 40%, transparent);
+  --paper-line: color-mix(in srgb, var(--paper-ink) 9%, var(--paper));
+  --paper-mark: color-mix(in srgb, var(--accent) 45%, var(--paper-ink));
+  --paper-focus: color-mix(in srgb, var(--accent) 7%, var(--paper));
+  --paper-break: color-mix(in srgb, var(--paper-ink) 16%, var(--paper));
+}
+
+@font-face { font-family: "DM Sans"; font-weight: 400; font-display: swap; src: url("/fonts/dm-sans-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "DM Sans"; font-weight: 500; font-display: swap; src: url("/fonts/dm-sans-latin-500-normal.woff2") format("woff2"); }
+@font-face { font-family: "DM Sans"; font-weight: 700; font-display: swap; src: url("/fonts/dm-sans-latin-700-normal.woff2") format("woff2"); }
+@font-face { font-family: "Instrument Serif"; font-weight: 400; font-display: swap; src: url("/fonts/instrument-serif-latin-400-normal.woff2") format("woff2"); }
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 14.5px/1.5 var(--font); -webkit-font-smoothing: antialiased; min-height: 100vh; }
+button, select, input { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+[hidden] { display: none !important; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
+
+/* ── the tool pill ─────────────────────────────────────────────────────────────────── */
+.bar { position: sticky; top: 14px; z-index: 10; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 3px;
+  width: max-content; max-width: calc(100% - 24px); margin: 16px auto 0; padding: 7px; background: var(--card); border-radius: 22px;
+  box-shadow: 0 18px 48px var(--shade); }
+.grp { display: flex; align-items: center; gap: 1px; }
+.grp select, .grp button { all: unset; cursor: pointer; padding: 7px 10px; border-radius: 13px; color: var(--body); font-size: 13px; }
+.grp select { padding-right: 4px; font-weight: 500; color: var(--ink); }
+.grp select option { background: var(--card); color: var(--ink); }
+.grp button:hover, .grp select:hover { background: var(--raise); color: var(--ink); }
+.grp button[aria-pressed="true"] { background: var(--on); color: var(--accent); }
+.grp button:disabled { opacity: .4; cursor: default; }
+.grp .v { min-width: 34px; text-align: center; color: var(--ink); font-weight: 500; font-size: 13px; font-variant-numeric: tabular-nums; }
+.ib { width: 32px; height: 32px; padding: 0 !important; display: grid !important; place-items: center; }
+.ib svg { width: 17px; height: 17px; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.serif-i { font-family: Georgia, serif; }
+.sep { width: 1px; height: 20px; background: var(--raise2); margin: 0 5px; }
+.txt { color: var(--body); }
+.grp.cta button { background: linear-gradient(180deg, var(--accent), var(--accent2)); color: var(--on-accent); font-weight: 600;
+  border-radius: 14px; padding: 9px 16px; box-shadow: 0 10px 26px var(--glow); }
+.saved { display: inline-flex; gap: 6px; align-items: center; padding: 0 8px 0 6px; color: var(--muted); font-size: 12.5px; }
+.saved::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
+.saved[data-state="saving"]::before { background: var(--muted); }
+.saved[data-state="failed"]::before { background: var(--accent); }
+
+/* ── the section menu ──────────────────────────────────────────────────────────────── */
+.wrap { display: grid; grid-template-columns: 250px minmax(0, 816px); gap: clamp(20px, 4vw, 56px); justify-content: center;
+  padding: 28px clamp(14px, 3vw, 40px) 80px; }
+.menu { position: sticky; top: 88px; align-self: start; background: var(--card); border-radius: var(--radius); padding: 22px 16px 18px; }
+.eb { color: var(--accent); font-size: 13px; margin: 0 8px 6px; }
+.mt { font: 400 30px/1.04 var(--serif); letter-spacing: -.01em; color: var(--ink); margin: 0 8px 4px; overflow-wrap: anywhere; }
+.ms { color: var(--body); font-size: 13.5px; margin: 0 8px 18px; }
+.menu h3 { font: 500 12.5px/1 var(--font); color: var(--muted); letter-spacing: .02em; margin: 0 8px 8px; }
+.sl { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.si { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto 14px; gap: 8px; align-items: center; padding: 9px 8px; border-radius: 14px;
+  cursor: grab; transition: transform .22s cubic-bezier(.22, 1, .36, 1), background .15s; }
+.si:hover, .si.on { background: var(--raise); }
+.si.drag { opacity: .4; }
+.si.over { box-shadow: inset 0 2px 0 var(--accent); }
+.si.lock { cursor: default; }
+.si b { font-weight: 500; font-size: 14px; line-height: 1.25; color: var(--ink); overflow-wrap: anywhere; }
+.num { width: 22px; height: 22px; border-radius: 50%; background: var(--raise2); display: grid; place-items: center; font-size: 11.5px; font-weight: 600; color: var(--body); }
+.si.on .num { background: linear-gradient(180deg, var(--accent), var(--accent2)); color: var(--on-accent); box-shadow: 0 6px 16px var(--glow); }
+.pin { color: var(--muted); font-size: 11.5px; }
+.grip { display: grid; gap: 3px; justify-items: center; }
+.grip i { display: block; width: 12px; height: 2px; border-radius: 1px; background: var(--muted); }
+.si.lock .grip i { opacity: .25; }
+.mv { display: flex; gap: 2px; }
+.mv button { all: unset; cursor: pointer; width: 22px; height: 22px; border-radius: 7px; display: grid; place-items: center; color: var(--muted); font-size: 12px; }
+.mv button:hover { background: var(--raise2); color: var(--ink); }
+.grip, .mv { opacity: 0; transition: opacity .15s; }
+.si:hover .grip, .si:hover .mv, .si:focus-within .mv, .si.on .mv, .si:focus .mv { opacity: 1; }
+.add { margin: 10px 8px 0; }
+.add summary { cursor: pointer; color: var(--accent); font-size: 13.5px; font-weight: 600; list-style: none; }
+.add summary::-webkit-details-marker { display: none; }
+.add__list { display: grid; gap: 2px; margin-top: 8px; }
+.add__list button { all: unset; cursor: pointer; padding: 7px 10px; border-radius: 12px; color: var(--body); font-size: 13.5px; }
+.add__list button:hover, .add__list button:focus-visible { background: var(--raise); color: var(--ink); }
+.hint { color: var(--muted); font-size: 12px; margin: 12px 8px 0; line-height: 1.45; }
+
+/* ── the page: the only surface ────────────────────────────────────────────────────── */
+.stage { min-width: 0; }
+.paper { width: 100%; max-width: 816px; min-height: 1056px; background: var(--paper); color: var(--paper-ink); border-radius: 10px;
+  box-shadow: 0 44px 110px var(--shade); }
+
+/* ── on resumemaster.one by itself, before a résumé is open ────────────────────────── */
+.start { max-width: 640px; margin: 12vh auto; padding: 32px 28px; background: var(--card); border-radius: var(--radius); }
+.start .eb, .start .mt, .start .ms { margin-left: 0; margin-right: 0; }
+.start .mt { font-size: 38px; margin-bottom: 10px; }
+.start__row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+.btnlike { all: unset; cursor: pointer; padding: 10px 16px; border-radius: 14px; background: var(--raise); color: var(--ink); font-weight: 600; font-size: 14px; }
+.btnlike:hover { background: var(--raise2); }
+.btnlike.cta { background: linear-gradient(180deg, var(--accent), var(--accent2)); color: var(--on-accent); box-shadow: 0 10px 26px var(--glow); }
+.err { color: var(--accent); font-size: 13px; min-height: 1em; }
+.refused { max-width: 560px; margin: 20vh auto; padding: 24px; color: var(--body); text-align: center; }
+.refused a { color: var(--accent); }
+
+@media (max-width: 860px) {
+  .wrap { grid-template-columns: 1fr; padding-top: 18px; }
+  .menu { position: static; }
+  .bar { top: 8px; }
+}

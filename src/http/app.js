@@ -26,6 +26,18 @@ import { fileURLToPath } from "node:url";
 const PUBLIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "public");
 const ROOT_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const TOOLKIT_SRC = path.join(ROOT_DIR, "src", "pdf-toolkit");
+// D157: the résumé editor's document model (src/editor/sections.js) and the one formatter file it imports — the
+// same files the server runs, served to the editor page, so the page and the server can never disagree.
+const EDITOR_SRC = path.join(ROOT_DIR, "src", "editor");
+const FORMATTER_FILE = path.join(ROOT_DIR, "src", "formatting", "resumeFormatter.js");
+// D157: the editor page may be framed only by its hosts (draft), and runs only its own script. A section's HTML is
+// sanitised by the model; this policy is the page's second wall (no inline script, nothing fetched elsewhere).
+export const EDITOR_FRAME_ANCESTORS = "'self' https://jobsviadraft.com https://*.jobsviadraft.com https://*.up.railway.app http://localhost:* http://127.0.0.1:*";
+const EDITOR_CSP = [
+  "default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob:",
+  "font-src 'self' data:", "connect-src 'self'", "object-src 'none'", "base-uri 'none'", "form-action 'none'",
+  `frame-ancestors ${EDITOR_FRAME_ANCESTORS}`,
+].join("; ");
 const PDF_LIB_DIST = path.join(ROOT_DIR, "node_modules", "@cantoo", "pdf-lib", "dist");
 const PDFJS_BUILD = path.join(ROOT_DIR, "node_modules", "pdfjs-dist", "build");
 // A69 tier 2 (owner, 10-03): Office files (fflate) and OCR (tesseract.js, its wasm core, English data).
@@ -150,6 +162,17 @@ export function createApp({ anthropic = null, version = {}, log = defaultLog, en
   app.use("/lib/pdf-lib", express.static(PDF_LIB_DIST, js));
   app.use("/lib/pdfjs", express.static(PDFJS_BUILD, js));
   app.use("/lib/pdf-toolkit", express.static(TOOLKIT_SRC, js));
+  app.use("/lib/editor", express.static(EDITOR_SRC, js));
+  // One file, as middleware (a file, not an API route — the contract's route table stays the API).
+  app.use("/lib/formatting/resumeFormatter.js", (req, res, next) => {
+    if ((req.method !== "GET" && req.method !== "HEAD") || req.path !== "/") return next();
+    res.type("text/javascript; charset=utf-8").sendFile(FORMATTER_FILE);
+  });
+  app.use("/editor", (req, res, next) => {
+    // Mounted at /editor, so the page itself is "/" (or "/index.html") here; its scripts and styles need no policy.
+    if (req.path === "/" || req.path === "/index.html") res.setHeader("Content-Security-Policy", EDITOR_CSP);
+    next();
+  });
   app.use("/lib/fflate", express.static(FFLATE_ESM, js));
   app.use("/lib/tesseract", express.static(TESSERACT_DIST, js));
   app.use("/lib/tesseract-core", express.static(TESSERACT_CORE, js));
