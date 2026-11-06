@@ -157,3 +157,11 @@ test("d157Routes: the page with its policy (framed only by draft), its model ser
     assert.equal((await fetch(base + "/lib/formatting/formattingSystem.js")).status, 404);
   } finally { await new Promise(r => server.close(r)); }
 });
+
+test("d157ReadOnlySent: a résumé that was already sent opens read-only — readable, highlighted, downloadable, never changed", () => {
+  const js = read("public/editor/editor.js");
+  assert.match(js, /readOnly: m\.readOnly === true/);
+  assert.match(js, /contenteditable="\$\{!meta\.readOnly\}"/, "the page is not editable");
+  assert.match(js, /function changed\(\) \{\n  if \(meta\.readOnly\) return;/, "nothing is ever sent back as a change");
+  assert.match(js, /li\.draggable = !s\.locked && !meta\.readOnly/, "nothing reorders");
+});
