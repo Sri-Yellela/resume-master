@@ -113,11 +113,14 @@ function documentResult(out, html, title) {
   const blob = new Blob([html], { type: "text/html" });
   const url = URL.createObjectURL(blob);
   out.innerHTML = `
-    <iframe class="preview" sandbox="allow-modals" title="${esc(title)}"></iframe>
+    <iframe class="preview" sandbox="allow-modals allow-same-origin" title="${esc(title)}"></iframe>
     <div class="row"><a class="btn" href="${url}" download="${esc(title)}.html">Download HTML</a>
       <button class="btn" type="button" data-print>Print / save as PDF</button></div>`;
   const frame = $("iframe", out);
   frame.srcdoc = html;
+  // ⛔ The preview stays script-free (no allow-scripts: nothing in the document can run), and same-origin so THIS page
+  // may call its print(). With "allow-modals" alone the frame's origin was opaque and the call threw a SecurityError —
+  // the button did nothing (D157 T6, measured in Chrome 11-06).
   $("[data-print]", out).addEventListener("click", () => frame.contentWindow?.print());
 }
 $("#format-form").addEventListener("submit", async (e) => {
