@@ -47,6 +47,8 @@ export const PDF_PAGES = [
     desc: "Turn tables and statements in a PDF into an Excel workbook — rows and columns, numbers kept as numbers.", steps: ["Choose a PDF", "Make the Excel file", "Download the .xlsx — one sheet per page"] },
   { slug: "ocr-pdf", tool: "ocr", name: "OCR PDF", h1: "OCR a scanned PDF",
     desc: "Read the text in a scanned PDF, and get a searchable copy you can select and search.", steps: ["Choose a scanned PDF", "Read it — a page at a time, on this computer", "Download the text and the searchable PDF"] },
+  { slug: "html-to-pdf", tool: "html", name: "HTML to PDF", h1: "HTML to PDF",
+    desc: "Turn an HTML file or pasted HTML into a PDF with your browser's own printing — scripts never run and nothing is fetched.", steps: ["Choose an HTML file, or paste HTML", "Check the preview", "Print, and choose “Save as PDF”"] },
 ];
 
 // ── the shared chrome ────────────────────────────────────────────────────────────────────────────

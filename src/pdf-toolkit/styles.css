@@ -53,4 +53,9 @@
 .pt-row { display: flex; justify-content: center; gap: 4px; flex-wrap: wrap; }
 .pt-textout { width: 100%; box-sizing: border-box; font: 0.85em/1.45 ui-monospace, monospace; color: var(--pt-text);
   background: var(--pt-surface); border: 1px solid var(--pt-border); border-radius: calc(var(--pt-radius) * 0.6); padding: 8px; }
+/* the HTML tool's preview — white, like the paper it prints to */
+.pt-preview { display: block; width: 100%; height: 520px; margin-top: 10px; border: 1px solid var(--pt-border);
+  border-radius: calc(var(--pt-radius) * 0.6); background: #fff; }
+.pt-preview[hidden] { display: none; }
+@media (max-width: 520px) { .pt-preview { height: 400px; } }
 @media (prefers-reduced-motion: reduce) { .pt-page img { transition: none; } }
