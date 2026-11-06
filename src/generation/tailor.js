@@ -28,6 +28,10 @@ import { callAnthropic, textOf, MODEL_HAIKU, MODEL_SONNET } from "../model/anthr
 import { tailorRoute } from "../model/modelClient.js";
 import { applyPromptConditionals } from "./promptAssembler.js";
 import { bulletCraftText } from "./bulletCraft.js";
+import { ResumeUnparsedError } from "../errors.js";
+
+/** Non-space characters a base needs before "no sections" means unreadable rather than empty (a header is ≈ 80). */
+export const UNPARSED_MIN_CHARS = 200;
 
 export const TAILOR_MODEL = MODEL_HAIKU;
 export const TAILOR_REPAIR_MODEL = MODEL_SONNET;
@@ -532,6 +536,12 @@ export async function tailorResume(client, { baseResumeText, job = {}, keywords 
                                               variant = "lean", model: choice = null, gists = [], coursework = [], env = process.env }) {
   const usage = [];
   const structure = buildStructuredResume(baseResumeText);
+  // ⛔ Never answer a real résumé with its header alone. A base that is real text (≥ UNPARSED_MIN_CHARS of it) and
+  // reads as zero sections would render as the name and contact line and still answer 200 — before any model call.
+  if (!structure.sections.length && String(baseResumeText || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, "").length >= UNPARSED_MIN_CHARS) {
+    throw new ResumeUnparsedError("No section heading in the base résumé could be read (Experience, Education, Skills, Projects, " +
+      "Summary), so tailoring would return only its header. Put each heading on its own line, or send the résumé as HTML.");
+  }
   const payload = variant === "payload";
   const codeOnly = variant === "code" || (payload && !bulletsNeedModel(structure, keywords, gists));
   // P6d: the free tier's Skills rows and coursework are code's, for "code" and "payload" alike; the model's own skills

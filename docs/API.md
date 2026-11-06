@@ -141,6 +141,11 @@ Every document from `/v1/resumes/generate` passes the claim guard **before** it 
   violations; the document is not in it. There is no option to skip the check.
 - **"No violation" always means "was read".** If the guard is handed no document text it refuses
   (`502 resume_claim_not_inspected`) rather than passing an unread document.
+- **Never the header alone (1.9.0).** An editing tailoring (`lean`, `payload`, `code`) whose base résumé is real text
+  (≥ 200 non-space characters) but has no readable section heading is refused before any model call:
+  `422 resume_unparsed`, `retryable: false`, `permanent: true`. Until 1.9.0 it answered 200 with the name and contact
+  line only. A heading may end in a colon ("Education:", "Work Experience :", the full-width "：") — it reads as the
+  heading without one.
 
 ### 3. Flag, don't fabricate
 
