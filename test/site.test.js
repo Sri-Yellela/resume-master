@@ -68,3 +68,18 @@ test("bands on the site are draft's cutpoints, and 'not enough signal' is never 
   assert.match(js, /if \(out\.outcome !== "scored"\) return \{ cls: "nosignal", label: "Not enough signal"/);
   assert.match(js, /This is not a low score/);
 });
+
+test("⛔ the result preview is script-free AND same-origin, so 'Print / save as PDF' can reach its print() (D157 T6)", () => {
+  // sandbox="allow-modals" alone made the frame's origin opaque: the button's contentWindow.print() threw a SecurityError
+  // and nothing printed (measured in Chrome 11-06). allow-scripts must never join allow-same-origin here — together they
+  // let the document lift its own sandbox.
+  const js = fs.readFileSync("public/site.js", "utf8");
+  const frames = [...js.matchAll(/<iframe class="preview" sandbox="([^"]*)"/g)].map(m => m[1].split(/\s+/));
+  assert.ok(frames.length >= 1, "the preview iframe is where documentResult builds it");
+  for (const tokens of frames) {
+    assert.ok(tokens.includes("allow-same-origin"), "the page must be able to call the preview's print()");
+    assert.ok(tokens.includes("allow-modals"), "print() is a modal");
+    assert.ok(!tokens.includes("allow-scripts"), "the preview runs no script");
+  }
+  assert.match(js, /\[data-print\][\s\S]{0,400}contentWindow\?\.print\(\)/);
+});
