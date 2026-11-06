@@ -29,7 +29,21 @@ const TOOLS = [
   { id: "word", label: "PDF → Word", blurb: "A .docx of the text, in reading order, with headings and paragraphs. Not the exact layout or pictures." },
   { id: "excel", label: "PDF → Excel", blurb: "A .xlsx of the text laid out in columns — tables and statements. One sheet per page; numbers stay numbers." },
   { id: "ocr", label: "OCR", blurb: "Read a scanned PDF: its text, and a searchable copy you can select and search. English; it runs on this computer, a page at a time." },
+  { id: "html", label: "HTML → PDF", blurb: "An HTML file or pasted HTML, previewed, then printed by your browser — choose “Save as PDF”. Scripts in it never run, and nothing it links to is fetched." },
 ];
+
+// The HTML tool's frame: same-origin so this page may call its print(), and NO allow-scripts — nothing in the document
+// runs. The policy inside it keeps the promise above: no request leaves the browser (inline styles and data: pictures
+// and fonts only); a linked stylesheet, picture or font is simply not loaded.
+const HTML_SANDBOX = "allow-modals allow-same-origin";
+const HTML_POLICY = "default-src 'none'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:";
+export function htmlForPrint(html) {
+  const meta = `<meta http-equiv="Content-Security-Policy" content="${HTML_POLICY}">`;
+  const src = String(html || "");
+  const head = /<head(?:\s[^>]*)?>/i; // not <header>
+  return head.test(src) ? src.replace(head, m => `${m}${meta}`)
+    : `<!doctype html><html><head><meta charset="utf-8">${meta}</head><body>${src}</body></html>`;
+}
 
 const el = (tag, attrs = {}, ...kids) => {
   const n = document.createElement(tag);
@@ -328,6 +342,35 @@ export function mountPdfToolkit(root, { lib, pdfjs, zipSync = null, loadOcr = nu
         if (onText) out.append(el("button", { type: "button", class: "pt-btn", onclick: () => onText(r.text) }, "Use this text"));
       });
       return [el("label", { class: "pt-field" }, "Scanned PDF", input), btn, s, out];
+    },
+    html() {
+      const input = fileInput(false, ".html,.htm,text/html");
+      const paste = el("textarea", { class: "pt-textout", rows: "8", placeholder: "…or paste HTML here" });
+      const frame = el("iframe", { class: "pt-preview", sandbox: HTML_SANDBOX, title: "Preview", hidden: true });
+      const s = status();
+      let name = "document";
+      const show = async () => {
+        const f = input.files?.[0];
+        const src = paste.value.trim() ? paste.value : f ? await f.text() : "";
+        if (!src.trim()) { frame.hidden = true; say(s, "Choose an HTML file or paste HTML first.", "bad"); return false; }
+        name = f && !paste.value.trim() ? base(f.name.replace(/\.html?$/i, "")) : "document";
+        frame.srcdoc = htmlForPrint(src);
+        frame.hidden = false;
+        await new Promise(r => frame.addEventListener("load", r, { once: true }));
+        try { frame.contentDocument.title = name; } catch { /* the title is a nicety: the dialog names the file from it */ }
+        return true;
+      };
+      input.addEventListener("change", () => { paste.value = ""; show().then(ok => ok && say(s, "Preview ready.")); });
+      const btn = el("button", { type: "button", class: "pt-btn pt-primary" }, "Print / save as PDF");
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        try {
+          if (!(await show())) return;
+          frame.contentWindow.print();
+          say(s, "In the print dialog, choose “Save as PDF” as the destination.", "good");
+        } catch (e) { fail(s, e); } finally { btn.disabled = false; }
+      });
+      return [el("label", { class: "pt-field" }, "HTML file", input), paste, btn, s, frame];
     },
   };
 
