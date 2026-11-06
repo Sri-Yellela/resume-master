@@ -245,6 +245,12 @@ export function maxYearsClaim(text) {
  * Every seniority level the text asserts AS A TITLE, strongest first.
  * Word-boundary matched throughout, so "senior" never fires on "seniority" nor "head" on "header".
  */
+// ⛔ A135 (draft 45a, measured): a seniority phrase that names SOMEONE ELSE is not the candidate's claim. The base résumé
+// read "Assistant to the Director of (Specific Title) for the College of Engineering"; the honest rewording "assistant to
+// the director of the college of engineering" was withheld as a "director" claim. A phrase introduced by one of these
+// relations (in the few words before it) refers to another person.
+const REFERS_TO_OTHER_RE = /\b(?:assistant\s+to|assisting|reporting\s+to|reported\s+to|reports\s+to|report\s+to|support(?:ed|ing)?|partnered\s+with|partnering\s+with|working\s+with|worked\s+with|under|alongside|advised|advising|briefed|briefing|presented\s+to)\s+(?:the\s+|a\s+|an\s+|our\s+|their\s+|its\s+)?$/;
+
 export function extractSeniorityClaims(text) {
   const t = String(text ?? "").toLowerCase();
   const found = new Map();
@@ -252,6 +258,7 @@ export function extractSeniorityClaims(text) {
     const word = m[1].toLowerCase();
     const rank = SENIORITY_RANK.get(word);
     if (rank === undefined) continue;
+    if (REFERS_TO_OTHER_RE.test(t.slice(Math.max(0, m.index - 40), m.index))) continue;
     if (!found.has(word)) found.set(word, { word, rank, phrase: m[0].trim() });
   }
   return [...found.values()].sort((a, b) => b.rank - a.rank);
@@ -374,9 +381,10 @@ export function checkResumeClaims({ html, profile, baseResumeText = "", domainPr
         allowed: hasDeclaration && declaredRank >= supportedRank
           ? declaredWord
           : (supported ? supported.word : "(no seniority stated)"),
-        evidence: [claimed.word],
+        // A135 (draft 45a): the PHRASE that read as a title, so the person (and whoever reads the log) can see it.
+        evidence: [claimed.phrase || claimed.word],
         message:
-          `The generated resume claims "${claimed.word}" seniority; this profile allows up to ` +
+          `The generated resume claims "${claimed.word}" seniority ("${claimed.phrase || claimed.word}"); this profile allows up to ` +
           `${allowed}. A JD's title is not a promotion — change the level on your profile if it is ` +
           `wrong.`,
       });

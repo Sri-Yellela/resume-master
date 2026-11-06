@@ -461,3 +461,19 @@ test("the prompt tells the model to keep the honest figure rather than blur or o
 // The wiring tests that followed here in draft read draft's server.js, routes/apply.js and client —
 // draft's own integration, which stays under test in draft. This service's equivalents, against its
 // own kernel, are in test/generate.test.js and test/runtimeInputs.test.js.
+
+test("A135: a seniority phrase that names someone else is not the candidate's claim; a promotion still is", async () => {
+  const { maxSeniority } = await import("../src/integrity/resumeClaimGuard.js");
+  const word = (s) => maxSeniority(s)?.word ?? null;
+  // Measured in draft 45a: the base résumé's "Assistant to the Director of (Specific Title) for the College of Engineering",
+  // reworded honestly, was withheld as a "director" claim.
+  assert.equal(word("Assistant to the Director of the College of Engineering"), null);
+  assert.equal(word("Worked under the Director of Engineering"), null);
+  assert.equal(word("Partnered with the Director of Platform Engineering"), null);
+  assert.equal(word("Reported to a Senior Engineering Manager"), null);
+  // Still claims:
+  assert.equal(word("Promoted to Senior Software Engineer"), "senior");
+  assert.equal(word("Hired as Staff Engineer"), "staff");
+  assert.equal(word("Staff Backend Engineer"), "staff");
+  assert.equal(word("Director of Engineering, Acme"), "director");
+});

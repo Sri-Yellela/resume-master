@@ -179,6 +179,19 @@ simply not used.
 `;
   }
 
+  // ⛔ A135 (draft 45a, measured: 4 of 5 generations for "Staff Backend Engineer" on a "mid", 8-year profile were withheld
+  // — the header read "Staff Backend Engineer" and a line claimed "10 years", the posting's own title and its "10+ years").
+  // The limits were stated ABOVE, but the posting's title arrived labelled "Target role / job title" and was copied into
+  // the header. The rule now sits beside it, in the same words the claim guard checks.
+  const levelWord = profile?.seniority ? String(profile.seniority).trim() : "";
+  const targetGuard = (levelWord || (Number.isFinite(profileYears) && profileYears > 0))
+    ? `**The target title is the POSTING's, not the candidate's:** never write it, or any level word above ` +
+      `${levelWord ? `"${levelWord}"` : "what the base resume shows"}, in the header, tagline or any role title` +
+      `${Number.isFinite(profileYears) && profileYears > 0 ? `; never state more than ${profileYears} years of experience, whatever the posting asks for` : ""}. ` +
+      `A résumé that claims more is withheld.
+`
+    : "";
+
   // The one place the posting enters the prompt. "description" is the pinned text, unchanged.
   const jobBlock = jobContext === "keywords"
     ? renderJobKeywords(job.keywords || {})
@@ -196,7 +209,7 @@ ${job.description||job.title}`;
 **User location (City, State):** ${userLocation}
 ${yearsBlock}${employerBlock}${domainProfileBlock}${claimsBlock}
 **Target role / job title:** ${job.title}
-**Target industry / domain:** ${job.category && job.category !== "Other" ? job.category : job.title || "Technology"}
+${targetGuard}**Target industry / domain:** ${job.category && job.category !== "Other" ? job.category : job.title || "Technology"}
 **Target company:** ${job.company}
 **Known tech stack of target company:** ${job.stack||"unknown"}
 
