@@ -33,7 +33,10 @@ const capped = (maxLength, description) => ({ type: "string", maxLength, descrip
 // bullet order by code); options.model ("haiku" | "sonnet" | "open") names the model of a lean or payload call;
 // GenerateRequest.gists and .coursework; job.keywords.mustHave, .niceToHave and .broader; GenerateResponse.tailoring gains
 // `added` and `modelCalled`; and POST /v1/resumes/gists (the gists, built once per base résumé). No 1.7.0 shape changed.
-export const CONTRACT_VERSION = "1.8.0";
+// 1.9.0 (draft's WORKLOG 44y): additive — Error.error gains "resume_unparsed" (422 on POST /v1/resumes/generate, retryable
+// false, permanent true): an editing tailoring's base is real text with no readable section heading, which until now was
+// answered 200 with the header alone. Headings ending in ":" now read as headings. No 1.8.0 shape changed.
+export const CONTRACT_VERSION = "1.9.0";
 
 const usage = arr(ref("UsageRecord"));
 
@@ -168,13 +171,14 @@ export const DECLARED_SCHEMAS = {
 
   Error: obj({
     error: enumOf("invalid_request", "invalid_json", "unauthenticated", "not_found", "payload_too_large",
-      "resume_claim_violation", "resume_claim_not_inspected", "upstream_model_failure", "model_unconfigured",
+      "resume_claim_violation", "resume_claim_not_inspected", "resume_unparsed", "upstream_model_failure", "model_unconfigured",
       "auth_unconfigured", "limit_exceeded", "internal_error"),
     message: str, retryable: bool, permanent: bool, violations: arr(ref("ClaimViolation")), usage,
   }, { optional: ["message", "retryable", "permanent", "violations", "usage"],
     description: "`retryable` is present on every model-backed and auth error. ⛔ A non-retryable failure says so: " +
       "`retryable: false` for an exhausted balance, a bad key or an unconfigured service. " +
-      "resume_claim_violation carries `violations` and NEVER the document." }),
+      "resume_claim_violation carries `violations` and NEVER the document. " +
+      "resume_unparsed (1.9.0, 422, permanent) — an editing tailoring's base is real text with no readable section heading." }),
 };
 
 const E = ref("Error");

@@ -186,6 +186,10 @@ export function createApp({ anthropic = null, version = {}, log = defaultLog, en
       return res.status(422).json({ error: "resume_claim_violation", retryable: true,
         violations: err.violations, usage });
     }
+    if (err.code === "resume_unparsed") {
+      // Permanent: the same base reads the same way every time. Nothing was generated; no model was called.
+      return res.status(422).json({ error: "resume_unparsed", retryable: false, permanent: true, message: err.message, usage });
+    }
     if (err.code === "resume_claim_not_inspected") {
       return res.status(502).json({ error: "resume_claim_not_inspected", retryable: true, usage });
     }

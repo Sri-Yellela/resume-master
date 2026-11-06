@@ -128,6 +128,13 @@ export const SCENARIOS = [
     expect: b => (b.html === undefined && b.violations?.length > 0 && b.retryable === true) || "422 must carry violations and NO document" },
   { name: "generate: unread document refused", route: "POST /v1/resumes/generate", body: GENERATE, model: "", status: 502,
     expect: b => b.error === "resume_claim_not_inspected" || "expected resume_claim_not_inspected" },
+  { name: "generate: an unreadable base is refused, never answered header-only (1.9.0)", route: "POST /v1/resumes/generate",
+    body: { ...GENERATE, domainModuleKey: undefined, options: { tailoring: "code" },
+            job: { title: "Backend Engineer", company: "Acme", keywords: { matched: ["Go"], claimed: [], verbs: [], phrases: [] } },
+            baseResumeText: "JANE DOE\n" + "Built services in Go for four years at a payments company, and ran them on call. ".repeat(4) },
+    status: 422, live: true,
+    expect: b => (b.error === "resume_unparsed" && b.retryable === false && b.permanent === true && b.html === undefined) ||
+      "expected resume_unparsed, retryable false, permanent true, no html" },
   { name: "generate: permanent upstream failure says so", route: "POST /v1/resumes/generate", body: GENERATE, model: permanent, status: 502,
     expect: b => (b.retryable === false && b.permanent === true) || "an exhausted balance must be retryable:false" },
   { name: "generate: transient upstream failure", route: "POST /v1/resumes/generate", body: GENERATE, model: transient, status: 502,

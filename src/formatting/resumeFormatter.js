@@ -421,7 +421,9 @@ function extractElementsByClass(html, tagName, className) {
 }
 
 function normalizeSectionName(raw) {
-  const key = collapseWhitespace(stripTagsToText(raw)).toUpperCase();
+  // A heading written "Education:" or "Work Experience :" (or with the full-width colon) is the same heading — with
+  // the colon kept, no line of such a résumé matched an alias and the parser returned zero sections (the 11-05 run).
+  const key = collapseWhitespace(stripTagsToText(raw)).replace(/\s*[:：]\s*$/, "").toUpperCase();
   return SECTION_ALIASES.get(key) || key;
 }
 
