@@ -22,7 +22,7 @@ const embedded = framed && params.get("embed") === "1" && isAllowedHost(host);
 const STORE_KEY = "rm-editor:doc";
 
 let doc = null;           // { contract, style, sections }
-let meta = {};            // { company, title, changes[], filename }
+let meta = {};            // { company, title, changes[], filename, readOnly, readOnlyNote }
 let focusId = null;
 let dragId = null;
 let showChanges = false;
@@ -60,7 +60,10 @@ function load(html, m) {
   try {
     doc = sectionsFromHtml(html);
     meta = { company: String(m.company || ""), title: String(m.title || ""), filename: String(m.filename || ""),
-      changes: Array.isArray(m.changes) ? m.changes.map(String).filter(s => s.trim().length >= 8).slice(0, 200) : [] };
+      changes: Array.isArray(m.changes) ? m.changes.map(String).filter(s => s.trim().length >= 8).slice(0, 200) : [],
+      // READ ONLY: a résumé that was already sent is shown as it was — it can be read, highlighted and downloaded, not changed.
+      readOnly: m.readOnly === true, readOnlyNote: String(m.readOnlyNote || "") };
+    document.documentElement.dataset.readonly = String(meta.readOnly);
     if (!doc.sections.length) throw new Error("No sections were found in this résumé.");
     focusId = (doc.sections.find(s => !s.locked) || doc.sections[0]).id;
     showUi();
@@ -77,6 +80,7 @@ function currentHtml() { return doc ? htmlFromSections(doc) : ""; }
 
 let changeTimer = null;
 function changed() {
+  if (meta.readOnly) return;
   setSaved("saving");
   clearTimeout(changeTimer);
   changeTimer = setTimeout(() => {
@@ -155,8 +159,8 @@ function buildSection(s) {
   el.className = "sec";
   el.dataset.id = s.id;
   el.innerHTML = `<span class="tag" contenteditable="false">${escapeHtml(s.title)}</span>`
-    + (s.locked ? "" : `<div class="section-title" contenteditable="true" spellcheck="true">${escapeHtml(s.heading)}</div>`)
-    + `<div class="ed" contenteditable="true" spellcheck="true">${sanitizeFragment(s.html)}</div>`;
+    + (s.locked ? "" : `<div class="section-title" contenteditable="${!meta.readOnly}" spellcheck="true">${escapeHtml(s.heading)}</div>`)
+    + `<div class="ed" contenteditable="${!meta.readOnly}" spellcheck="true">${sanitizeFragment(s.html)}</div>`;
   el.addEventListener("focusin", () => setFocus(s.id));
   el.addEventListener("pointerdown", () => setFocus(s.id));
   el.addEventListener("input", () => readSection(el));
@@ -230,16 +234,16 @@ function renderMenu() {
     li.className = "si" + (s.locked ? " lock" : "") + (s.id === focusId ? " on" : "");
     li.dataset.id = s.id;
     li.tabIndex = 0;
-    li.draggable = !s.locked;
+    li.draggable = !s.locked && !meta.readOnly;
     li.innerHTML = `<span class="num">${i + 1}</span><b>${escapeHtml(s.title)}</b>`
-      + (s.locked ? `<span class="pin">at the top</span>` : `<span class="mv"><button type="button" aria-label="Move ${escapeHtml(s.title)} up">▲</button><button type="button" aria-label="Move ${escapeHtml(s.title)} down">▼</button></span>`)
+      + (s.locked ? `<span class="pin">at the top</span>` : meta.readOnly ? `<span></span>` : `<span class="mv"><button type="button" aria-label="Move ${escapeHtml(s.title)} up">▲</button><button type="button" aria-label="Move ${escapeHtml(s.title)} down">▼</button></span>`)
       + `<span class="grip" aria-hidden="true"><i></i><i></i><i></i></span>`;
     li.addEventListener("click", (e) => {
       if (e.target.closest("button")) return;
       setFocus(s.id);
       pageEl.querySelector(`.sec[data-id="${CSS.escape(s.id)}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
     });
-    if (!s.locked) {
+    if (!s.locked && !meta.readOnly) {
       const [up, down] = li.querySelectorAll(".mv button");
       up.addEventListener("click", () => move(s.id, -1));
       down.addEventListener("click", () => move(s.id, 1));
@@ -302,6 +306,15 @@ function renderToolbar() {
   $("#size-up").disabled = effectiveSize() >= SIZE.max;
   document.querySelectorAll("[data-spacing]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.spacing === doc.style.spacing)));
   document.querySelectorAll("[data-margin]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.margin === doc.style.margin)));
+  // Read only: the document's options and the selection commands are off; reading, Review changes and the downloads stay.
+  document.querySelectorAll("#font, [data-spacing], [data-margin], #cmd-bold, #cmd-italic, #cmd-bullets")
+    .forEach(el => { el.disabled = !!meta.readOnly; });
+  if (meta.readOnly) { $("#size-down").disabled = true; $("#size-up").disabled = true; }
+  document.querySelector(".hint").textContent = meta.readOnly
+    ? "This is the résumé as it was sent. Read it, review what was rewritten, or download it."
+    : "Drag a section to move it on the page, or use the arrows (Alt + ↑ / ↓). Name and contact stay at the top.";
+  $("#add").hidden = !!meta.readOnly;
+  if (meta.readOnly) setSaved("saved", meta.readOnlyNote || "Sent — shown as it was sent");
   const rc = $("#review-changes");
   rc.disabled = !meta.changes?.length;
   rc.title = meta.changes?.length ? "Highlight what draft's tailoring rewrote" : "Nothing was rewritten in this résumé";
