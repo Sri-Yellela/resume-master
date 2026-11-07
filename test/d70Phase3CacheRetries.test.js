@@ -7,6 +7,7 @@ import { generateResume } from "../src/generation/generate.js";
 import { assemblePrompt, loadAllPrompts } from "../src/generation/promptAssembler.js";
 import { buildRuntimeInputs } from "../src/generation/runtimeInputs.js";
 import { createAnthropicClient, MODEL_MAX_RETRIES } from "../src/model/anthropicCall.js";
+import { UNTRUSTED_DATA_RULE } from "../src/integrity/untrustedText.js";
 import { createApp } from "../src/http/app.js";
 import { mintToken, parseClientTokens } from "../src/http/auth.js";
 import { buildOpenApi } from "../src/contract/build.js";
@@ -44,7 +45,10 @@ const sent = async (input) => { const c = fakeClient(); await generateResume(c, 
 test("⛔ options.cache absent: the request is byte-for-byte the one assembled before the option existed", async () => {
   const runtimeInputs = buildRuntimeInputs({ ...INPUT, profile: null, claims: null, employers: [] });
   // assemblePrompt called exactly as generate.js called it before 1.5.0 — no options argument.
-  const { systemBlocks } = assemblePrompt("engineering", "GENERATE", runtimeInputs, { SUMMARY: false });
+  const { systemBlocks: assembled } = assemblePrompt("engineering", "GENERATE", runtimeInputs, { SUMMARY: false });
+  // Changed on purpose 11-07 (draft D173 (1)): the untrusted-posting rule is appended to the FIRST block, inside its
+  // existing breakpoint — every other byte, and every breakpoint, is as assembled before the option existed.
+  const systemBlocks = assembled.map((b, i) => (i === 0 ? { ...b, text: `${b.text}\n\n${UNTRUSTED_DATA_RULE}` } : b));
   for (const input of [INPUT, { ...INPUT, options: {} }, { ...INPUT, options: { includeSummary: false } }]) {
     const req = await sent(input);
     assert.equal(JSON.stringify(req.system), JSON.stringify(systemBlocks));

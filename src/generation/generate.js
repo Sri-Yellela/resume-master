@@ -21,6 +21,7 @@ import { classify } from "./classifier.js";
 import { normalizeResumeHtml } from "../formatting/resumeFormatter.js";
 import { FORMATTING_SYSTEM } from "../formatting/formattingSystem.js";
 import { assertResumeClaims } from "../integrity/resumeClaimGuard.js";
+import { UNTRUSTED_DATA_RULE, stripInvisible } from "../integrity/untrustedText.js";
 import { callAnthropic, textOf, MODEL_SONNET, MODEL_HAIKU } from "../model/anthropicCall.js";
 
 import { tailorResume, buildGists, GIST_MAX_CHARS } from "./tailor.js";
@@ -28,6 +29,11 @@ import { MODEL_CHOICES, openConfigured } from "../model/modelClient.js";
 import { InvalidRequestError } from "../errors.js";
 import { INPUT_LIMITS, capString, capRequest } from "./inputLimits.js";
 // Re-exported: the class moved to src/errors.js (see there); existing importers keep working.
+// ⛔ draft D173 (1): what the claim guard checks the résumé's contacts and links against — the candidate's own fields, and
+// the posting text that went in (a link only the posting had is the posting's, never the candidate's).
+const ownContactsOf = (c = {}) => [c.name, c.fullName, c.email, c.phone, c.linkedinUrl, c.githubUrl, c.portfolioUrl, c.website].filter(Boolean).join("\n");
+const untrustedTextOf = (job = {}) => stripInvisible([job.description, job.title, job.company, ...(job.keywords?.phrases || [])].filter(Boolean).join("\n"));
+
 export { InvalidRequestError };
 
 export const TAILORINGS = Object.freeze(["full", "lean", "payload", "code"]);
@@ -133,6 +139,7 @@ export async function generateResume(client, input = {}, { env = process.env } =
         profile: { years_of_experience: candidate.yearsOfExperience ?? null },
         baseResumeText,
         domainProfile: profile ? { seniority: profile.seniority ?? null } : null,
+        ownContacts: ownContactsOf(candidate), untrustedText: untrustedTextOf(job),
       });
     } catch (e) {
       throw Object.assign(e, { usageSoFar: lean.usage });
@@ -170,8 +177,10 @@ export async function generateResume(client, input = {}, { env = process.env } =
   // so no summary is generated to strip.
   const includeSummary = options.includeSummary === true;
   const runtimeInputs = buildRuntimeInputs({ candidate, job, baseResumeText, mode, employers, profile, claims, jobContext });
-  const { systemBlocks } = assemblePrompt(domainModuleKey, mode, runtimeInputs, { SUMMARY: includeSummary },
+  const { systemBlocks: assembled } = assemblePrompt(domainModuleKey, mode, runtimeInputs, { SUMMARY: includeSummary },
     { cache: options.cache !== false });
+  // ⛔ draft D173 (1): the rule for the fenced posting rides on the first (cached) block — no extra breakpoint.
+  const systemBlocks = assembled.map((b, i) => (i === 0 ? { ...b, text: `${b.text}\n\n${UNTRUSTED_DATA_RULE}` } : b));
 
   const gen = await callAnthropic(client, {
     purpose: "resume_generate",
@@ -215,6 +224,7 @@ export async function generateResume(client, input = {}, { env = process.env } =
       profile: { years_of_experience: candidate.yearsOfExperience ?? null },
       baseResumeText,
       domainProfile: profile ? { seniority: profile.seniority ?? null } : null,
+      ownContacts: ownContactsOf(candidate), untrustedText: untrustedTextOf(job),
     });
   } catch (e) {
     throw Object.assign(e, { usageSoFar: usage });

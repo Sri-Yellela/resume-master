@@ -23,6 +23,7 @@
 // base résumé does not show but the CALLER's knowledge base shows in the stack of one of the candidate's employers.
 // Such a term may be named only in a bullet of THAT employer, as part of work the bullet already describes, and may be
 // added to Skills. The caller decides the placements; the model words them; the guard holds them to their employer.
+import { UNTRUSTED_DATA_RULE, fenceInline } from "../integrity/untrustedText.js";
 import { buildStructuredResume, renderStructuredResume } from "../formatting/resumeFormatter.js";
 import { callAnthropic, textOf, MODEL_HAIKU, MODEL_SONNET } from "../model/anthropicCall.js";
 import { tailorRoute } from "../model/modelClient.js";
@@ -73,7 +74,9 @@ Bullet order is set by code (most must-have terms first within each employer); e
 // reads. The lean call never rewrites a summary, so the craft's SUMMARY rules are resolved off.
 export const LEAN_SYSTEM = `${LEAN_RULES}
 
-${applyPromptConditionals(bulletCraftText(), { SUMMARY: false }).trim()}`;
+${applyPromptConditionals(bulletCraftText(), { SUMMARY: false }).trim()}
+
+${UNTRUSTED_DATA_RULE}`;
 
 // D123 P6a + P6g: the payload variant's rules. The same craft file follows them (P6f: no second copy of the rules).
 const PAYLOAD_RULES = `You tailor an existing resume to one job posting so it scores as high as honestly possible in an applicant tracking system (ATS). You REWORD the candidate's own bullets first; you do not write a new resume.
@@ -100,7 +103,9 @@ OUTPUT: JSON only, no prose, no code fence:
 
 export const PAYLOAD_SYSTEM = `${PAYLOAD_RULES}
 
-${applyPromptConditionals(bulletCraftText(), { SUMMARY: false }).trim()}`;
+${applyPromptConditionals(bulletCraftText(), { SUMMARY: false }).trim()}
+
+${UNTRUSTED_DATA_RULE}`;
 
 // D123 P6g (2): the gist is built ONCE per base résumé, on the stronger model; the caller stores it and sends it back.
 export const GIST_SYSTEM = `For each employer entry of a resume, write a gist of the work the person did there: 2 to 3 plain sentences, at most ${GIST_MAX_CHARS} characters — their role and scope, the domain, the kinds of systems they built or ran and the outcomes they worked toward.
@@ -142,7 +147,8 @@ export function renderTailorInput({ structure, job = {}, keywords = {} }) {
   out += line("PLACEABLE terms (term @ employer whose stack has it)", placements);
   out += line("Posting verbs", list("verbs"));
   out += line("Posting competencies", list("competencies"));
-  out += line("Posting priorities", (keywords.phrases || []).join("; "));
+  // ⛔ draft D173 (1): the posting's own phrases are free text — fenced as untrusted data.
+  out += line("Posting priorities", fenceInline((keywords.phrases || []).join("; ")));
   out += "\nRESUME BULLETS\n";
   let last = null;
   for (const b of indexBullets(structure)) {
@@ -195,7 +201,7 @@ export function renderPayloadInput({ structure, job = {}, keywords = {}, gists =
   out += line("MUST-HAVE terms", list("mustHave") || list("matched"));
   out += line("Nice-to-have terms", list("niceToHave"));
   out += line("Posting verbs, most used first", list("verbs"));
-  out += line("Responsibilities", (keywords.phrases || []).slice(0, 8).join("; "));
+  out += line("Responsibilities", fenceInline((keywords.phrases || []).slice(0, 8).join("; ")));
   out += line("EVIDENCED terms (the resume already supports them)", list("matched"));
   out += line("CLAIMED terms (the candidate says they are true)", list("claimed"));
   out += line("PLACEABLE terms (term @ employer whose stack has it)", placements);
