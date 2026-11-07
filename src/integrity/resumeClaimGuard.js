@@ -1,3 +1,4 @@
+import { untrustedOutputViolations } from "./untrustedText.js";
 /**
  * Resume claim guard (AF2) — the JD may steer emphasis, never a quantity.
  *
@@ -279,7 +280,7 @@ export function maxSeniority(text) {
  * @param {string}  o.baseResumeText   the base resume, which is what supports a seniority claim
  * @returns {{ok: boolean, violations: Array, checked: object}}
  */
-export function checkResumeClaims({ html, profile, baseResumeText = "", domainProfile = null }) {
+export function checkResumeClaims({ html, profile, baseResumeText = "", domainProfile = null, ownContacts = null, untrustedText = "" }) {
   const violations = [];
   const text = htmlToText(html);
   const profileYears = Number(profile?.years_of_experience);
@@ -389,6 +390,12 @@ export function checkResumeClaims({ html, profile, baseResumeText = "", domainPr
           `wrong.`,
       });
     }
+  }
+
+  // ⛔ draft D173 (1): nothing the POSTING asked for reaches the résumé — no email or phone the candidate did not give,
+  // no link the posting supplied. Run when the caller passes the candidate's own contact fields (generate does).
+  if (ownContacts !== null) {
+    violations.push(...untrustedOutputViolations(text, { own: `${baseResumeText}\n${ownContacts}`, untrusted: untrustedText }));
   }
 
   return {
