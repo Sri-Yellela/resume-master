@@ -79,11 +79,17 @@ export function createApp({ anthropic = null, version = {}, log = defaultLog, en
     }
   };
 
+  // draft D173 (5): ONE REQUEST ID ACROSS SERVICES. draft sends `x-request-id` (its own request's id, or
+  // "run<id>-job<id>" for an application run's job); it is logged on this service's line for the same work and
+  // echoed back, so one application can be followed draft → here → the model. A missing or malformed id gets
+  // none — this service never invents one that the caller's logs could not match.
   app.use((req, res, next) => {
     const started = Date.now();
+    const rid = requestIdOf(req);
+    if (rid) res.setHeader("x-request-id", rid);
     res.on("finish", () => log({
       method: req.method, path: req.path, status: res.statusCode, ms: Date.now() - started,
-      client: req.client?.id ?? null,
+      client: req.client?.id ?? null, ...(rid ? { rid } : {}),
     }));
     next();
   });
@@ -228,6 +234,13 @@ export function createApp({ anthropic = null, version = {}, log = defaultLog, en
   });
 
   return app;
+}
+
+/** draft D173 (5): the caller's request id when it is a plain token (letters, digits, - _ . :), ≤ 80 chars; else null. */
+export function requestIdOf(req) {
+  const raw = typeof req?.get === "function" ? req.get("x-request-id") : req?.headers?.["x-request-id"];
+  const v = typeof raw === "string" ? raw.trim() : "";
+  return /^[\w.:-]{6,80}$/.test(v) ? v : null;
 }
 
 function defaultLog(entry) {
