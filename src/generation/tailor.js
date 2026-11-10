@@ -291,7 +291,10 @@ export function checkLeanChanges({ structure, baseResumeText = "", changes, keyw
     || (keywords.broader || []).some(b => norm(b.term) === norm(term))
     || (claims?.skills || []).some(t => norm(t) === norm(term));
   const bullets = {};
-  for (const [id, text] of Object.entries(changes?.bullets || {})) {
+  // ⛔ draft 46a: `let`, not `const` — the dash rule below rewrites `text`. With `const`, every edited bullet carrying an en
+  // or em dash threw "Assignment to constant variable" AFTER the model call, and the whole generation answered 500
+  // (production 11-07 → 11-10: every lean / payload résumé whose model output had a dash).
+  for (let [id, text] of Object.entries(changes?.bullets || {})) {
     const b = byId.get(id);
     if (!b) continue;
     if (plain(text).length > BULLET_MAX_CHARS) { violations.push({ kind: "bullet_too_long", id, message: `${id} is longer than ${BULLET_MAX_CHARS} characters.` }); continue; }

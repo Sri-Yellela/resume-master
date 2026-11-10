@@ -201,3 +201,15 @@ test("d123ModelClientWiredIntoLean: with the provider configured, generateResume
     assert.equal(out.usage[0].attempts, 1, "the other provider's sends are counted too");
   } finally { globalThis.fetch = realFetch; }
 });
+
+test("draft 46a: an edited bullet with an en / em dash is rewritten, never thrown on (production 500s 11-07 → 11-10)", () => {
+  const structure = buildStructuredResume(BASE);
+  const id = indexBullets(structure)[0].id;
+  const original = indexBullets(structure)[0].text;
+  // the same words as the original (no new number, no new claim) — only a dash added, as a model's edit often does
+  const edited = original.replace(/^(\S+)/, "$1 — ");
+  let r;
+  assert.doesNotThrow(() => { r = checkLeanChanges({ structure, baseResumeText: BASE, keywords: KEYWORDS, changes: { bullets: { [id]: edited } } }); },
+    "used to throw TypeError: Assignment to constant variable");
+  assert.ok(!/[–—]/.test(r.bullets[id] || ""), "the dash is replaced, as the rule says");
+});
