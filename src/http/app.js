@@ -200,7 +200,15 @@ export function createApp({ anthropic = null, version = {}, log = defaultLog, en
   // eslint-disable-next-line no-unused-vars
   app.use((err, _req, res, _next) => {
     const usage = err.usageSoFar || (err.usage ? [err.usage] : []);
-    log({ error: err.code || err.name || "error", status: err.status ?? null });
+    log({ error: err.code || err.name || "error", status: err.status ?? null,
+      // draft 46a: every résumé generation since 11-07 answered 500 here with only "TypeError" to go on. An unexpected
+      // error (no HTTP status of its own) now also logs its message and where in THIS service's code it was thrown —
+      // code locations only (paths under src/), never the request, the résumé or the model's text.
+      ...(err.status == null && (err instanceof TypeError || err instanceof RangeError || err instanceof ReferenceError) ? {
+        message: String(err.message || "").slice(0, 200),
+        at: String(err.stack || "").split("\n").slice(1).filter(l => /[\\/]src[\\/]/.test(l)).slice(0, 4)
+          .map(l => l.trim().replace(/^at\s+/, "").replace(/\(?(?:file:\/\/\/)?.*?[\\/](src[\\/][^)]+)\)?$/, "$1")),
+      } : {}) });
     if (err.type === "entity.parse.failed") return res.status(400).json({ error: "invalid_json",
       message: "The request body is not valid JSON." });
     if (err.type === "entity.too.large") return res.status(413).json({ error: "payload_too_large",
