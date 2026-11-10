@@ -23,6 +23,7 @@
 // nothing). A client with no entry and no "*" is unlimited — so "draft" stays unlimited unless named.
 // Counted in memory: a restart resets the day's count, which errs toward serving.
 import crypto from "node:crypto";
+import { costOf } from "../model/prices.js";
 
 export function parseLimits(raw) {
   const out = new Map();
@@ -185,6 +186,14 @@ export function createMetering({ log, limits = null, freeLimits = null, ledger =
         // A97: HTTP sends behind those calls, SDK retries included, and how many calls needed one.
         attempts: usage.some(u => u?.attempts != null) ? sum("attempts") : null,   // null: no call's sends were observable
         retried_calls: usage.filter(u => Number(u?.attempts) > 1).length,
+        // ⭐ draft 46a (owner 11-10: "$1.40 … no breakdown on what consumed what … we need more specific analytic logs"):
+        // the request's total said nothing about WHICH model each call used or what it cost. Each call now, counts and
+        // labels only — never content: its purpose, model, tokens, dollars at src/model/prices.js, time and outcome.
+        cost_usd: usage.length ? +usage.reduce((n, u) => n + (costOf(u) || 0), 0).toFixed(6) : 0,
+        per_call: usage.map(u => ({ purpose: u?.purpose ?? null, model: u?.model ?? null,
+          in: Number(u?.input_tokens) || 0, out: Number(u?.output_tokens) || 0,
+          cache_read: Number(u?.cache_read_input_tokens) || 0, cache_write: Number(u?.cache_creation_input_tokens) || 0,
+          cost_usd: costOf(u) == null ? null : +costOf(u).toFixed(6), ms: u?.duration_ms ?? null, ok: u?.success !== false })),
       });
       if (ledger && usage.length) {
         try { ledger(clientId, route, usage, extra); }

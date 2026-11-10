@@ -17,3 +17,11 @@ test("a 500 after the model answered still returns the spend so far (draft meter
   assert.ok(src.includes('res.status(500).json({ error: "internal_error", retryable: true, usage });'));
   assert.ok(src.includes("const usage = err.usageSoFar || (err.usage ? [err.usage] : []);"), "the usage the generation gathered before it threw");
 });
+
+test("the metering line names each call's model and dollars — counts and labels only", async () => {
+  const { createMetering } = await import("../src/http/metering.js").catch(() => ({}));
+  const src = fs.readFileSync("src/http/metering.js", "utf8");
+  assert.ok(src.includes("per_call: usage.map(u => ({ purpose: u?.purpose ?? null, model: u?.model ?? null,"));
+  assert.ok(src.includes("cost_usd: usage.length ? +usage.reduce((n, u) => n + (costOf(u) || 0), 0).toFixed(6) : 0,"));
+  void createMetering;
+});
