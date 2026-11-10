@@ -238,7 +238,9 @@ export function createApp({ anthropic = null, version = {}, log = defaultLog, en
       return res.status(502).json({ error: "upstream_model_failure", retryable: !err.permanent,
         permanent: err.permanent, message: err.message, usage });
     }
-    res.status(500).json({ error: "internal_error" });
+    // draft 46a: the spend so far goes back even here — a failure AFTER the model answered (the 11-07 → 11-10 dash bug)
+    // was billed but answered with no usage, so draft recorded none of it and the cost was invisible.
+    res.status(500).json({ error: "internal_error", retryable: true, usage });
   });
 
   return app;

@@ -11,3 +11,9 @@ test("the error handler logs an unexpected error's message and its src/ code loc
   assert.ok(src.includes(".slice(0, 4)"), "at most 4 code locations");
   assert.ok(src.includes("[\\\\/]src[\\\\/]"), "src/ frames only");
 });
+
+test("a 500 after the model answered still returns the spend so far (draft meters it)", () => {
+  const src = fs.readFileSync("src/http/app.js", "utf8");
+  assert.ok(src.includes('res.status(500).json({ error: "internal_error", retryable: true, usage });'));
+  assert.ok(src.includes("const usage = err.usageSoFar || (err.usage ? [err.usage] : []);"), "the usage the generation gathered before it threw");
+});
