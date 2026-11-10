@@ -119,9 +119,15 @@ test("per-client accounting: one metering line per model request, counts only, k
     await s.post("/v1/resumes/enhance", { resumeText: "SECRET-RESUME-BODY 555-867-5309" }, token);
     const m = s.logs.filter(l => l.metering);
     assert.equal(m.length, 1);
-    assert.deepEqual(m[0], { metering: true, client: "draft", route: "resumes.enhance", calls: 1, failed_calls: 0,
+    const { per_call: perCall, cost_usd: costUsd, ...totals } = m[0];
+    assert.deepEqual(totals, { metering: true, client: "draft", route: "resumes.enhance", calls: 1, failed_calls: 0,
       input_tokens: 120, output_tokens: 30, cache_creation_input_tokens: 6704, cache_read_input_tokens: 0,
       attempts: null, retried_calls: 0 });   // A97: null — a fake client's sends are not observed
+    // draft 46a: each call's model and dollars ride on the line too — counts and labels only
+    assert.equal(perCall.length, 1);
+    assert.deepEqual(Object.keys(perCall[0]).sort(), ["cache_read", "cache_write", "cost_usd", "in", "model", "ms", "ok", "out", "purpose"]);
+    assert.deepEqual([perCall[0].in, perCall[0].out, perCall[0].cache_write, perCall[0].ok], [120, 30, 6704, true]);
+    assert.ok(typeof costUsd === "number");
     const req = s.logs.find(l => l.path === "/v1/resumes/enhance");
     assert.equal(req.client, "draft", "the request log names the client");
     assert.ok(!JSON.stringify(s.logs).includes("SECRET-RESUME-BODY"), "content reached a log line");
