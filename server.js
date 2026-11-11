@@ -49,7 +49,7 @@ if (store) {
   purgeExpired(store);
   setInterval(() => { try { purgeExpired(store); } catch { /* next hour */ } }, 3600_000).unref();
   configureStoreBackups(storePath);
-  scheduleDailyBackups();
+  scheduleDailyBackups(console, store);   // ⛔ draft A186: the online backup on the store's own connection
 }
 
 const port = Number(process.env.PORT) || 3100;

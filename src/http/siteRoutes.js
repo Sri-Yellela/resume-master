@@ -35,7 +35,7 @@ import {
   balance, ensureMonthlyGrant, checkCanAfford, debitOnSuccess, grant, refund, ledgerFor, creditConfig,
 } from "../accounts/credits.js";
 import { saveArtifact, listArtifacts, getArtifact, deleteArtifact, setPinned, retentionDays, MAX_PINNED_PER_USER } from "../accounts/artifacts.js";
-import { listBackups, runBackup } from "../store/backups.js";
+import { listBackups, runBackupAsync } from "../store/backups.js";
 import { sendResetEmail, emailConfigured } from "../accounts/email.js";
 import { generateResume } from "../generation/generate.js";
 import { enhanceResume } from "../generation/enhance.js";
@@ -228,8 +228,8 @@ export function siteRoutes({ store, anthropic = null, env = process.env, meterin
   const needBackups = (req, res, next) => (backups ? next()
     : fail(res, 503, "backups_unconfigured", "Backups run only when the store is on a volume."));
   r.get("/admin/backups", needStore, requireAdmin, needBackups, (req, res) => res.json(listBackups()));
-  r.post("/admin/backups", needStore, writeGuard, requireAdmin, needBackups, (req, res) => {
-    const out = runBackup("admin");
+  r.post("/admin/backups", needStore, writeGuard, requireAdmin, needBackups, async (req, res) => {
+    const out = await runBackupAsync("admin", console, store);   // ⛔ draft A186: never a copy on the one thread
     if (!out) return fail(res, 507, "backup_refused", "The backup was refused — the volume has no room. See the logs.");
     res.json({ ok: true, backup: { filename: out.filename, created: out.created } });
   });
