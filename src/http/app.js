@@ -11,6 +11,7 @@
 // client — never a body, a query string or a header value. The error handler logs the error's code
 // and name, never the request, and never express's JSON parse error `body`, which echoes the input.
 import express from "express";
+import { isStaging } from "../stagingGuard.js";   // ⛔ draft A188
 import { generateResume, generateGists, InvalidRequestError } from "../generation/generate.js";
 import { enhanceResume } from "../generation/enhance.js";
 import { extractPdfText } from "../parsing/extractPdfText.js";
@@ -57,6 +58,8 @@ export function createApp({ anthropic = null, version = {}, log = defaultLog, en
                             anonymous = null, siteOptions = {} } = {}) {
   const app = express();
   app.disable("x-powered-by");
+  // ⛔ draft A188: a staging copy is never indexed beside the live service.
+  if (isStaging(env)) app.use((_req, res, next) => { res.setHeader("X-Robots-Tag", "noindex, nofollow"); next(); });
   // Railway terminates TLS in front of the service: req.secure (the session cookie's Secure flag)
   // and req.ip (the anonymous tools' rate key) must come from the one proxy hop.
   app.set("trust proxy", 1);
