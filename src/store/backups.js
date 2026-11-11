@@ -10,10 +10,10 @@
 // restarts. One copy a day at 02:00 UTC (draft's own time), plus admin-requested ones.
 import path from "node:path";
 import {
-  configureBackups, createBackup, listBackups, verifyBackups, restoreBackup, BackupRefused,
+  configureBackups, createBackup, createBackupAsync, listBackups, verifyBackups, restoreBackup, BackupRefused,
 } from "../../vendor/sqlite-backup/src/index.js";
 
-export { listBackups, verifyBackups, restoreBackup, createBackup, BackupRefused };
+export { listBackups, verifyBackups, restoreBackup, createBackup, createBackupAsync, BackupRefused };
 
 /** Point the policy at the store's file. Backups go to <volume>/backups beside it. */
 export function configureStoreBackups(dbPath) {
@@ -41,10 +41,29 @@ export function runBackup(label, log = console) {
   }
 }
 
-/** Daily at 02:00 UTC. Timers are unref'd so they never hold the process open. */
-export function scheduleDailyBackups(log = console) {
+/**
+ * ⛔ draft A186 (46g): the RUNNING service's backup — SQLite's online backup on the store's own connection, a step at a
+ * time, the event loop free between steps (vendored createBackupAsync). runBackup's fs.copyFileSync held draft's whole
+ * site 95 s at 6.2 GB; this service's store is smaller, but the same copy blocked every request while it ran.
+ * Logged like runBackup; never throws.
+ */
+export async function runBackupAsync(label, log = console, db = null) {
+  if (!db) return runBackup(label, log);
+  try {
+    const r = await createBackupAsync(label, { db });
+    log.log(JSON.stringify({ t: new Date().toISOString(), backup: label, ok: !!r, file: r?.filename ?? null, method: "online-backup" }));
+    return r;
+  } catch (e) {
+    log.error(JSON.stringify({ t: new Date().toISOString(), backup: label, ok: false,
+      refused: e instanceof BackupRefused, error: e.message }));
+    return null;
+  }
+}
+
+/** Daily at 02:00 UTC. Timers are unref'd so they never hold the process open. `db` = the store's live connection. */
+export function scheduleDailyBackups(log = console, db = null) {
   const tick = () => {
-    runBackup("auto-daily", log);
+    runBackupAsync("auto-daily", log, db).catch(() => { /* logged inside */ });
     const t = setTimeout(tick, msUntilNextRun());
     t.unref?.();
   };

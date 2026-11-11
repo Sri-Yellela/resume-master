@@ -347,6 +347,69 @@ export function createBackup(label = "manual") {
   return { filename, path: dest, created: new Date().toISOString() };
 }
 
+/**
+ * createBackup for a RUNNING server — the same room-proving, manifest and retention, without holding the event loop.
+ *
+ * ⛔ WHY (draft 46g, 2026-11-11): createBackup's fs.copyFileSync ran on the server's one thread. At 6.2 GB it held
+ * EVERY request for 95 s (an admin's candidate Approve, 16:05Z — the whole site answered in the same millisecond when it
+ * let go), and the 02:00 auto-daily and the manual Back up now did the same.
+ *
+ * WHY NOT fs.promises.copyFile: a copy that runs WHILE the server writes can be torn — SQLite's automatic checkpoints
+ * rewrite pages of the main file mid-copy, and the synchronous copy was only consistent because it froze every writer.
+ * This uses SQLite's ONLINE BACKUP (better-sqlite3 `db.backup`) on the caller's OWN connection: a consistent snapshot,
+ * copied a step at a time with the event loop free between steps; writes made through that same connection during the
+ * backup are carried into it (SQLite's rule — another connection's write would restart it, which is why the live
+ * connection is passed in). The result is still ONE plain database file (the WAL's committed pages are read through the
+ * connection), so restoreBackup and verifyBackups treat it exactly like the others.
+ *
+ * One at a time: a second call while one runs is refused (BackupRefused), never queued behind a 6 GB copy.
+ * @param {string} label
+ * @param {{ db: import("better-sqlite3").Database, pagesPerStep?: number }} o  db = the server's live connection
+ */
+let backupInFlight = null;
+export async function createBackupAsync(label = "manual", { db, pagesPerStep = 256 } = {}) {
+  requireConfigured();
+  if (!db || typeof db.backup !== "function") throw new Error("createBackupAsync needs the live better-sqlite3 connection (db)");
+  if (backupInFlight) throw new BackupRefused(`a backup is already running (${backupInFlight}); try again when it has finished`);
+  if (!fs.existsSync(DB_PATH)) {
+    console.warn("[backup] No DB found at", DB_PATH);
+    return null;
+  }
+  const ts       = new Date().toISOString().replace(/[:.]/g, "-");
+  const filename = `${FILE_PREFIX}_${ts}_${label}.db`;
+  const dest     = path.join(BAK_DIR, filename);
+  backupInFlight = filename;
+  try {
+    // The copy holds the main file AND the WAL's committed pages, so both are counted before room is made.
+    const need = fileSize(DB_PATH) + fileSize(`${DB_PATH}-wal`);
+    const { budget, ceiling, disk } = makeRoom({ filename, label, size: need });
+    const started = Date.now();
+    try {
+      // pagesPerStep pages a step, then the event loop runs. Measured on a 1.4 GB copy (46g): 4096 pages (16 MB) a step → the
+      // loop paused up to 294 ms; 1024 → 81 ms; 256 (1 MB) → 32 ms, at the same speed (~140 MB/s, 10 s).
+      await db.backup(dest, { progress: () => pagesPerStep });
+    } catch (e) {
+      removeBackupFile(filename);   // a half-written copy is never left to look like a backup
+      throw e;
+    }
+    const size = fileSize(dest);
+    console.log(`[backup] Saved: ${dest} (${mb(size)}, online backup in ${((Date.now() - started) / 1000).toFixed(1)} s)`);
+    const manifest = loadManifest();
+    // walCheckpointed: true — the online backup reads committed WAL pages through the connection, so the file is the
+    // whole database (the field's meaning: "this backup can be trusted to be current").
+    manifest.unshift({ filename, label, created: new Date().toISOString(), size, walCheckpointed: true, method: "online-backup" });
+    const { keep, drop, keptBytes } = selectRetained(manifest, { maxBytes: budget, ceiling });
+    for (const e of drop) removeBackupFile(e.filename);
+    sweepOrphanSidecars();
+    saveManifest(keep);
+    console.log(`[backup] Retaining ${keep.length} (${mb(keptBytes)} of ${mb(budget)} budget, ` +
+                `${mb(disk.total)} volume)${drop.length ? `; pruned ${drop.length} more after the copy` : ""}`);
+    return { filename, path: dest, created: new Date().toISOString() };
+  } finally {
+    backupInFlight = null;
+  }
+}
+
 export function listBackups() {
   requireConfigured();
   return loadManifest();
