@@ -1,4 +1,5 @@
 // Resume Master — stateless résumé tools. See README.md and docs/API.md.
+import "./src/stagingGuardBoot.js";   // ⛔ draft A188: a staging deploy with a production credential exits HERE
 import fs from "node:fs";
 import { createAnthropicClient, workspaceHeaderFor } from "./src/model/anthropicCall.js";
 import { checkModelKey, KEY_CHECK_EVERY_MS } from "./src/model/keyCheck.js";
