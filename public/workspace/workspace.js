@@ -205,7 +205,9 @@ const maker = editor.signatureMaker({ el, fileInput: (multiple = false, accept =
 dlg.append(maker.node);
 const openMaker = maker.open;
 maker.open = (k) => { dlg.hidden = false; openMaker(k); };
-new MutationObserver(() => { if (maker.node.hidden) dlg.hidden = true; }).observe(maker.node, { attributes: true, attributeFilter: ["hidden"] });
+// the signature maker closing closes the dialog — only when the maker IS the dialog (History / shortcuts share the dialog;
+// setting `hidden` again on an already-hidden maker is still a mutation, and it closed them as they opened — P4/P5 walk)
+new MutationObserver(() => { if (maker.node.hidden && dlg.children.length === 1) dlg.hidden = true; }).observe(maker.node, { attributes: true, attributeFilter: ["hidden"] });
 
 // ── the page strip and the navigator ──
 let current = 1;
