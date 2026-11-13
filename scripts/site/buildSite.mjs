@@ -29,6 +29,10 @@ export const PDF_PAGES = [
     desc: "Reorder, rotate or delete the pages of a PDF, with a picture of each page.", steps: ["Choose a PDF", "Move, rotate or remove pages", "Save, and download"] },
   { slug: "compress-pdf", tool: "compress", name: "Compress PDF", h1: "Compress a PDF",
     desc: "Make a PDF smaller for an upload limit: the pictures shrink and the text stays selectable — or, at Maximum, every page becomes a picture for the smallest file.", steps: ["Choose a PDF", "Pick how much to shrink it", "Download — or keep the original if it could not get smaller"] },
+  { slug: "edit-pdf", tool: "edit", name: "Edit PDF", h1: "Edit a PDF",
+    desc: "Add text, white-out, pictures, a signature and initials to a PDF — click where they go, drag and resize them, and save.", steps: ["Choose a PDF", "Pick Text, White-out, Picture or Signature, and click on the page", "Save, and download the edited PDF"] },
+  { slug: "sign-pdf", tool: "sign", name: "Sign PDF", h1: "Sign a PDF",
+    desc: "Sign a PDF with your signature and initials — drawn, typed, or traced from a photo into clean vector lines — and add the date.", steps: ["Choose a PDF", "Draw, type or upload your signature and initials", "Place them, save, and download the signed PDF"] },
   { slug: "watermark-pdf", tool: "watermark", name: "Watermark PDF", h1: "Add a watermark to a PDF",
     desc: "Stamp text diagonally across every page of a PDF.", steps: ["Choose a PDF", "Type the watermark", "Download"] },
   { slug: "protect-pdf", tool: "protect", name: "Protect PDF", h1: "Password-protect a PDF",
@@ -128,7 +132,7 @@ const card = (p, i) => `      <a class="card" href="/pdf/${p.slug}/">
 
 export function renderHub() {
   return head({ title: "Free PDF tools that never upload your file — Resume Master",
-    description: "Merge, split, organize, compress, watermark, protect, unlock and convert PDFs — free, no account, and your file never leaves your browser.",
+    description: "Edit, sign, merge, split, organize, compress, watermark, protect, unlock and convert PDFs — free, no account, and your file never leaves your browser.",
     canonical: "/pdf/" }) + "\n" + wrapChrome(`    <section class="hero hero--small">
       <h1>PDF tools that never upload your file</h1>
       <p class="hero__tagline">Every tool here runs in your browser. Nothing is uploaded, stored or seen by anyone — free, no account.</p>
