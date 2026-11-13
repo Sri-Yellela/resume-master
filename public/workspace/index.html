@@ -28,6 +28,7 @@
       <button class="ws-b" id="ws-download" disabled>Download PDF</button>
       <button class="ws-b ws-ic" id="ws-print" title="Print (Ctrl+P)" aria-label="Print" disabled>⎙</button>
       <button class="ws-b" id="ws-to-resume" disabled title="Turn this PDF's text into an editable résumé (sections, lists, margins)">Make this an editable résumé</button>
+      <button class="ws-b ws-ic" id="ws-keys" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" aria-haspopup="dialog">⌨</button>
       <button class="ws-b ws-p" id="ws-done" disabled>Done</button>
     </header>
     <nav class="ws-modes" role="tablist" aria-label="Modes">
@@ -68,6 +69,11 @@
         <section class="ws-changes" id="ws-changes" aria-live="polite"></section>
       </aside>
     </div>
+    <!-- D189 P5 · phones: the page strip and the properties are bottom sheets, opened from here -->
+    <nav class="ws-sheetbar" aria-label="Panels">
+      <button class="ws-b" id="ws-show-pages" aria-expanded="false" aria-controls="ws-strip">Pages</button>
+      <button class="ws-b" id="ws-show-props" aria-expanded="false" aria-controls="ws-props">Properties</button>
+    </nav>
     <p class="ws-status" id="ws-status" role="status"></p>
   </div>
   <div class="ws-dialog" id="ws-dialog" hidden role="dialog" aria-modal="true" aria-label="Your signature"></div>

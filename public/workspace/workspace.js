@@ -382,6 +382,82 @@ window.addEventListener("beforeunload", (e) => { if (dirty) { e.preventDefault()
 
 drawTools(); drawText(null); setZoom(1);
 
+// ── D189 P5 · PHONES: the strip and the properties are bottom sheets (the canvas keeps the full width) ──
+const phone = () => matchMedia("(max-width: 820px)").matches;
+function sheet(which, open) {
+  const el2 = which === "pages" ? $("#ws-strip") : $("#ws-props");
+  const btn = which === "pages" ? $("#ws-show-pages") : $("#ws-show-props");
+  const other = which === "pages" ? "props" : "pages";
+  const want = open ?? !el2.classList.contains("ws-sheet--open");
+  if (want) sheet(other, false);
+  el2.classList.toggle("ws-sheet--open", want);
+  btn.setAttribute("aria-expanded", String(want));
+}
+$("#ws-show-pages").addEventListener("click", () => sheet("pages"));
+$("#ws-show-props").addEventListener("click", () => sheet("props"));
+session.on("active", (t) => { if (phone() && t) sheet("props", true); });
+$("#ws-strip").addEventListener("click", (e) => { if (phone() && e.target.closest(".ws-thumb")) sheet("pages", false); });
+
+// ── D189 P5 · the tool bar is ONE tab stop; the arrow keys move along it (Home / End to its ends) ──
+$("#ws-tools").addEventListener("keydown", (e) => {
+  const tools = [...$("#ws-tools").querySelectorAll("button:not(:disabled)")];
+  const i = tools.indexOf(document.activeElement);
+  if (i < 0) return;
+  const to = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: tools.length - 1 }[e.key];
+  if (to == null) return;
+  e.preventDefault();
+  const t = tools[(to + tools.length) % tools.length];
+  tools.forEach(b => b.tabIndex = -1); t.tabIndex = 0; t.focus();
+});
+new MutationObserver(() => { const tools = [...$("#ws-tools").querySelectorAll("button")]; tools.forEach((b, k) => { b.tabIndex = (b.getAttribute("aria-pressed") === "true" || (!tools.some(x => x.getAttribute("aria-pressed") === "true") && k === 0)) ? 0 : -1; }); })
+  .observe($("#ws-tools"), { childList: true, subtree: true, attributes: true, attributeFilter: ["aria-pressed"] });
+
+// ── D189 P5 · KEYBOARD SHORTCUTS (? opens the list) ──
+const SHORTCUTS = [
+  ["Ctrl + Z", "Undo"], ["Ctrl + Shift + Z  ·  Ctrl + Y", "Redo"], ["Ctrl + S", "Download the PDF (a version is kept)"], ["Ctrl + P", "Print"],
+  ["+  /  −", "Zoom in / out"], ["Page Up  /  Page Down", "Previous / next page"], ["Home  /  End", "First / last page"],
+  ["Enter", "Finish editing a line"], ["Esc", "Undo a line being edited · put a tool down · close a dialog"],
+  ["Arrow keys (on a placed item)", "Nudge it (Shift = further)"], ["Delete (on a placed item)", "Remove it"],
+  ["Tab  ·  ← →  in the tool bar", "Reach the tools · move between them"], ["?", "This list"],
+];
+let lastFocus = null;
+function openKeys() {
+  lastFocus = document.activeElement;
+  const close = el("button", { type: "button", class: "ws-b", onclick: () => closeDialog() }, "Close");
+  const box = el("div", { class: "ws-hist", role: "document", "data-shortcuts": "" },
+    el("p", { class: "ws-hist__t", id: "ws-keys-title" }, "Keyboard shortcuts"),
+    el("dl", { class: "ws-keys" }, ...SHORTCUTS.flatMap(([k, what]) => [el("dt", {}, k), el("dd", {}, what)])),
+    close);
+  maker.node.hidden = true;
+  dlg.setAttribute("aria-labelledby", "ws-keys-title");
+  dlg.append(box); dlg.hidden = false; close.focus();
+}
+function closeDialog() {
+  dlg.hidden = true;
+  for (const c of [...dlg.children]) if (c !== maker.node) c.remove();
+  maker.node.hidden = true;
+  dlg.setAttribute("aria-label", "Your signature"); dlg.removeAttribute("aria-labelledby");
+  lastFocus?.focus?.();
+}
+$("#ws-keys").addEventListener("click", openKeys);
+document.addEventListener("keydown", (e) => {
+  const typing = e.target.closest?.("[contenteditable], textarea, input, select");
+  if (e.key === "Escape" && !dlg.hidden) { e.preventDefault(); closeDialog(); return; }
+  if (typing) return;
+  if (e.key === "?" ) { e.preventDefault(); openKeys(); }
+  if (e.key === "Home" && session.pages.length && !e.target.closest("#ws-tools")) goTo(1);
+  if (e.key === "End" && session.pages.length && !e.target.closest("#ws-tools")) goTo(session.pages.length);
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "p" && session.bytes) { e.preventDefault(); $("#ws-print").click(); }
+});
+// a dialog keeps the focus inside it (Tab wraps)
+dlg.addEventListener("keydown", (e) => {
+  if (e.key !== "Tab") return;
+  const f = [...dlg.querySelectorAll("button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])")].filter(x => !x.disabled && x.offsetParent);
+  if (!f.length) return;
+  if (e.shiftKey && document.activeElement === f[0]) { e.preventDefault(); f[f.length - 1].focus(); }
+  else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
+});
+
 // ── D189 P4 · AUTOSAVE: while there are changes, a version every minute (this browser only) ──
 setInterval(async () => {
   if (!dirty || !docId || autosaving || !session.bytes) return;
