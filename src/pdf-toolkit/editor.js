@@ -226,7 +226,7 @@ export function buildPageEditor(h, mode = "edit") {
 
 const clamp = (n, a, b) => Math.min(b, Math.max(a, n));
 
-function svgNode(sig, cls) {
+export function svgNode(sig, cls) {   // D189 P2: the workspace draws signatures with it too
   const NS = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(NS, "svg");
   svg.setAttribute("viewBox", `0 0 ${sig.width} ${sig.height}`);
