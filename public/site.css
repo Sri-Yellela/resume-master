@@ -7,6 +7,13 @@
  * host — public/sky.svg is generated here, scripts/site/sky.mjs), and the accent is ONE variable
  * the owner picks (the old site drew one at random per visit).
  *
+ * ⭐⭐ A203 (3) (owner 11-13, SUPERSEDES A68's look): "bring it into resume master and apply the theme, styling and range of
+ * utility options to the entire resume master site and draft would just host the sandbox." — the site now wears draft's
+ * Dusk theme (draft client/src/themes/dusk-dark.js): the canvas #1B1B1B, solid cards (#262626 / #2E2E2E), the warm accent,
+ * draft's depth boxes for every control (DepthButton.css — rest / hover / press shadows, radius 11) and NO PILLS (draft
+ * D60), Instrument Serif for display. Kept from A68: the stamp (the brand) and the self-hosted fonts. The night sky is
+ * retired with the look (public/sky.svg stays generated, unused by the page).
+ *
  * ⛔ Fonts are self-hosted (public/fonts, OFL — licences beside them). A font CDN would send every
  * visitor's address to a third party the privacy page does not name.
  */
@@ -27,25 +34,32 @@
        Sky Blue #A8D8EA · Lemon Yellow #F0EF8A · Celtic Green #88C87A · Sunset Orange #FFB07A
      Every one is a light fill with dark text on it, and ≥ 9:1 as text on the night.
      Chosen: Sky Blue. Changing it is this one line. */
-  --accent: #A8D8EA;
-  --on-accent: #0f0f0f;
+  /* A203 (3): draft's Dusk accent (ACCENT #FBD3C4, ON_ACCENT #1B1B1B). The A68 four stay listed above for reference. */
+  --accent: #FBD3C4;
+  --on-accent: #1B1B1B;
+  --accent-edge: #F2C2B2;
 
-  /* the night — the old site's hsl(201 100% 13%) */
-  --night: #002842;
-  --night-deep: #00131f;
-  --ink: #f5f5f5;              /* text on night: 15.6:1 */
-  --ink-muted: #c3ccd3;        /* 11.0:1 */
-  --ink-faint: #93a3ae;        /* 6.6:1 */
-  --glass: rgba(255, 255, 255, 0.06);
-  --glass-strong: rgba(255, 255, 255, 0.10);
-  --glass-edge: rgba(255, 255, 255, 0.10);
-  --bar: rgba(0, 40, 66, 0.64);   /* the fixed bar: the night at 64 %, blurred */
-  --good: #7ddba3;
-  --warn: #f5c35b;
-  --bad: #ff9a8b;
-  --radius: 12px;
+  /* draft's Dusk ground (CANVAS / SURFACE_SOLID / FH_WELL / BORDER / INK / INK_MUTED) */
+  --night: #1B1B1B;
+  --night-deep: #1B1B1B;
+  --ink: #FFFFFF;
+  --ink-muted: #A3A3A3;
+  --ink-faint: #959595;
+  --glass: #262626;            /* a card: solid, as draft's — no glass, no blur */
+  --glass-strong: #2E2E2E;     /* the well a control sits in */
+  --glass-edge: #343434;
+  --bar: rgba(27, 27, 27, 0.92);
+  --good: #9FD8A8;
+  --warn: #F2CC8F;
+  --bad: #F2A090;
+  --radius: 22px;              /* draft's card radius */
+  --depth-rest: 0 3px 8px rgba(0,0,0,0.40), inset 0 1px 0 rgba(255,255,255,0.08);
+  --depth-hover: 0 7px 17px rgba(0,0,0,0.50), inset 0 1px 0 rgba(255,255,255,0.10);
+  --depth-press: 0 2px 5px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.06);
+  --depth-accent: 0 10px 26px rgba(251,211,196,0.16), inset 0 1px 0 rgba(255,255,255,0.30);
   --font-body: "DM Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-display: "Barlow Condensed", "DM Sans", system-ui, sans-serif;
+  --font-display: "Instrument Serif", Georgia, serif;   /* draft's --font-display */
+  --font-stamp: "Barlow Condensed", "DM Sans", system-ui, sans-serif;   /* the brand stamp keeps its face */
   --font-serif: "Instrument Serif", Georgia, serif;
   /* type scale (1.25) */
   --t-xs: 0.8rem; --t-sm: 0.875rem; --t-md: 1rem; --t-lg: 1.25rem; --t-xl: 1.563rem; --t-2xl: 2rem; --t-3xl: 3rem;
@@ -78,7 +92,7 @@ a { color: var(--accent); }
   display: inline-flex; align-items: center; overflow: hidden;
   background: #ffffff; border: 2.5px solid #0f0f0f; border-radius: 2px; transform: rotate(-2deg);
   padding: 3px 10px; color: #0f0f0f;
-  font: italic 800 15px/1 var(--font-display); letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap;
+  font: italic 800 15px/1 var(--font-stamp); letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap;
 }
 .stamp__fold {
   display: inline-block; overflow: hidden; vertical-align: bottom; max-width: 5em; opacity: 1;
@@ -227,3 +241,47 @@ table.ledger td, table.ledger th { padding: 6px 8px; border-top: 1px solid var(-
   #acct-signed-in #acct-email { display: none; }
 }
 @media (max-width: 520px) { .panel { padding: 14px; } iframe.preview { height: 420px; } .btn { padding: 7px 14px; } }
+
+/* ── A203 (3) · draft's look, over the components above ───────────────────────────────────────────────────────────── */
+body::before { background: var(--night-deep); }   /* the flat Dusk canvas — the sky is retired */
+.glass, .card { backdrop-filter: none; -webkit-backdrop-filter: none; background: var(--glass); border-color: transparent; }
+.card { box-shadow: var(--depth-rest); }
+.card:hover { background: var(--glass); box-shadow: var(--depth-hover); }
+.nav { backdrop-filter: none; -webkit-backdrop-filter: none; }
+.nav__menu-panel { background: var(--glass); border-radius: 16px; box-shadow: var(--depth-hover); }
+.hero__title, .hero--small h1, .panel h2, .display, .more h2, .doc h2, .doc h3, .doc h4 { font-weight: 400; letter-spacing: -0.01em; }
+.panel h3 { font-family: var(--font-body); font-weight: 700; }
+/* every control a depth box (draft DepthButton.css): no capsule anywhere (draft D60) */
+.btn, .hero__cta, .tab, .nav__menu summary {
+  border-radius: 11px; border: 1px solid var(--glass-edge); background: var(--glass-strong); color: var(--ink); box-shadow: var(--depth-rest);
+  backdrop-filter: none; -webkit-backdrop-filter: none; transition: transform .16s, box-shadow .16s, border-color .16s, color .16s;
+}
+.btn:hover:not(:disabled), .btn:focus-visible, .hero__cta:hover, .hero__cta:focus-visible, .tab:hover, .tab:focus-visible {
+  transform: translateY(-2px); box-shadow: var(--depth-hover); border-color: var(--accent); color: var(--accent);
+}
+.btn:active:not(:disabled), .tab:active { transform: translateY(0); box-shadow: var(--depth-press); }
+.btn.ghost { background: transparent; box-shadow: none; }
+.btn.primary, .tab[aria-selected="true"] { background: var(--accent); color: var(--on-accent); border-color: var(--accent-edge); box-shadow: var(--depth-accent); }
+.btn.primary:hover:not(:disabled), .tab[aria-selected="true"]:hover { color: var(--on-accent); border-color: var(--accent-edge); }
+input[type=text], input[type=email], input[type=password], input[type=number], textarea, select { background: var(--glass); border-color: var(--glass-edge); border-radius: 11px; }
+/* status words, not capsules: a band is the word with a 6 px dot before it (draft D152's mark) */
+.band { border-radius: 0; padding: 0; background: none !important; border: 0 !important; }
+.band::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin-right: 7px; vertical-align: 2px; }
+.chip { border-radius: 6px; }
+.nav__link { border-radius: 9px; }
+.nav__link:hover, .nav__link--active { background: var(--glass-strong); }
+.foot { background: transparent; }
+/* the PDF tools wear the same boxes */
+.pdf-tools { --pt-host-surface: var(--glass); --pt-host-radius: 11px; }
+.pdf-tools .pt-tab, .pdf-tools .pt-btn, .pdf-tools .pt-mini {
+  border-radius: 11px; box-shadow: var(--depth-rest); background: var(--glass-strong); border-color: var(--glass-edge);
+  transition: transform .16s, box-shadow .16s, border-color .16s, color .16s;
+}
+.pdf-tools .pt-tab:hover, .pdf-tools .pt-btn:hover:not(:disabled), .pdf-tools .pt-tab:focus-visible, .pdf-tools .pt-btn:focus-visible {
+  transform: translateY(-2px); box-shadow: var(--depth-hover); border-color: var(--accent); color: var(--accent);
+}
+.pdf-tools .pt-tab[aria-selected="true"], .pdf-tools .pt-btn.pt-primary, .pdf-tools .pt-ed-add[aria-pressed="true"] {
+  background: var(--accent); color: var(--on-accent); border-color: var(--accent-edge); box-shadow: var(--depth-accent);
+}
+.pdf-tools .pt-mini { border-radius: 7px; }
+.pdf-tools .pt-sb { padding: 0; background: transparent; }   /* Edit PDF's sandbox sits on the same canvas now */
