@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url><loc>https://resumemaster.one/</loc></url>
+  <url><loc>https://resumemaster.one/workspace/</loc></url>
   <url><loc>https://resumemaster.one/pdf/</loc></url>
   <url><loc>https://resumemaster.one/pdf/merge-pdf/</loc></url>
   <url><loc>https://resumemaster.one/pdf/split-pdf/</loc></url>

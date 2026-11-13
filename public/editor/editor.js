@@ -434,6 +434,7 @@ if (framed && !embedded) {
   try { handoff = JSON.parse(sessionStorage.getItem("rm-editor:handoff") || "null"); sessionStorage.removeItem("rm-editor:handoff"); } catch { handoff = null; }
   try { saved = localStorage.getItem(STORE_KEY); } catch { /* storage blocked */ }
   if (handoff?.html) load(handoff.html, { filename: handoff.filename || "document.html" });
+  else if (params.get("sample")) load(SAMPLE, {});   // D189 P4: Documents home's "A sample résumé"
   else if (saved) load(saved, {});
   else $("#start").hidden = false;
   // Open a PDF: its text read in this browser (pdf.js) and laid out as a document (src/pdf-toolkit/pdfToDoc.js)

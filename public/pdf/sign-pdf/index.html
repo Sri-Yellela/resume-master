@@ -45,9 +45,14 @@
       <h1>Sign a PDF</h1>
       <p class="hero__tagline">Sign a PDF with your signature and initials — drawn, typed, or traced from a photo into clean vector lines — and add the date.</p>
     </section>
-    <section class="panel glass">
+    <section class="panel glass tool-landing">
       <ol class="steps"><li>Choose a PDF</li><li>Draw, type or upload your signature and initials</li><li>Place them, save, and download the signed PDF</li></ol>
-      <div id="pdf-tools" class="pdf-tools" data-initial="sign"><p class="note">Loading the tool…</p></div>
+      <label class="docs-drop" data-docs-drop="" data-mode="sign" data-tool="sign" data-workspace-mode="sign">
+        <input type="file" accept="application/pdf,.pdf" hidden>
+        <span class="docs-drop__t">Drop a PDF here</span>
+        <span class="docs-drop__s">or <span class="btn primary">Open a PDF</span> — it opens in the workspace with Sign PDF ready, and never leaves this device</span>
+      </label>
+      <p class="tool-landing__more">The workspace also edits text in place, fills and signs, redacts, organises pages and converts — <a href="/workspace/?mode=sign">open it empty</a>.</p>
     </section>
     <section class="more" aria-label="More PDF tools">
       <h2>More PDF tools</h2>
@@ -65,5 +70,6 @@
   <!-- /chrome:footer -->
   <script src="/chrome.js" defer></script>
   <script type="module" src="/pdf-tools.js"></script>
+  <script type="module" src="/docs-home.js"></script>
 </body>
 </html>

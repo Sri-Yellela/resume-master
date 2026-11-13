@@ -74,3 +74,16 @@ test("d189 P3: Fill out, Redact, Pages and Convert live in the ONE session / she
   assert.match(ws, /convert: \[\["compress", "⇲", "Compress"\]/);
   assert.match(ws, /under your \$\{limit\} MB limit/, "compress names the size against the form's limit (d188CompressShowsSizeVsLimit)");
 });
+
+test("d189 P4 · d189AutosaveAndRestore + d189ToolPagesOpenWorkspace: versions kept in this browser, Documents home and the tool pages hand a file to the workspace", () => {
+  const store = read("src/pdf-toolkit/docstore.js"), ws = read("public/workspace/workspace.js"), home = read("public/index.html"), dh = read("public/docs-home.js");
+  assert.match(store, /indexedDB\.open\(DB, VERSION\)/, "IndexedDB on this origin — nothing uploaded");
+  assert.doesNotMatch(store + dh, /\bfetch\s*\(|XMLHttpRequest|sendBeacon/, "the document store makes no network request");
+  assert.match(ws, /setInterval\(async \(\) => \{\r?\n  if \(!dirty \|\| !docId \|\| autosaving \|\| !session\.bytes\) return;/, "autosave while there are changes");
+  assert.match(ws, /await store\.addVersion\(docId, r\.bytes, "Autosaved"\)/);
+  assert.match(ws, /await store\.addVersion\(docId, session\.bytes, "Pages changed"\)/);
+  assert.match(ws, /await openBytes\(v\.bytes, nameBase\(\), \{ id: docId, note: "Restored" \}\)/, "Restore opens that version");
+  assert.match(ws, /const h = await store\.takeHandoff\(\);/, "a handed-over file opens");
+  assert.match(home, /data-docs-home=""/); assert.match(home, /id="docs-recent"/);
+  assert.match(dh, /location\.href = `\/workspace\/\?open=1&mode=\$\{encodeURIComponent\(mode\)\}`;/);
+});

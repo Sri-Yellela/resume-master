@@ -123,3 +123,9 @@ button, select, input { font: inherit; color: inherit; }
   .ws-zoom { padding: 16px 12px 80px; }
 }
 @media (prefers-reduced-motion: reduce) { .ws-b { transition: none; } }
+
+/* D189 P4 · version history (in the dialog) */
+.ws-hist { width: min(560px, 100%); max-height: 80vh; overflow: auto; background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 16px; display: grid; gap: 10px; }
+.ws-hist__t { margin: 0; font: 400 24px/1.2 "Instrument Serif", Georgia, serif; }
+.ws-hist__list { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.ws-hist__list li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border-radius: 10px; background: var(--well); font-size: 13px; }
