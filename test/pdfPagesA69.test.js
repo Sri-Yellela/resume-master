@@ -4,7 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { createApp } from "../src/http/app.js";
-import { PDF_PAGES, ORIGIN } from "../scripts/site/buildSite.mjs";
+import { PDF_PAGES, ORIGIN, WORKSPACE_MODE } from "../scripts/site/buildSite.mjs";
 import { TOOLS } from "../src/pdf-toolkit/ui.js";
 
 async function serve() {
@@ -25,7 +25,10 @@ test("every tool has a page: served, titled, canonical, and mounting THAT tool",
       const html = await r.text();
       assert.match(html, new RegExp(`<title>${p.h1.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} — free, in your browser`));
       assert.ok(html.includes(`<link rel="canonical" href="${ORIGIN}/pdf/${p.slug}/">`), p.slug);
-      assert.ok(html.includes(`data-initial="${p.tool}"`), `${p.slug} opens on its own tool`);
+      // D189 P4 changed this on purpose: a tool the workspace carries opens the WORKSPACE with that tool on (a landing page);
+      // the others still mount their own quick tool
+      if (WORKSPACE_MODE[p.tool]) assert.ok(html.includes(`data-workspace-mode="${WORKSPACE_MODE[p.tool]}"`) && html.includes(`data-tool="${p.tool}"`), `${p.slug} opens the workspace with its tool`);
+      else assert.ok(html.includes(`data-initial="${p.tool}"`), `${p.slug} opens on its own tool`);
       assert.match(html, /<meta name="description" content="[^"]{40,}">/);
     }
     const bare = await fetch(`${s.base}/pdf/merge-pdf`, { redirect: "manual" });

@@ -45,9 +45,14 @@
       <h1>PDF to JPG or PNG</h1>
       <p class="hero__tagline">Save every page of a PDF as a picture.</p>
     </section>
-    <section class="panel glass">
+    <section class="panel glass tool-landing">
       <ol class="steps"><li>Choose a PDF</li><li>Pick PNG or JPEG</li><li>Download each page</li></ol>
-      <div id="pdf-tools" class="pdf-tools" data-initial="toimages"><p class="note">Loading the tool…</p></div>
+      <label class="docs-drop" data-docs-drop="" data-mode="convert" data-tool="toimages" data-workspace-mode="convert">
+        <input type="file" accept="application/pdf,.pdf" hidden>
+        <span class="docs-drop__t">Drop a PDF here</span>
+        <span class="docs-drop__s">or <span class="btn primary">Open a PDF</span> — it opens in the workspace with PDF to JPG ready, and never leaves this device</span>
+      </label>
+      <p class="tool-landing__more">The workspace also edits text in place, fills and signs, redacts, organises pages and converts — <a href="/workspace/?mode=convert">open it empty</a>.</p>
     </section>
     <section class="more" aria-label="More PDF tools">
       <h2>More PDF tools</h2>
@@ -65,5 +70,6 @@
   <!-- /chrome:footer -->
   <script src="/chrome.js" defer></script>
   <script type="module" src="/pdf-tools.js"></script>
+  <script type="module" src="/docs-home.js"></script>
 </body>
 </html>

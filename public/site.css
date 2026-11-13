@@ -285,3 +285,25 @@ input[type=text], input[type=email], input[type=password], input[type=number], t
 }
 .pdf-tools .pt-mini { border-radius: 7px; }
 .pdf-tools .pt-sb { padding: 0; background: transparent; }   /* Edit PDF's sandbox sits on the same canvas now */
+
+/* ── D189 P4 · Documents home + the tool landing pages (draft's Dusk, depth boxes, no capsules) ── */
+.docs-home { display: grid; gap: 22px; margin: 0 0 36px; }
+.docs-drop { display: grid; gap: 8px; place-items: center; text-align: center; padding: 34px 18px; border: 2px dashed var(--glass-edge); border-radius: var(--radius); cursor: pointer; background: transparent; }
+.docs-drop[data-drag="true"] { border-color: var(--accent); background: var(--glass); }
+.docs-drop__t { font: 400 clamp(1.6rem, 4vw, 2.1rem)/1.15 var(--font-display); color: var(--ink); }
+.docs-drop__s { color: var(--ink-muted); font-size: var(--t-sm); }
+.docs-h { font-family: var(--font-body) !important; font-size: var(--t-sm) !important; font-weight: 700 !important; color: var(--ink-faint); letter-spacing: .02em; margin: 0 0 10px !important; }
+.docs-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; }
+.docs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.docs-doc { display: grid; gap: 4px; padding: 10px; border-radius: 14px; background: var(--glass); box-shadow: var(--depth-rest); color: var(--ink); text-decoration: none; transition: transform .16s, box-shadow .16s; }
+.docs-doc:hover { transform: translateY(-2px); box-shadow: var(--depth-hover); }
+.docs-doc img { width: 100%; aspect-ratio: 8.5 / 11; object-fit: cover; object-position: top; border-radius: 3px; background: #fff; }
+.docs-doc b { font-size: var(--t-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.docs-doc small { color: var(--ink-faint); font-size: var(--t-xs); }
+.docs-tools { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+.docs-tool { display: grid; gap: 3px; padding: 14px; border-radius: 14px; background: var(--glass); box-shadow: var(--depth-rest); color: var(--ink); text-decoration: none; transition: transform .16s, box-shadow .16s; }
+.docs-tool:hover { transform: translateY(-2px); box-shadow: var(--depth-hover); }
+.docs-tool b { font-size: var(--t-sm); }
+.docs-tool span { color: var(--ink-faint); font-size: var(--t-xs); }
+.tool-landing { display: grid; gap: 14px; }
+.tool-landing__more { color: var(--ink-faint); font-size: var(--t-sm); }

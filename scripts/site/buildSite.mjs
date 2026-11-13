@@ -120,6 +120,7 @@ ${FOOTER}
   <!-- /chrome:footer -->
   <script src="/chrome.js" defer></script>
   <script type="module" src="/pdf-tools.js"></script>
+  <script type="module" src="/docs-home.js"></script>
 </body>
 </html>
 `;
@@ -152,8 +153,17 @@ ${PDF_PAGES.map(card).join("\n")}
     </section>`);
 }
 
+/**
+ * D189 (4) · the tools the workspace now carries: their page is a LANDING page that opens the workspace with that tool on
+ * (a dropped PDF is handed over in this browser — public/docs-home.js), not a separate mini-app. The rest keep their quick
+ * tool until the workspace has them.
+ */
+export const WORKSPACE_MODE = Object.freeze({ edit: "edit", sign: "sign", organise: "pages", merge: "pages",
+  compress: "convert", word: "convert", text: "convert", toimages: "convert", ocr: "convert", protect: "convert" });
+
 export function renderToolPage(p) {
   const others = PDF_PAGES.filter(o => o.slug !== p.slug);
+  const mode = WORKSPACE_MODE[p.tool];
   return head({ title: `${p.h1} — free, in your browser | Resume Master`,
     description: `${p.desc} Free, no account — your file never leaves your browser.`,
     canonical: `/pdf/${p.slug}/` }) + "\n" + wrapChrome(`    <p class="crumbs"><a href="/pdf/">PDF tools</a> › ${esc(p.name)}</p>
@@ -161,9 +171,15 @@ export function renderToolPage(p) {
       <h1>${esc(p.h1)}</h1>
       <p class="hero__tagline">${esc(p.desc)}</p>
     </section>
-    <section class="panel glass">
+    <section class="panel glass${mode ? " tool-landing" : ""}">
       <ol class="steps">${p.steps.map(s => `<li>${esc(s)}</li>`).join("")}</ol>
-      <div id="pdf-tools" class="pdf-tools" data-initial="${p.tool}"><p class="note">Loading the tool…</p></div>
+${mode ? `      <label class="docs-drop" data-docs-drop="" data-mode="${mode}" data-tool="${p.tool}" data-workspace-mode="${mode}">
+        <input type="file" accept="application/pdf,.pdf" hidden>
+        <span class="docs-drop__t">Drop a PDF here</span>
+        <span class="docs-drop__s">or <span class="btn primary">Open a PDF</span> — it opens in the workspace with ${esc(p.name)} ready, and never leaves this device</span>
+      </label>
+      <p class="tool-landing__more">The workspace also edits text in place, fills and signs, redacts, organises pages and converts — <a href="/workspace/?mode=${mode}">open it empty</a>.</p>`
+    : `      <div id="pdf-tools" class="pdf-tools" data-initial="${p.tool}"><p class="note">Loading the tool…</p></div>`}
     </section>
     <section class="more" aria-label="More PDF tools">
       <h2>More PDF tools</h2>
@@ -172,7 +188,7 @@ export function renderToolPage(p) {
 }
 
 export function renderSitemap() {
-  const urls = ["/", "/pdf/", ...PDF_PAGES.map(p => `/pdf/${p.slug}/`), "/privacy.html"];
+  const urls = ["/", "/workspace/", "/pdf/", ...PDF_PAGES.map(p => `/pdf/${p.slug}/`), "/privacy.html"];
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n` +
     urls.map(u => `  <url><loc>${ORIGIN}${u}</loc></url>`).join("\n") + `\n</urlset>\n`;
 }

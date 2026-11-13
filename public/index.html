@@ -45,6 +45,37 @@
       <a class="hero__cta" href="#tools">Check a résumé free →</a>
     </section>
 
+    <!-- D189 P4 · DOCUMENTS HOME (the approved sketch, frame 3): drop a file, recent documents (this browser only), start from,
+         the tools — each opens the ONE workspace (/workspace/) with that tool on. -->
+    <section class="docs-home" id="documents" aria-label="Your documents" data-docs-home="">
+      <label class="docs-drop" id="docs-drop" data-docs-drop="">
+        <input type="file" id="docs-open" accept="application/pdf,.pdf" hidden>
+        <span class="docs-drop__t">Drop a PDF here</span>
+        <span class="docs-drop__s">or <span class="btn primary">Open a PDF</span> — it opens in the workspace and never leaves this device</span>
+      </label>
+      <div class="docs-recent" id="docs-recent" hidden>
+        <h2 class="docs-h">Recent on this device</h2>
+        <div class="docs-grid" id="docs-recent-list"></div>
+      </div>
+      <div>
+        <h2 class="docs-h">Start from</h2>
+        <p class="docs-row"><a class="btn" href="/editor/">A blank résumé</a> <a class="btn" href="/editor/?sample=1">A sample résumé</a> <a class="btn" href="#tools">Check a résumé against a job</a></p>
+      </div>
+      <div>
+        <h2 class="docs-h">Tools — each opens the workspace with that tool on</h2>
+        <div class="docs-tools">
+          <a class="docs-tool" href="/pdf/edit-pdf/"><b>Edit PDF</b><span>change text where it is</span></a>
+          <a class="docs-tool" href="/pdf/sign-pdf/"><b>Fill &amp; sign</b><span>forms, signature, initials</span></a>
+          <a class="docs-tool" href="/pdf/compress-pdf/"><b>Compress</b><span>size against the form's limit</span></a>
+          <a class="docs-tool" href="/pdf/pdf-to-word/"><b>Convert</b><span>Word · text · pictures</span></a>
+          <a class="docs-tool" href="/pdf/organize-pdf/"><b>Merge &amp; organise</b><span>pages from many files</span></a>
+          <a class="docs-tool" href="/workspace/?mode=edit"><b>Redact</b><span>remove, not cover</span></a>
+          <a class="docs-tool" href="/pdf/ocr-pdf/"><b>OCR</b><span>text in pictures</span></a>
+          <a class="docs-tool" href="/pdf/protect-pdf/"><b>Protect</b><span>AES-256</span></a>
+        </div>
+      </div>
+    </section>
+
     <section id="tools" class="tools">
     <div class="tabs" role="tablist" aria-label="Tools">
       <button class="tab" role="tab" aria-selected="true" data-tab="ats">ATS check <span class="tag">free</span></button>
@@ -200,5 +231,6 @@
   <script src="/site.js" defer></script>
   <script src="/chrome.js" defer></script>
   <script type="module" src="/pdf-tools.js"></script>
+  <script type="module" src="/docs-home.js"></script>
 </body>
 </html>

@@ -22,6 +22,7 @@ const [lib, pdfjs, core, S, sign, editor, pdfText, pdfToDoc, render, office] = a
   import("/lib/pdf-lib/pdf-lib.esm.min.js"), import("/lib/pdfjs/pdf.min.mjs"), import("/lib/pdf-toolkit/core.js"),
   import("/lib/pdf-toolkit/session.js"), import("/lib/pdf-toolkit/sign.js"), import("/lib/pdf-toolkit/editor.js"),
   import("/lib/pdf-toolkit/pdfText.js"), import("/lib/pdf-toolkit/pdfToDoc.js"), import("/lib/pdf-toolkit/render.js"), import("/lib/pdf-toolkit/office.js")]);
+const store = await import("/lib/pdf-toolkit/docstore.js");   // D189 P4: Recent, versions, the hand-off — this browser only
 pdfjs.GlobalWorkerOptions.workerSrc = "/lib/pdfjs/pdf.worker.min.mjs";
 const loadOcr = async () => {
   const { default: Tesseract } = await import("/lib/tesseract/tesseract.esm.min.js");
@@ -33,7 +34,7 @@ const session = S.createPdfSession({ el, lib, pdfjs, core, loadOcr, svgNode: edi
   linesOf: pdfText.linesOf, blocksOf: pdfToDoc.blocksOf, docHtmlOf: pdfToDoc.docHtmlOf });
 const ws = $("[data-ws]"), zoomBox = $("#ws-zoom");
 zoomBox.append(session.pagesEl);
-let mode = "edit", zoom = 1, fileSize = 0, dirty = false;
+let mode = "edit", zoom = 1, fileSize = 0, dirty = false, docId = null, autosaving = false;
 const sigs = { signature: null, initials: null };
 
 // ── status, save state ──
@@ -85,6 +86,7 @@ async function pageOp(kind, arg, done) {
     const had = session.changeCount();
     say("Working on the pages…");
     const r = await session.editPages(kind, arg);
+    if (docId) await store.addVersion(docId, session.bytes, "Pages changed");
     await drawStrip(); fitWidth(); drawTools(); sync();
     $("#ws-meta").textContent = `${r.pages} page${r.pages === 1 ? "" : "s"} · ${kb(session.bytes.length)}`;
     say(`${done}.${had ? " Your other changes were written first — undo starts again from here." : ""}`, "good");
@@ -184,6 +186,10 @@ imagePick.addEventListener("change", async () => {
   bmp?.close?.(); drawTools(); say("Click on a page to place the picture.");
 });
 session.on("armed", (a) => { drawTools(); if (a) say(`Click on a page to place the ${a.kind === "whiteout" ? "white-out box" : a.kind}. Esc to stop.`); });
+function setMode(m) {
+  const b = document.querySelector(`.ws-mode[data-mode="${m}"]`);
+  if (b) b.click();
+}
 for (const b of document.querySelectorAll(".ws-mode")) b.addEventListener("click", () => {
   mode = b.dataset.mode;
   for (const x of document.querySelectorAll(".ws-mode")) x.setAttribute("aria-selected", String(x === b));
@@ -288,12 +294,23 @@ document.querySelector('[data-ptab="page"]').addEventListener("click", drawPage)
 async function openFile(file) {
   $("#ws-err").textContent = "";
   if (!/pdf$/i.test(file.type) && !/\.pdf$/i.test(file.name)) { $("#ws-err").textContent = "That isn't a PDF."; return; }
+  return openBytes(new Uint8Array(await file.arrayBuffer()), file.name, {});
+}
+/** Open bytes in the workspace; remembered in Recent (this browser) with a first version unless it is one already. */
+async function openBytes(bytes, fileName, { id = null, note = "Opened", openMode = null } = {}) {
+  $("#ws-err").textContent = "";
   try {
     ws.dataset.state = "loading";
-    fileSize = file.size;
-    const r = await session.open(new Uint8Array(await file.arrayBuffer()), file.name);
+    fileSize = bytes.length;
+    const r = await session.open(bytes, fileName);
     ws.dataset.state = "open";
-    $("#ws-name").textContent = baseName(file.name);
+    $("#ws-name").textContent = baseName(fileName);
+    const fresh = !id;
+    docId = id || store.newId();
+    await store.putDoc({ id: docId, name: baseName(fileName), kind: "PDF", pages: r.pages, size: fileSize, thumb: await session.thumbnail(1, 160) });
+    if (fresh || note === "Restored") await store.addVersion(docId, bytes, note);
+    $("#ws-history").disabled = false;
+    if (openMode) setMode(openMode);
     $("#ws-meta").textContent = `${r.pages} page${r.pages === 1 ? "" : "s"} · ${kb(fileSize)}`;
     $("#ws-kind").hidden = false;
     for (const id of ["#ws-download", "#ws-print", "#ws-to-resume", "#ws-done"]) $(id).disabled = false;
@@ -323,6 +340,7 @@ async function download() {
     const r = dirty ? await saved() : { bytes: session.bytes, lines: 0, items: 0, fromPics: 0, stuck: 0 };
     downloadBytes(r.bytes);
     setSaved("Downloaded · just now");
+    if (docId && dirty) { await store.addVersion(docId, r.bytes, "Downloaded"); await store.putDoc({ id: docId, name: nameBase(), kind: "PDF", pages: session.pages.length, size: r.bytes.length, thumb: await session.thumbnail(1, 160) }); }
     say(dirty ? `Downloaded with ${r.lines} line${r.lines === 1 ? "" : "s"} changed${r.items ? ` and ${r.items} item${r.items === 1 ? "" : "s"} placed` : ""}.${r.fromPics ? ` ${r.fromPics} read from a picture were covered with its paper colour.` : ""}` : "Downloaded — nothing was changed.", "good");
     return r;
   } catch (e) { say(e?.message || String(e), "bad"); return null; }
@@ -363,4 +381,46 @@ document.addEventListener("keydown", (e) => {
 window.addEventListener("beforeunload", (e) => { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
 
 drawTools(); drawText(null); setZoom(1);
+
+// ── D189 P4 · AUTOSAVE: while there are changes, a version every minute (this browser only) ──
+setInterval(async () => {
+  if (!dirty || !docId || autosaving || !session.bytes) return;
+  autosaving = true;
+  try { const r = await session.save(); await store.addVersion(docId, r.bytes, "Autosaved"); setSaved(`Autosaved on this device · ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`); }
+  catch { /* nothing to save yet, or storage is blocked */ } finally { autosaving = false; }
+}, 60000);
+
+// ── D189 P4 · VERSION HISTORY: every version kept for this document; Restore opens it ──
+$("#ws-history").addEventListener("click", async () => {
+  if (!docId) return;
+  const vs = await store.listVersions(docId);
+  const box = el("div", { class: "ws-hist", role: "document" },
+    el("p", { class: "ws-hist__t" }, "Version history"),
+    el("p", { class: "ws-faint ws-small" }, "Kept in this browser only — nothing is uploaded."),
+    vs.length ? el("ol", { class: "ws-hist__list" }, ...vs.map((v, i) => el("li", {},
+      el("span", {}, el("b", {}, v.note), ` · ${new Date(v.at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} · ${kb(v.bytes.length)}${i === 0 ? " · newest" : ""}`),
+      el("button", { type: "button", class: "ws-b", "data-restore": v.id, onclick: async () => {
+        dlg.hidden = true; box.remove();
+        await openBytes(v.bytes, nameBase(), { id: docId, note: "Restored" });
+        say(`Restored the version from ${new Date(v.at).toLocaleString()}. The one you had is kept in the history too.`, "good");
+      } }, "Restore")))) : el("p", { class: "ws-faint" }, "No versions yet."),
+    el("button", { type: "button", class: "ws-b", onclick: () => { dlg.hidden = true; box.remove(); maker.node.hidden = true; } }, "Close"));
+  maker.node.hidden = true;
+  dlg.append(box); dlg.hidden = false;
+});
+
+// ── D189 P4 · arriving with a file (Documents home, a tool page) or a recent document (?doc=) ──
+{
+  const q = new URLSearchParams(location.search);
+  if (q.has("open")) {
+    const h = await store.takeHandoff();
+    if (h?.bytes) await openBytes(h.bytes, h.name || "document.pdf", { openMode: q.get("mode") || h.mode || null });
+    history.replaceState(null, "", location.pathname + (q.get("mode") ? `?mode=${q.get("mode")}` : ""));
+  } else if (q.get("doc")) {
+    const d = await store.getDoc(q.get("doc"));
+    const v = d && (await store.listVersions(d.id))[0];
+    if (v) await openBytes(v.bytes, d.name, { id: d.id, note: "Reopened", openMode: q.get("mode") });
+    else $("#ws-err").textContent = "That document isn't kept in this browser any more.";
+  } else if (q.get("mode")) setMode(q.get("mode"));
+}
 window.__rmWorkspace = session;   // for the walks
