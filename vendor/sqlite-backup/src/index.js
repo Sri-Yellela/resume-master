@@ -23,6 +23,40 @@
 import Database from "better-sqlite3";
 import fs       from "fs";
 import path     from "path";
+import { Worker } from "worker_threads";
+import { createRequire } from "module";
+
+// ⛔ A196 (46j, production 11-12 05:05–05:07Z): an Approve's online backup on the live connection (46g) still froze every
+// request for ~57 s at its END — the last backup step commits the 6.2 GB destination and SQLite's fsync of it runs on
+// the server's one thread (every request then answered in the same millisecond, 05:07:03.29). The running server's
+// copy now runs in a WORKER THREAD on its own read-only connection as `VACUUM INTO` — one consistent snapshot (a
+// second connection's step-wise backup restarts whenever the server writes), a compact plain file, and the fsync
+// blocks only the worker.
+const BETTER_SQLITE3 = createRequire(import.meta.url).resolve("better-sqlite3");
+const WORKER_SRC = `
+const { workerData, parentPort } = require("worker_threads");
+const Database = require(workerData.lib);
+let db = null;
+try {
+  db = new Database(workerData.src, { readonly: true, fileMustExist: true });
+  db.pragma("busy_timeout = 30000");
+  db.prepare("VACUUM INTO ?").run(workerData.dest);
+  db.close(); db = null;
+  parentPort.postMessage({ ok: true });
+} catch (e) {
+  try { db && db.close(); } catch {}
+  parentPort.postMessage({ ok: false, error: String(e && e.message || e) });
+}`;
+/** A196 · VACUUM INTO `dest` from `src` in a worker thread; resolves when the file is written and synced. */
+export function vacuumIntoInWorker(src, dest) {
+  return new Promise((resolve, reject) => {
+    const w = new Worker(WORKER_SRC, { eval: true, workerData: { src, dest, lib: BETTER_SQLITE3 } });
+    let settled = false;
+    w.once("message", (m) => { settled = true; m?.ok ? resolve() : reject(new Error(m?.error || "backup worker failed")); });
+    w.once("error", (e) => { if (!settled) { settled = true; reject(e); } });
+    w.once("exit", (code) => { if (!settled) { settled = true; reject(new Error(`backup worker exited ${code}`)); } });
+  });
+}
 
 // WHERE: set by configureBackups(). draft points it at its data/ (or BACKUP_DATA_DIR, which exists
 // for the tests — one run against the real data/ with a faked disk once deleted two local backups
@@ -367,7 +401,7 @@ export function createBackup(label = "manual") {
  * @param {{ db: import("better-sqlite3").Database, pagesPerStep?: number }} o  db = the server's live connection
  */
 let backupInFlight = null;
-export async function createBackupAsync(label = "manual", { db, pagesPerStep = 256 } = {}) {
+export async function createBackupAsync(label = "manual", { db, pagesPerStep = 256, worker = true } = {}) {
   requireConfigured();
   if (!db || typeof db.backup !== "function") throw new Error("createBackupAsync needs the live better-sqlite3 connection (db)");
   if (backupInFlight) throw new BackupRefused(`a backup is already running (${backupInFlight}); try again when it has finished`);
@@ -384,20 +418,27 @@ export async function createBackupAsync(label = "manual", { db, pagesPerStep = 2
     const need = fileSize(DB_PATH) + fileSize(`${DB_PATH}-wal`);
     const { budget, ceiling, disk } = makeRoom({ filename, label, size: need });
     const started = Date.now();
+    let method = "online-backup";
     try {
-      // pagesPerStep pages a step, then the event loop runs. Measured on a 1.4 GB copy (46g): 4096 pages (16 MB) a step → the
-      // loop paused up to 294 ms; 1024 → 81 ms; 256 (1 MB) → 32 ms, at the same speed (~140 MB/s, 10 s).
-      await db.backup(dest, { progress: () => pagesPerStep });
+      if (worker) {
+        // A196: the copy off the event loop (VACUUM INTO on the worker's own read-only connection).
+        await vacuumIntoInWorker(DB_PATH, dest);
+        method = "vacuum-into-worker";
+      } else {
+        // pagesPerStep pages a step, then the event loop runs. Measured on a 1.4 GB copy (46g): 4096 pages (16 MB) a step → the
+        // loop paused up to 294 ms; 1024 → 81 ms; 256 (1 MB) → 32 ms, at the same speed (~140 MB/s, 10 s).
+        await db.backup(dest, { progress: () => pagesPerStep });
+      }
     } catch (e) {
       removeBackupFile(filename);   // a half-written copy is never left to look like a backup
       throw e;
     }
     const size = fileSize(dest);
-    console.log(`[backup] Saved: ${dest} (${mb(size)}, online backup in ${((Date.now() - started) / 1000).toFixed(1)} s)`);
+    console.log(`[backup] Saved: ${dest} (${mb(size)}, ${method} in ${((Date.now() - started) / 1000).toFixed(1)} s)`);
     const manifest = loadManifest();
-    // walCheckpointed: true — the online backup reads committed WAL pages through the connection, so the file is the
-    // whole database (the field's meaning: "this backup can be trusted to be current").
-    manifest.unshift({ filename, label, created: new Date().toISOString(), size, walCheckpointed: true, method: "online-backup" });
+    // walCheckpointed: true — both methods read committed WAL pages (the online backup through the connection, VACUUM
+    // INTO through its snapshot), so the file is the whole database ("this backup can be trusted to be current").
+    manifest.unshift({ filename, label, created: new Date().toISOString(), size, walCheckpointed: true, method });
     const { keep, drop, keptBytes } = selectRetained(manifest, { maxBytes: budget, ceiling });
     for (const e of drop) removeBackupFile(e.filename);
     sweepOrphanSidecars();

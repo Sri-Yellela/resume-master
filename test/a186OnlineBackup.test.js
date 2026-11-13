@@ -26,11 +26,11 @@ test("a186: runBackupAsync takes a consistent online backup of the live store wh
     clearInterval(tick);
     assert.ok(r?.filename, lines.join("\n"));
     assert.ok(wrote > 0 && maxGap < 250, `the store kept writing (${wrote}) and the loop ran (longest pause ${maxGap} ms)`);
-    assert.equal(JSON.parse(lines[0]).method, "online-backup");
+    assert.equal(JSON.parse(lines[0]).method, "vacuum-into-worker");   // draft A196 (46j, changed on purpose): off the thread
     const copy = openStore(path.join(dir, "backups", r.filename));
     assert.ok(copy.prepare("SELECT COUNT(*) FROM t46").pluck().get() >= 20000);
     copy.close();
-    assert.equal(listBackups()[0].method, "online-backup");
+    assert.equal(listBackups()[0].method, "vacuum-into-worker");
   } finally { try { db?.close(); } catch {} try { fs.rmSync(dir, { recursive: true, force: true }); } catch {} }
 });
 

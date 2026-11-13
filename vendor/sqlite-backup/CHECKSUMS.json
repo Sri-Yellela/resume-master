@@ -7,7 +7,7 @@
     "README.md": "8068a334baffb95c9b2dceb40cd762281e54ec558fbf101efb000e4cfc48c4d9",
     "package.json": "ad7dd58c30c1be12ac005d27d09cf0eb8c356d80ca5b1cb9b45425f990cc6e8e",
     "scripts/checksums.mjs": "8581103849343b74f232f435be7cb58bf0135bc81045f89b875130769a35dda5",
-    "src/index.js": "6da3b84aed87c35646bf9c1c581947f4c33a888660a2aa98ced467bfc3046a9c",
+    "src/index.js": "926cb531a6a096c23a6d7c76e2c10766481587cd5855df70babb710a3a2d14d4",
     "test/checksums.test.js": "a29e3f3ac5c269f0a77c3728c50fb91e6cf0d7a2b94030d272e39a560f67059f"
   }
 }
