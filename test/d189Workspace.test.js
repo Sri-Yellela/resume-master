@@ -87,3 +87,17 @@ test("d189 P4 · d189AutosaveAndRestore + d189ToolPagesOpenWorkspace: versions k
   assert.match(home, /data-docs-home=""/); assert.match(home, /id="docs-recent"/);
   assert.match(dh, /location\.href = `\/workspace\/\?open=1&mode=\$\{encodeURIComponent\(mode\)\}`;/);
 });
+
+test('d189 P5 · d189KeyboardReachable + d189PhoneBottomSheets: the tool bar is one tab stop moved by the arrows, ? lists the shortcuts, dialogs keep and give back the focus; on a phone the strip and the properties are bottom sheets', () => {
+  const ws = read('public/workspace/workspace.js'), css = read('public/workspace/workspace.css'), html = read('public/workspace/index.html');
+  assert.match(ws, /const to = \{ ArrowRight: i \+ 1, ArrowLeft: i - 1, Home: 0, End: tools\.length - 1 \}\[e\.key\];/);
+  assert.match(ws, /if \(e\.key === "\?" \) \{ e\.preventDefault\(\); openKeys\(\); \}/);
+  assert.match(ws, /if \(e\.key === "Escape" && !dlg\.hidden\) \{ e\.preventDefault\(\); closeDialog\(\); return; \}/);
+  assert.match(ws, /lastFocus\?\.focus\?\.\(\);/, 'the focus goes back where it was');
+  assert.match(ws, /else if \(!e\.shiftKey && document\.activeElement === f\[f\.length - 1\]\) \{ e\.preventDefault\(\); f\[0\]\.focus\(\); \}/, 'Tab wraps inside a dialog');
+  assert.match(html, /id="ws-keys"[^>]*aria-label="Keyboard shortcuts"/);
+  assert.match(html, /id="ws-show-pages" aria-expanded="false" aria-controls="ws-strip"/);
+  assert.match(css, /\.ws-strip\.ws-sheet--open, \.ws-props\.ws-sheet--open \{ transform: none; \}/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{ \.ws-strip, \.ws-props, \.ws-tool, \.ws-b \{ transition: none !important; \} \}/);
+});
+

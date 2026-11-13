@@ -129,3 +129,27 @@ button, select, input { font: inherit; color: inherit; }
 .ws-hist__t { margin: 0; font: 400 24px/1.2 "Instrument Serif", Georgia, serif; }
 .ws-hist__list { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
 .ws-hist__list li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border-radius: 10px; background: var(--well); font-size: 13px; }
+
+/* ── D189 P5 · shortcuts, phones, accessibility ── */
+.ws-keys { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: 13px; }
+.ws-keys dt { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; color: var(--accent); white-space: nowrap; }
+.ws-keys dd { margin: 0; color: var(--muted); }
+.ws-sheetbar { display: none; }
+@media (max-width: 820px) {
+  .ws-body { grid-template-columns: minmax(0, 1fr); }
+  /* the strip and the properties leave the flow: bottom sheets over the canvas, opened from the sheet bar */
+  .ws-strip, .ws-props {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 15; max-height: 62vh; overflow: auto; background: var(--card);
+    border: 0; border-top: 1px solid var(--line); border-radius: 18px 18px 0 0; box-shadow: 0 -12px 32px rgba(0,0,0,.5);
+    transform: translateY(105%); transition: transform .24s cubic-bezier(.22, 1, .36, 1); padding: 16px;
+  }
+  .ws-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); }
+  .ws-thumb { width: auto; }
+  .ws-strip.ws-sheet--open, .ws-props.ws-sheet--open { transform: none; }
+  .ws-sheetbar { display: flex; gap: 8px; justify-content: center; padding: 8px 12px; border-top: 1px solid var(--line); background: var(--bg); position: sticky; bottom: 0; z-index: 16; }
+  .ws-top { gap: 6px; }
+  .ws-top .ws-b:not(.ws-ic):not(.ws-p) { padding: 0 9px; }
+  #ws-to-resume { display: none; }   /* the résumé road is in the desktop workspace; the phone keeps its tools */
+  .ws-canvas { min-height: 70vh; }
+}
+@media (prefers-reduced-motion: reduce) { .ws-strip, .ws-props, .ws-tool, .ws-b { transition: none !important; } }
