@@ -59,3 +59,48 @@
 .pt-preview[hidden] { display: none; }
 @media (max-width: 520px) { .pt-preview { height: 400px; } }
 @media (prefers-reduced-motion: reduce) { .pt-page img { transition: none; } }
+
+/* ── A203 · Edit PDF and Sign PDF: the palette, the pages with their layer of placed items, the signature maker ── */
+.pt-ed-palette { display: flex; flex-wrap: wrap; gap: 6px; }
+.pt-ed-add[aria-pressed="true"] { background: var(--pt-accent); color: var(--pt-on-accent); border-color: var(--pt-accent); }
+.pt-ed-hint { margin: 0; }
+.pt-ed-slots { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.pt-ed-slots:empty { display: none; }
+.pt-ed-slot { display: inline-flex; gap: 6px; align-items: center; }
+.pt-ed-slotsvg { height: 28px; width: auto; max-width: 140px; }
+.pt-ed-pages { display: grid; gap: 18px; justify-items: center; }
+.pt-ed-pages:empty { display: none; }
+.pt-ed-page { position: relative; margin: 0; width: 100%; max-width: 820px; box-shadow: 0 1px 6px rgba(0, 0, 0, 0.18); background: #fff; }
+.pt-ed-page figcaption { position: absolute; top: 100%; left: 0; font-size: 0.8em; padding-top: 2px; }
+.pt-ed-canvas { display: block; width: 100%; height: 100%; }
+.pt-ed-layer { position: absolute; inset: 0; cursor: crosshair; }
+.pt-ed-item { position: absolute; box-sizing: border-box; outline: 1px dashed rgba(30, 90, 200, 0.55); cursor: move; touch-action: none; }
+.pt-ed-item:focus-visible, .pt-ed-item:focus-within { outline: 2px solid rgba(30, 90, 200, 0.9); }
+.pt-ed-item--whiteout { background: #fff; }
+.pt-ed-item img, .pt-ed-sig { display: block; width: 100%; height: 100%; pointer-events: none; }
+.pt-ed-text {
+  display: block; width: 100%; height: 100%; box-sizing: border-box; margin: 0; padding: 0; border: 0; resize: none; overflow: hidden;
+  background: rgba(255, 255, 255, 0.35); color: #000; font-family: Helvetica, Arial, sans-serif; line-height: 1.2; cursor: text;
+}
+.pt-ed-text:focus { outline: none; }
+.pt-ed-tools { position: absolute; left: 0; top: calc(100% + 2px); display: none; gap: 2px; }
+.pt-ed-item:focus-within .pt-ed-tools { display: inline-flex; }
+.pt-ed-x {
+  position: absolute; right: -10px; top: -10px; width: 20px; height: 20px; padding: 0; border-radius: 50%; border: 1px solid var(--pt-border);
+  background: var(--pt-surface); color: var(--pt-text); font-size: 11px; line-height: 1; cursor: pointer; display: none;
+}
+.pt-ed-item:hover .pt-ed-x, .pt-ed-item:focus-within .pt-ed-x { display: block; }
+.pt-ed-resize { position: absolute; right: -5px; bottom: -5px; width: 10px; height: 10px; background: rgba(30, 90, 200, 0.9); cursor: nwse-resize; }
+.pt-ed-grip { position: absolute; left: -5px; top: -5px; width: 10px; height: 10px; border: 2px solid rgba(30, 90, 200, 0.9); background: var(--pt-surface); box-sizing: border-box; }
+.pt-ed-maker { display: grid; gap: 10px; padding: 14px; border: 1px solid var(--pt-border); border-radius: var(--pt-radius); background: var(--pt-surface); }
+.pt-ed-title { margin: 0; font-size: 1.05em; }
+.pt-ed-body { display: grid; gap: 8px; }
+.pt-ed-pad { width: 100%; max-width: 640px; height: auto; aspect-ratio: 900 / 260; border: 1px dashed var(--pt-border); border-radius: calc(var(--pt-radius) * 0.6); background: #fff; touch-action: none; cursor: crosshair; }
+.pt-ed-preview { min-height: 60px; display: flex; align-items: center; padding: 8px; background: #fff; border-radius: calc(var(--pt-radius) * 0.6); border: 1px solid var(--pt-border); }
+.pt-ed-preview:empty::before { content: "Your signature shows here."; color: #888; font-size: 0.9em; }
+.pt-ed-previewsvg { max-height: 110px; max-width: 100%; width: auto; height: 110px; }
+@media (max-width: 600px) { .pt-ed-x { display: block; } }
+/* A203: a grid item's min-width is its content's by default — the 900 px drawing pad and the 1.6× page canvases widened
+   the whole panel past a phone (a 390 px screen laid out 506 px wide). Every column may shrink; canvases fit their box. */
+.pt-panel > *, .pt-ed-maker > *, .pt-ed-body > *, .pt-ed-pages > * { min-width: 0; }
+.pt-ed-pad, .pt-ed-canvas { max-width: 100%; }

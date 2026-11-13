@@ -241,3 +241,87 @@ export async function compress(lib, bytes, { reencodeJpeg, maxDimension = 1600, 
       : `${recompressed} of ${images} picture${images === 1 ? "" : "s"} made smaller. Text is untouched and still selectable.`,
   };
 }
+
+// ── A203 (owner 11-13: "the basic pdf editor … and also the signature one") ─────────────────────────────────────────
+//
+// Edit / Sign: what the person placed on the pages, written INTO the PDF — text, a white-out box, a picture, and a
+// signature or initials as a VECTOR path (sign.js). Every item is placed the way the page is SHOWN: `fx, fy, fw, fh`
+// are fractions of the displayed page (top-left origin), so a page with /Rotate 90 / 180 / 270 takes each item upright,
+// where the person put it. Nothing else on the page changes; a white-out covers, it does not delete the text beneath.
+
+const KINDS = new Set(["text", "whiteout", "image", "svg"]);
+
+/** The displayed page's box → PDF user space, for a page with /Rotate r (its crop box W × H at x0, y0). */
+export function displayToPdf({ W, H, x0 = 0, y0 = 0, r = 0 }, dx, dy) {
+  const k = ((r % 360) + 360) % 360;
+  const [px, py] = k === 90 ? [dy, dx] : k === 180 ? [W - dx, dy] : k === 270 ? [W - dy, H - dx] : [dx, H - dy];
+  return { x: x0 + px, y: y0 + py };
+}
+
+const clamp01 = (n) => Math.min(1, Math.max(0, Number(n)));
+const colorOf = (lib, c, fallback) => {
+  const v = Array.isArray(c) && c.length === 3 ? c.map(clamp01) : fallback;
+  return lib.rgb(v[0], v[1], v[2]);
+};
+
+/**
+ * @param items  [{ page (0-based), kind: "text" | "whiteout" | "image" | "svg", fx, fy, fw, fh,
+ *                  text?, size? (pt), color? [r,g,b 0–1],           — text
+ *                  image? (JPEG / PNG bytes),                       — image
+ *                  d?, vbw?, vbh?, strokeWidth? (lines when set)    — svg (a signature / initials)
+ *               }]
+ */
+export async function applyEdits(lib, bytes, items) {
+  if (!Array.isArray(items) || !items.length) throw new ToolkitError("Add something to a page first.");
+  const doc = await open(lib, bytes);
+  const pages = doc.getPages();
+  let font = null;
+  for (const [n, it] of items.entries()) {
+    const page = pages[it?.page];
+    if (!page) throw new ToolkitError(`Item ${n + 1} is on a page this PDF does not have.`);
+    if (!KINDS.has(it.kind)) throw new ToolkitError(`Item ${n + 1} is not something this tool can place.`);
+    const crop = page.getCropBox();
+    const geo = { W: crop.width, H: crop.height, x0: crop.x, y0: crop.y, r: page.getRotation().angle };
+    const turned = geo.r % 180 !== 0;
+    const Dw = turned ? geo.H : geo.W, Dh = turned ? geo.W : geo.H;
+    const dx = clamp01(it.fx) * Dw, dy = clamp01(it.fy) * Dh;
+    const dw = Math.max(0, Number(it.fw) || 0) * Dw, dh = Math.max(0, Number(it.fh) || 0) * Dh;
+    const rotate = lib.degrees(geo.r);
+    const bottomLeft = displayToPdf(geo, dx, dy + dh);
+    const topLeft = displayToPdf(geo, dx, dy);
+    if (it.kind === "whiteout") {
+      if (!dw || !dh) continue;
+      page.drawRectangle({ ...bottomLeft, width: dw, height: dh, rotate, color: colorOf(lib, it.color, [1, 1, 1]), borderWidth: 0 });
+    } else if (it.kind === "image") {
+      const kind = it.image && sniffImage(it.image);
+      if (!kind) throw new ToolkitError(`Item ${n + 1}: a picture must be a JPEG or PNG.`);
+      const img = kind === "jpeg" ? await doc.embedJpg(it.image) : await doc.embedPng(it.image);
+      page.drawImage(img, { ...bottomLeft, width: dw || img.width, height: dh || img.height, rotate });
+    } else if (it.kind === "text") {
+      const text = String(it.text ?? "").replace(/\r/g, "");
+      if (!text.trim()) continue;
+      font ??= await doc.embedFont(lib.StandardFonts.Helvetica);
+      const size = Math.min(144, Math.max(4, Number(it.size) || 12));
+      const lineH = size * 1.2;
+      // Helvetica speaks WinAnsi: a character it cannot draw becomes "?" rather than failing the whole save
+      const safe = (line) => [...line].map(ch => { try { font.encodeText(ch); return ch; } catch { return "?"; } }).join("");
+      text.split("\n").forEach((line, i) => {
+        const at = displayToPdf(geo, dx, dy + size * 0.93 + i * lineH);   // the baseline, one ascent below the top
+        page.drawText(safe(line), { ...at, size, font, color: colorOf(lib, it.color, [0, 0, 0]), rotate });
+      });
+    } else {
+      const d = String(it.d || "");
+      const vbw = Number(it.vbw), vbh = Number(it.vbh);
+      if (!d || !(vbw > 0) || !(vbh > 0)) throw new ToolkitError(`Item ${n + 1}: the signature is empty.`);
+      const scale = Math.min((dw || vbw) / vbw, (dh || vbh) / vbh);
+      const color = colorOf(lib, it.color, [0.07, 0.07, 0.12]);
+      const common = { ...topLeft, scale, rotate };
+      if (it.strokeWidth) {
+        page.drawSvgPath(d, { ...common, borderColor: color, borderWidth: Number(it.strokeWidth), borderLineCap: lib.LineCapStyle.Round });
+      } else {
+        page.drawSvgPath(d, { ...common, color, fillRule: lib.FillRule?.NonZero });
+      }
+    }
+  }
+  return save(doc);
+}
