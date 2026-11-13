@@ -51,7 +51,9 @@ export async function runBackupAsync(label, log = console, db = null) {
   if (!db) return runBackup(label, log);
   try {
     const r = await createBackupAsync(label, { db });
-    log.log(JSON.stringify({ t: new Date().toISOString(), backup: label, ok: !!r, file: r?.filename ?? null, method: "online-backup" }));
+    // draft A196 (46j): the vendored copy now runs VACUUM INTO in a worker thread (the online backup's final fsync froze
+    // draft's site ~1 min); the method is the one the manifest recorded.
+    log.log(JSON.stringify({ t: new Date().toISOString(), backup: label, ok: !!r, file: r?.filename ?? null, method: listBackups()[0]?.method ?? null }));
     return r;
   } catch (e) {
     log.error(JSON.stringify({ t: new Date().toISOString(), backup: label, ok: false,
