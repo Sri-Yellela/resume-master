@@ -437,7 +437,11 @@ export async function applyTextEdits(lib, bytes, edits, others = []) {
     const page = pages[n];
     const widths = await fontWidthsOf(lib, doc, page);
     const src = pageContent(lib, page);
-    const res = stripText(src, list, widths);
+    // ⭐ A203 (4): a run read by OCR (`cover: true`) is pixels in a picture, not text the stream draws — it is never looked
+    // for in the stream (a stripped neighbour would be lost); it is covered with its background and rewritten.
+    const strip = list.filter(e => !e.cover);
+    const res0 = stripText(src, strip, widths);
+    const res = { ...res0, removed: list.map(e => (e.cover ? 0 : res0.removed[strip.indexOf(e)])) };
     if (res.touched.size) {
       const enc = new Uint8Array(res.content.length);
       for (let i = 0; i < res.content.length; i++) enc[i] = res.content.charCodeAt(i) & 255;

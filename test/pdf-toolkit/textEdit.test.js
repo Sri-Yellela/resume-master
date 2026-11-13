@@ -103,3 +103,16 @@ test("a203(2) applyTextEdits: text the stream can't account for is covered with 
   const [after] = await textItems(r.bytes);
   assert.ok(after.some(i => i.str === "New"));
 });
+
+test("a203(4) applyTextEdits: a line read by OCR (cover) is painted over and rewritten — the stream's real text is never stripped for it", async () => {
+  const bytes = await letter();
+  const [items] = await textItems(bytes);
+  const real = items.find(i => /Dear Hiring/.test(i.str));
+  // an OCR field that happens to sit on a real line: covering must not take the real words out of the stream
+  const r = await applyTextEdits(lib, bytes, [{ page: 0, transform: real.transform, width: real.width, height: real.height, text: "Hello", cover: true }]);
+  assert.equal(r.removed, 0, "nothing stripped for a covered field");
+  assert.equal(r.covered, 1);
+  const [after] = await textItems(r.bytes);
+  assert.ok(after.some(i => /Dear Hiring Manager/.test(i.str)), "the real words stay in the file (under the cover)");
+  assert.ok(after.some(i => i.str === "Hello"));
+});

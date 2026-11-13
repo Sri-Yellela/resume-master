@@ -120,7 +120,7 @@ export function mountPdfToolkit(root, { lib, pdfjs, zipSync = null, loadOcr = nu
   };
   const one = (input, s) => { const f = input.files?.[0]; if (!f) { say(s, "Choose a PDF first.", "bad"); return null; } return f; };
 
-  const editorHelpers = () => ({ el, lib, pdfjs, core, status, say, fail, results, download, fileInput, base, readBytes });
+  const editorHelpers = () => ({ el, lib, pdfjs, core, status, say, fail, results, download, fileInput, base, readBytes, loadOcr });   // A203 (4): + OCR
   const BUILD = {
     edit() { return buildTextEditor(editorHelpers()); },   // A203 (2): inline, the page's own text
     sign() { return buildPageEditor(editorHelpers(), "sign"); },   // A203
