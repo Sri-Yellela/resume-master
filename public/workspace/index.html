@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Workspace — Resume Master</title>
+  <meta name="description" content="Edit a PDF where its text is, fill and sign it — in your browser. Nothing is uploaded.">
+  <link rel="canonical" href="https://resumemaster.one/workspace/">
+  <link rel="stylesheet" href="/lib/pdf-toolkit/styles.css">
+  <link rel="stylesheet" href="/workspace/workspace.css">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <script type="module" src="/workspace/workspace.js"></script>
+</head>
+<body>
+  <!-- D189 P2 · the workspace shell (the approved sketch, docs/sketches/D189 workspace.html in draft): top bar · modes · tool bar ·
+       page strip · canvas + navigator · properties. Each mode swaps the tool bar; the layout never moves. -->
+  <div class="ws" data-ws="" data-state="empty">
+    <header class="ws-top" role="banner">
+      <a class="ws-stamp" href="/" aria-label="Resume Master — home"><span>RM</span></a>
+      <span class="ws-name" id="ws-name" contenteditable="plaintext-only" spellcheck="false" role="textbox" aria-label="File name" title="Click to rename">No file open</span>
+      <span class="ws-meta" id="ws-meta"></span>
+      <span class="ws-kind" id="ws-kind" hidden>PDF edit</span>
+      <span class="ws-saved" id="ws-saved" role="status"></span>
+      <span class="ws-grow"></span>
+      <button class="ws-b ws-ic" id="ws-undo" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>↶</button>
+      <button class="ws-b ws-ic" id="ws-redo" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled>↷</button>
+      <button class="ws-b" id="ws-download" disabled>Download PDF</button>
+      <button class="ws-b ws-ic" id="ws-print" title="Print (Ctrl+P)" aria-label="Print" disabled>⎙</button>
+      <button class="ws-b" id="ws-to-resume" disabled title="Turn this PDF's text into an editable résumé (sections, lists, margins)">Make this an editable résumé</button>
+      <button class="ws-b ws-p" id="ws-done" disabled>Done</button>
+    </header>
+    <nav class="ws-modes" role="tablist" aria-label="Modes">
+      <button role="tab" class="ws-mode" data-mode="edit" aria-selected="true">Edit</button>
+      <button role="tab" class="ws-mode" data-mode="sign" aria-selected="false">Fill &amp; sign</button>
+    </nav>
+    <div class="ws-tools" id="ws-tools" role="toolbar" aria-label="Tools"></div>
+    <div class="ws-body">
+      <aside class="ws-strip" id="ws-strip" aria-label="Pages"></aside>
+      <main class="ws-canvas" id="ws-canvas" aria-label="The document">
+        <div class="ws-empty" id="ws-empty">
+          <p class="ws-empty__t">Drop a PDF here</p>
+          <p class="ws-empty__s">or <label class="ws-b ws-p"><input type="file" id="ws-open" accept="application/pdf,.pdf" hidden>Open a PDF</label> — it opens here and never leaves this device.</p>
+          <p class="ws-empty__err" id="ws-err" role="alert"></p>
+        </div>
+        <div class="ws-zoom" id="ws-zoom"></div>
+        <div class="ws-nav" id="ws-nav" hidden>
+          <button class="ws-b ws-ic" id="ws-prev" aria-label="Previous page">‹</button>
+          <span id="ws-pageno" aria-live="polite">1 / 1</span>
+          <button class="ws-b ws-ic" id="ws-next" aria-label="Next page">›</button>
+          <span class="ws-sep"></span>
+          <button class="ws-b ws-ic" id="ws-out" aria-label="Zoom out">−</button>
+          <span id="ws-pct">100 %</span>
+          <button class="ws-b ws-ic" id="ws-in" aria-label="Zoom in">+</button>
+          <button class="ws-b" id="ws-fitw">Fit width</button>
+          <button class="ws-b" id="ws-fitp">Fit page</button>
+        </div>
+      </main>
+      <aside class="ws-props" id="ws-props" aria-label="Properties">
+        <div class="ws-ptabs" role="tablist">
+          <button role="tab" class="ws-ptab" data-ptab="text" aria-selected="true">Text</button>
+          <button role="tab" class="ws-ptab" data-ptab="page" aria-selected="false">Page</button>
+        </div>
+        <section class="ws-panel" data-panel="text" id="ws-text"></section>
+        <section class="ws-panel" data-panel="page" id="ws-page" hidden></section>
+        <section class="ws-changes" id="ws-changes" aria-live="polite"></section>
+      </aside>
+    </div>
+    <p class="ws-status" id="ws-status" role="status"></p>
+  </div>
+  <div class="ws-dialog" id="ws-dialog" hidden role="dialog" aria-modal="true" aria-label="Your signature"></div>
+</body>
+</html>
