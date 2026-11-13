@@ -165,3 +165,15 @@
 .pt-tx:hover { box-shadow: 0 0 0 1.5px rgba(30, 90, 200, 0.65); }
 .pt-tx--ocr:focus, .pt-tx--ocr:hover { outline-color: rgba(30, 90, 200, 0.9); }
 .pt-sb-bar { top: 64px; }   /* A203 (4): below the site's fixed 56 px bar */
+/* D189 P3 · Fill out: the PDF's own form fields as inputs where they are — a pale field tint, like a form in any viewer */
+.pt-fm { position: absolute; box-sizing: border-box; margin: 0; padding: 0 3px; border: 1px solid rgba(30, 90, 200, .45); border-radius: 2px;
+  background: rgba(214, 228, 255, .55); color: #111; font-family: Helvetica, Arial, sans-serif; outline: none; }
+.pt-fm:focus { border-color: rgba(30, 90, 200, .95); background: rgba(214, 228, 255, .8); }
+.pt-fm--text { resize: none; }
+.pt-fm--check { width: auto; height: auto; accent-color: #1e5ac8; padding: 0; background: none; border: 0; }
+/* Redact: a dashed dark box until the download, when the text under it leaves the file and the box is painted */
+.pt-ed-item--redact { background: rgba(0, 0, 0, .72); outline: 1px dashed #f2a090; }
+.pt-ed-redact-label { display: grid; place-items: center; width: 100%; height: 100%; color: #f2a090; font: 700 10px/1 system-ui; letter-spacing: .08em; text-transform: uppercase; pointer-events: none; }
+/* D189 P3: with a tool armed, the page's text fields and form inputs let the click through to the page (a redaction or a box goes over text) */
+.pt-ed-pages[data-armed]:not([data-armed=""]) .pt-tx, .pt-ed-pages[data-armed]:not([data-armed=""]) .pt-fm { pointer-events: none; }
+.pt-ed-pages[data-armed]:not([data-armed=""]) .pt-ed-layer { cursor: crosshair; }

@@ -41,6 +41,9 @@ test("d189Shell: the approved zones — top bar, modes, tool bar, page strip, ca
   }
   assert.match(html, /data-mode="edit"[^>]*>Edit</);
   assert.match(html, /data-mode="sign"[^>]*>Fill &amp; sign</);
+  // P3: the modes D188 adopts (Annotate stays LATER)
+  assert.match(html, /data-mode="pages"[^>]*>Pages</);
+  assert.match(html, /data-mode="convert"[^>]*>Convert</);
 });
 
 test("d189ModesSwapToolsNotLayout: a mode changes the tool bar only — no style keyed to the mode moves the workspace", () => {
@@ -59,4 +62,15 @@ test("d189TokensOnly + d189PageAlwaysPaperColours: the workspace's colours are i
   const literals = (rest.match(/#[0-9a-fA-F]{3,8}\b/g) || []).filter(h => !/^#(fff|ffffff|0f0f0f|111)$/i.test(h));
   assert.deepEqual(literals, [], "every colour comes from :root");
   assert.match(css, /\.ws-thumb img \{[^}]*background: #fff;/, "a page is drawn on white whatever the theme");
+});
+
+test("d189 P3: Fill out, Redact, Pages and Convert live in the ONE session / shell — not a second copy", () => {
+  const session = read("src/pdf-toolkit/session.js"), ws = read("public/workspace/workspace.js");
+  assert.match(session, /async function drawFormFields\(page, state\)/, "the PDF's own fields drawn as inputs");
+  assert.match(session, /if \(filled\.length\) \{ form = await core\.fillForm\(lib, out, filled\);/, "written first on save");
+  assert.match(session, /red = await core\.redact\(lib, out, redactions\.map/, "redactions last, truly");
+  assert.match(session, /async editPages\(kind, arg = \{\}\) \{/);
+  assert.match(ws, /pages: \[\["rotl", "⟲", "Rotate left"\]/);
+  assert.match(ws, /convert: \[\["compress", "⇲", "Compress"\]/);
+  assert.match(ws, /under your \$\{limit\} MB limit/, "compress names the size against the form's limit (d188CompressShowsSizeVsLimit)");
 });

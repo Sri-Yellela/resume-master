@@ -230,3 +230,32 @@ export function stripText(src, boxes, fontWidths) {
   out += src.slice(at);
   return { content: out, removed, touched: new Set(drop.keys()), runs, dropped: [...drop.values()] };
 }
+
+/**
+ * ⭐ D189 P3 · REDACT (D188: "a TRUE redaction that removes the text, not a black box over it"): every text-showing operator
+ * whose glyphs touch one of the rectangles (user space, axis-aligned { x0, y0, x1, y1 }) is replaced by a displacement of the
+ * same advance — the words leave the file, nothing else on the page moves.
+ * @returns { content, removed (operators taken out), texts (the removed runs' raw text, for the record — never shown) }
+ */
+export function stripInRects(src, rects, fontWidths) {
+  const ops = parseOps(tokenize(src));
+  const runs = textRuns(ops, fontWidths);
+  const hit = (r) => rects.some(q => {
+    const xs = [r.start[0], r.end[0]], ys = [r.start[1], r.end[1]];
+    const lo = Math.min(...xs), hi = Math.max(...xs), y = (ys[0] + ys[1]) / 2;
+    // the run's baseline segment, raised by its height, overlaps the rectangle
+    // strictly overlapping across (a word right next to the box is not taken), and its height reaching into the box
+    return hi > q.x0 && lo < q.x1 && y + (r.size || 10) * 0.8 >= q.y0 && y - (r.size || 10) * 0.25 <= q.y1;
+  });
+  const drop = runs.filter(hit);
+  if (!drop.length) return { content: src, removed: 0 };
+  let out = "", at = 0;
+  for (const r of drop.sort((a, b) => a.index - b.index)) {
+    const o = ops[r.index];
+    const k = r.Tfs * r.Th ? -(r.advance * 1000) / (r.Tfs * r.Th) : 0;
+    const move = r.op === "'" ? "T* " : r.op === "\"" ? `${fmt(o.args[0])} Tw ${fmt(o.args[1])} Tc T* ` : "";
+    out += src.slice(at, o.s) + `${move}[${fmt(k)}] TJ`;
+    at = o.e;
+  }
+  return { content: out + src.slice(at), removed: drop.length };
+}

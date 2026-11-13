@@ -71,6 +71,7 @@ export function createPdfSession(o) {
   const { el, lib, pdfjs, core } = o;
   const pagesEl = el("div", { class: "pt-ed-pages pt-tx-pages", "data-pt-tx-pages": true });
   const fields = [], items = [], pages = [], ocrQueue = [];
+  const formFields = [];   // D189 P3 · Fill out: the PDF's own form fields (AcroForm widgets), as inputs on the page
   const handlers = {};
   const emit = (ev, ...a) => (handlers[ev] || []).forEach(fn => fn(...a));
   const undoStack = [], redoStack = [];
@@ -158,7 +159,8 @@ export function createPdfSession(o) {
     const state = { canvas, ctx, v1, layer, wrap, n, ocrDone: false, rotate: page.rotate || 0, size: [v1.width, v1.height] };
     pages.push(state);
     layer.addEventListener("click", (e) => {
-      if (!armed || e.target !== layer) return;
+      // with a tool armed the page's fields let the click through (CSS), so a box can go over text — never over an item
+      if (!armed || e.target.closest(".pt-ed-item")) return;
       const r = layer.getBoundingClientRect();
       place(armed.kind, n - 1, (e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height, armed.payload);
     });
@@ -194,9 +196,61 @@ export function createPdfSession(o) {
         text, font: faceOf(fontObj.name || first.it.fontName, fontObj), pdfFont: fontObj.name || null,
       });
     }
+    await drawFormFields(page, state);
     page.cleanup();
     pagesEl.append(wrap);
     if (!lines.length && o.loadOcr) ocrQueue.push(state);
+  }
+
+  // ── Fill out (D189 P3, D188 ADOPT NOW): the PDF's own form fields — text, checkbox, radio, dropdown — as inputs where they are ──
+  async function drawFormFields(page, state) {
+    let annots = [];
+    try { annots = await page.getAnnotations({ intent: "display" }); } catch { return; }
+    for (const a of annots) {
+      if (a.subtype !== "Widget" || !a.fieldName || a.readOnly || !a.rect) continue;
+      const [x1, y1, x2, y2] = state.v1.convertToViewportRectangle(a.rect);
+      const box = { left: Math.min(x1, x2), top: Math.min(y1, y2), w: Math.abs(x2 - x1), h: Math.abs(y2 - y1) };
+      const kind = a.fieldType === "Tx" ? "text" : a.fieldType === "Ch" ? (a.combo ? "dropdown" : "list") : a.checkBox ? "checkbox" : a.radioButton ? "radio" : null;
+      if (!kind) continue;
+      let node;
+      const ff = { kind, name: a.fieldName, page: state.n - 1, changed: false };
+      if (kind === "text") {
+        node = el(a.multiLine ? "textarea" : "input", { class: "pt-fm pt-fm--text", "aria-label": a.alternativeText || a.fieldName, "data-field": a.fieldName });
+        node.value = ff.orig = ff.value = String(a.fieldValue ?? "");
+        node.addEventListener("input", () => { ff.value = node.value; ff.changed = ff.value !== ff.orig; emit("change"); });
+      } else if (kind === "checkbox") {
+        node = el("input", { type: "checkbox", class: "pt-fm pt-fm--check", "aria-label": a.alternativeText || a.fieldName, "data-field": a.fieldName });
+        node.checked = ff.orig = ff.value = !!a.fieldValue && a.fieldValue !== "Off";
+        node.addEventListener("change", () => { ff.value = node.checked; ff.changed = ff.value !== ff.orig; emit("change"); });
+      } else if (kind === "radio") {
+        node = el("input", { type: "radio", name: `rm-${a.fieldName}`, class: "pt-fm pt-fm--check", value: a.buttonValue, "aria-label": `${a.alternativeText || a.fieldName}: ${a.buttonValue}`, "data-field": a.fieldName });
+        node.checked = a.fieldValue === a.buttonValue;
+        ff.orig = ff.value = a.fieldValue || ""; ff.option = a.buttonValue;
+        node.addEventListener("change", () => { if (!node.checked) return; for (const g of formFields.filter(x => x.name === a.fieldName)) { g.value = a.buttonValue; g.changed = g.value !== g.orig; } emit("change"); });
+      } else {
+        node = el("select", { class: "pt-fm pt-fm--select", "aria-label": a.alternativeText || a.fieldName, "data-field": a.fieldName },
+          el("option", { value: "" }, "—"), ...(a.options || []).map(op => el("option", { value: op.exportValue }, op.displayValue || op.exportValue)));
+        const cur = Array.isArray(a.fieldValue) ? a.fieldValue[0] : a.fieldValue;
+        node.value = ff.orig = ff.value = String(cur ?? "");
+        node.addEventListener("change", () => { ff.value = node.value; ff.changed = ff.value !== ff.orig; emit("change"); });
+      }
+      Object.assign(node.style, { left: `${(box.left / state.v1.width) * 100}%`, top: `${(box.top / state.v1.height) * 100}%`,
+        width: `${(box.w / state.v1.width) * 100}%`, height: `${(box.h / state.v1.height) * 100}%` });
+      if (kind === "text" || kind === "dropdown" || kind === "list") node.style.fontSize = `calc(var(--pt-k, 1) * ${Math.max(7, Math.min(14, box.h * 0.62))}px)`;
+      ff.node = node;
+      formFields.push(ff);
+      state.layer.append(node);
+    }
+  }
+  /** The fields to write: one entry per changed field (a radio group once). */
+  function formValues() {
+    const seen = new Set(), out = [];
+    for (const f of formFields) {
+      if (!f.changed || seen.has(f.name)) continue;
+      seen.add(f.name);
+      out.push({ name: f.name, kind: f.kind, value: f.value });
+    }
+    return out;
   }
 
   // ── OCR: text that is part of a picture ──
@@ -274,8 +328,30 @@ export function createPdfSession(o) {
     return found;
   }
 
+  /** Pages whose pictures and drawings under a redaction must go too: each becomes one picture of itself (text no longer selectable). */
+  async function flattenPages(b, pageIdx) {
+    const src = await pdfjs.getDocument({ data: b.slice(), isEvalSupported: false }).promise;
+    const out = await lib.PDFDocument.load(b);
+    try {
+      for (const i of pageIdx) {
+        const pg = await src.getPage(i + 1);
+        const vp = pg.getViewport({ scale: 2 }), v1 = pg.getViewport({ scale: 1 });
+        const c = el("canvas", { width: Math.ceil(vp.width), height: Math.ceil(vp.height) });
+        const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height);
+        await pg.render({ canvasContext: g, viewport: vp }).promise;
+        const png = new Uint8Array(await (await new Promise(r => c.toBlob(r, "image/png"))).arrayBuffer());
+        const img = await out.embedPng(png);
+        const np = out.insertPage(i, [v1.width, v1.height]);
+        np.drawImage(img, { x: 0, y: 0, width: v1.width, height: v1.height });
+        out.removePage(i + 1);
+        pg.cleanup();
+      }
+    } finally { await src.destroy(); }
+    return out.save({ useObjectStreams: true });
+  }
+
   // ── items: what the person places (Fill & sign) ──
-  const ITEM_SIZE = { signature: [160, null], initials: [60, null], text: [180, 18], date: [130, 18], name: [180, 18], check: [14, 14], cross: [14, 14], whiteout: [120, 18], image: [140, null] };
+  const ITEM_SIZE = { signature: [160, null], initials: [60, null], text: [180, 18], date: [130, 18], name: [180, 18], check: [14, 14], cross: [14, 14], whiteout: [120, 18], redact: [140, 16], image: [140, null] };
   function place(kind, page, fx, fy, payload = {}) {
     const st = pages[page]; if (!st) return null;
     const [W, H] = st.size;
@@ -300,6 +376,7 @@ export function createPdfSession(o) {
     if (it.type === "signature" || it.type === "initials") box.append(o.svgNode(it.payload.sig, "pt-ed-sig"));
     else if (it.type === "image") box.append(el("img", { src: it.payload.url, alt: "" }));
     else if (it.type === "check" || it.type === "cross") box.append(el("span", { class: "pt-ed-mark" }, it.type === "check" ? "✓" : "✗"));
+    else if (it.type === "redact") box.append(el("span", { class: "pt-ed-redact-label" }, "Redact"));
     else if (it.type !== "whiteout") {
       const ta = el("textarea", { class: "pt-ed-text", rows: "1", placeholder: it.type === "name" ? "Your name" : "Type here", "aria-label": "Text on the page" });
       ta.value = it.text;
@@ -358,7 +435,7 @@ export function createPdfSession(o) {
     get canUndo() { return undoStack.length > 0; }, get canRedo() { return redoStack.length > 0; },
     on(ev, fn) { (handlers[ev] ||= []).push(fn); return api; },
     async open(data, fileName = "document.pdf") {
-      fields.length = 0; items.length = 0; pages.length = 0; ocrQueue.length = 0; undoStack.length = 0; redoStack.length = 0;
+      fields.length = 0; items.length = 0; pages.length = 0; ocrQueue.length = 0; formFields.length = 0; undoStack.length = 0; redoStack.length = 0;
       pagesEl.replaceChildren(); active = null; armed = null; name = fileName;
       emit("status", "Reading pages…");
       bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
@@ -381,20 +458,24 @@ export function createPdfSession(o) {
     },
     setStyle, revert,
     revertActive() { if (active?.kind === "field") revert(active); },
-    arm(kind, payload) { armed = kind ? { kind, payload } : null; emit("armed", armed); },
+    arm(kind, payload) { armed = kind ? { kind, payload } : null; pagesEl.dataset.armed = kind || ""; emit("armed", armed); },
     place, removeItem,
     undo() { const op = undoStack.pop(); if (!op) return; op.undo(); redoStack.push(op); emit("change"); if (active) emit("active", active); },
     redo() { const op = redoStack.pop(); if (!op) return; op.redo(); undoStack.push(op); emit("change"); if (active) emit("active", active); },
     async findInPictures() { return ocrPages(pages.filter(st => !st.ocrDone)); },
     changedFields() { return fields.filter(f => f.changed); },
-    changeCount() { return fields.filter(f => f.changed).length + items.length; },
+    changeCount() { return fields.filter(f => f.changed).length + items.length + formValues().length; },
+    get formFields() { return formFields; }, formValues,
     /** Write every change into a new PDF: text edits first, then the placed items. */
     async save() {
       if (!bytes) throw new core.ToolkitError("Open a PDF first.");
       const changed = fields.filter(f => f.changed);
-      const placed = items.filter(it => it.type !== "text" && it.type !== "name" && it.type !== "date" || String(it.text).trim());
-      if (!changed.length && !placed.length) throw new core.ToolkitError("Nothing changed yet — click any text on the page, or place something from the tool bar.");
-      let out = bytes, res = { removed: 0, covered: 0 };
+      const placed = items.filter(it => it.type !== "redact" && (it.type !== "text" && it.type !== "name" && it.type !== "date" || String(it.text).trim()));
+      const redactions = items.filter(it => it.type === "redact");
+      const filled = formValues();
+      if (!changed.length && !placed.length && !redactions.length && !filled.length) throw new core.ToolkitError("Nothing changed yet — click any text on the page, or place something from the tool bar.");
+      let out = bytes, res = { removed: 0, covered: 0 }, form = null, red = null;
+      if (filled.length) { form = await core.fillForm(lib, out, filled); out = form.bytes; }
       if (changed.length) {
         const pick = (f) => ({ page: f.page, transform: f.transform, width: f.width, height: f.height, text: f.text, font: f.font, color: f.color, bg: f.bg,
           size: f.size, underline: f.underline, cover: f.ocr });
@@ -414,9 +495,38 @@ export function createPdfSession(o) {
           return { ...at, kind: "text", text: it.text, size: it.size };
         }));
       }
+      if (redactions.length) {
+        red = await core.redact(lib, out, redactions.map(it => ({ page: it.page, fx: it.fx, fy: it.fy, fw: it.fw, fh: it.fh })));
+        out = red.bytes;
+        if (api.flattenRedacted) out = await flattenPages(out, [...new Set(redactions.map(it => it.page))]);
+      }
       const fromPics = changed.filter(f => f.ocr).length;
-      return { bytes: out, lines: changed.length, items: placed.length, fromPics, stuck: Math.max(0, res.covered - fromPics) };
+      return { bytes: out, lines: changed.length, items: placed.length, fromPics, stuck: Math.max(0, res.covered - fromPics),
+        fields: form ? form.filled : 0, fieldsSkipped: form ? form.skipped : [], redactions: redactions.length, redactedText: red ? red.removed : 0,
+        flattened: !!(redactions.length && api.flattenRedacted) };
     },
+    flattenRedacted: false,
+    /**
+     * PAGES (D189 P3): an operation on the document's pages — any pending changes are written first, then the operation, then
+     * the document opens again from the result (the history starts again; the caller says so).
+     * kind: rotate ({ page, degrees }) · duplicate ({ page }) · delete ({ page }) · move ({ page, to }) · blank ({ at }) · add ({ files: [{ bytes, name }] })
+     */
+    async editPages(kind, arg = {}) {   // (named apart from the `pages` list above it)
+      if (!bytes) throw new core.ToolkitError("Open a PDF first.");
+      let b = api.changeCount() ? (await api.save()).bytes : bytes;
+      const count = pages.length;
+      const all = [...Array(count).keys()];
+      if (kind === "rotate") b = await core.rotate(lib, b, arg.degrees || 90, [arg.page]);
+      // in place (core.arrangePages): the PDF's form and links survive a reorder, a duplicate or a delete
+      else if (kind === "duplicate") b = await core.arrangePages(lib, b, all.flatMap(i => (i === arg.page ? [i, i] : [i])));
+      else if (kind === "delete") { if (count < 2) throw new core.ToolkitError("A PDF needs at least one page."); b = await core.arrangePages(lib, b, all.filter(i => i !== arg.page)); }
+      else if (kind === "move") { const order = all.filter(i => i !== arg.page); order.splice(Math.max(0, Math.min(count - 1, arg.to)), 0, arg.page); b = await core.arrangePages(lib, b, order); }
+      else if (kind === "blank") b = await core.insertBlankPage(lib, b, arg.at ?? count);
+      else if (kind === "add") b = await core.appendFiles(lib, b, arg.files || []); else throw new core.ToolkitError("That isn't a page operation.");
+      await api.open(b, name);
+      return { pages: pages.length };
+    },
+
     /** The text as a document for the structured résumé editor ("Make this an editable résumé"). */
     async documentHtml(title) {
       const pgs = [];
