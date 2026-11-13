@@ -307,7 +307,7 @@ function renderToolbar() {
   document.querySelectorAll("[data-spacing]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.spacing === doc.style.spacing)));
   document.querySelectorAll("[data-margin]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.margin === doc.style.margin)));
   // Read only: the document's options and the selection commands are off; reading, Review changes and the downloads stay.
-  document.querySelectorAll("#font, [data-spacing], [data-margin], #cmd-bold, #cmd-italic, #cmd-bullets")
+  document.querySelectorAll("#font, [data-spacing], [data-margin], #cmd-bold, #cmd-italic, #cmd-bullets, .bar [data-cmd], #cmd-color, #fit-page, #reset-style")
     .forEach(el => { el.disabled = !!meta.readOnly; });
   if (meta.readOnly) { $("#size-down").disabled = true; $("#size-up").disabled = true; }
   document.querySelector(".hint").textContent = meta.readOnly
@@ -332,18 +332,43 @@ $("#size-up").addEventListener("click", () => setStyle({ sizePt: effectiveSize()
 document.querySelectorAll("[data-spacing]").forEach(b => b.addEventListener("click", () => setStyle({ spacing: b.dataset.spacing })));
 document.querySelectorAll("[data-margin]").forEach(b => b.addEventListener("click", () => setStyle({ margin: b.dataset.margin })));
 
-function command(name) {
+function command(name, value = null) {
   // The selection lives inside the page's shadow root; the commands act on it and the section's input handler records it.
-  document.execCommand(name, false);
+  document.execCommand(name, false, value);
   const sel = root.getSelection ? root.getSelection() : document.getSelection();
   const node = sel?.anchorNode;
   const sec = (node?.nodeType === 1 ? node : node?.parentElement)?.closest?.(".sec");
   if (sec) readSection(sec);
 }
-for (const [id, name] of [["#cmd-bold", "bold"], ["#cmd-italic", "italic"], ["#cmd-bullets", "insertUnorderedList"]]) {
+// ⭐ A203 (2) (owner 11-13: "bring it into resume master … the range of utility options"): the sandbox's commands, the
+// editor's own — draft only hosts it. Each acts on the page's selection and the section's input handler records it.
+const SEL_CMDS = [["#cmd-bold", "bold"], ["#cmd-italic", "italic"], ["#cmd-bullets", "insertUnorderedList"],
+  ...[...document.querySelectorAll(".bar [data-cmd]")].map(b => [`#${b.id}`, b.dataset.cmd])];
+for (const [id, name] of SEL_CMDS) {
   $(id).addEventListener("mousedown", (e) => { e.preventDefault(); command(name); });
   $(id).addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); command(name); } });
 }
+// The colour picker takes the focus, so the page's selection is kept and given back before the colour is applied.
+let keptRange = null;
+const pageSelection = () => (root.getSelection ? root.getSelection() : document.getSelection());
+document.addEventListener("selectionchange", () => {
+  const sel = pageSelection();
+  if (sel?.rangeCount && pageEl?.contains(sel.anchorNode)) keptRange = sel.getRangeAt(0).cloneRange();
+});
+$("#cmd-color").addEventListener("input", (e) => {
+  if (!keptRange) return setSaved("saved", "Select some text on the page first");
+  const sel = pageSelection();
+  sel.removeAllRanges(); sel.addRange(keptRange);
+  try { document.execCommand("styleWithCSS", false, true); } catch { /* inline tags instead */ }
+  command("foreColor", e.target.value);
+});
+// The page: one step tighter (smaller text, tight lines, narrow margins), or back to the document's own style.
+$("#fit-page").addEventListener("click", () => {
+  const size = Math.max(SIZE.min, effectiveSize() - SIZE.step);
+  setStyle({ sizePt: size, spacing: "tight", margin: doc.style.margin === "wide" ? "normal" : "narrow" });
+  setSaved("saved", `Tighter: ${size} pt, tight lines`);
+});
+$("#reset-style").addEventListener("click", () => setStyle({ font: null, sizePt: null, spacing: "normal", margin: "normal" }));
 $("#review-changes").addEventListener("click", () => {
   showChanges = !showChanges;
   const n = highlightChanges(showChanges);
@@ -404,10 +429,32 @@ if (framed && !embedded) {
   document.documentElement.dataset.embedded = "true";
   post("ready", { version: params.get("v") || null });
 } else {
-  let saved = null;
+  let saved = null, handoff = null;
+  // ⭐ A203 (2): a PDF handed over by Edit PDF ("Open in the résumé editor") — its text as a document, once
+  try { handoff = JSON.parse(sessionStorage.getItem("rm-editor:handoff") || "null"); sessionStorage.removeItem("rm-editor:handoff"); } catch { handoff = null; }
   try { saved = localStorage.getItem(STORE_KEY); } catch { /* storage blocked */ }
-  if (saved) load(saved, {});
+  if (handoff?.html) load(handoff.html, { filename: handoff.filename || "document.html" });
+  else if (saved) load(saved, {});
   else $("#start").hidden = false;
+  // Open a PDF: its text read in this browser (pdf.js) and laid out as a document (src/pdf-toolkit/pdfToDoc.js)
+  $("#open-pdf").addEventListener("change", async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    $("#start-error").textContent = "Reading the PDF…";
+    try {
+      const [pdfjs, { linesOf }, { blocksOf, docHtmlOf }] = await Promise.all([
+        import("/lib/pdfjs/pdf.min.mjs"), import("/lib/pdf-toolkit/pdfText.js"), import("/lib/pdf-toolkit/pdfToDoc.js")]);
+      pdfjs.GlobalWorkerOptions.workerSrc = "/lib/pdfjs/pdf.worker.min.mjs";
+      const pdf = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()), isEvalSupported: false }).promise;
+      const pages = [];
+      for (let n = 1; n <= pdf.numPages; n++) { const pg = await pdf.getPage(n); pages.push({ lines: linesOf((await pg.getTextContent()).items) }); pg.cleanup(); }
+      await pdf.destroy();
+      if (!pages.some(p => p.lines.length)) throw new Error("This PDF has no text — it looks like a scan. Run OCR on it first (PDF tools → OCR).");
+      $("#start-error").textContent = "";
+      const name = file.name.replace(/\.pdf$/i, "");
+      load(docHtmlOf(blocksOf(pages), { title: name }), { filename: `${name}.html` });
+    } catch (err) { $("#start-error").textContent = String(err?.message || err); }
+  });
   $("#open-sample").addEventListener("click", () => load(SAMPLE, {}));
   $("#open-file").addEventListener("change", async (e) => {
     const file = e.target.files?.[0];

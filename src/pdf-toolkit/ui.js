@@ -14,14 +14,15 @@ import * as core from "./core.js";
 import { renderPages, thumbnails, reencodeJpegInBrowser, flattenToImages, ocrPdf } from "./render.js";
 import { textFromPdfDocument, linesOf } from "./pdfText.js";
 import { paragraphsOf, toDocx, tableOf, toXlsx } from "./office.js";
-import { buildPageEditor } from "./editor.js";   // A203: Edit PDF and Sign PDF
+import { buildPageEditor } from "./editor.js";   // A203: Sign PDF
+import { buildTextEditor } from "./textEditor.js";   // A203 (2): Edit PDF — the page's own text, in place
 
 const TOOLS = [
   { id: "merge", label: "Merge", blurb: "Join PDFs into one, in the order you set." },
   { id: "split", label: "Split", blurb: "One PDF per page, or per range you choose." },
   { id: "organise", label: "Organize", blurb: "Reorder, rotate or delete pages." },
   { id: "compress", label: "Compress", blurb: "Shrink the pictures inside — the text stays readable, for upload limits." },
-  { id: "edit", label: "Edit", blurb: "Add text, white-out, pictures, your signature and initials — placed where you click, dragged and resized, written into the PDF." },
+  { id: "edit", label: "Edit", blurb: "Edit the PDF's own text where it is: click any line and type. The old words leave the file; the new ones are real text." },
   { id: "sign", label: "Sign", blurb: "Sign a PDF: draw, type, or upload a photo of your signature and initials — traced to clean vector lines — and place them, with the date." },
   { id: "watermark", label: "Watermark", blurb: "Stamp text across every page." },
   { id: "protect", label: "Protect", blurb: "Add a password (AES-256)." },
@@ -121,7 +122,7 @@ export function mountPdfToolkit(root, { lib, pdfjs, zipSync = null, loadOcr = nu
 
   const editorHelpers = () => ({ el, lib, pdfjs, core, status, say, fail, results, download, fileInput, base, readBytes });
   const BUILD = {
-    edit() { return buildPageEditor(editorHelpers(), "edit"); },   // A203
+    edit() { return buildTextEditor(editorHelpers()); },   // A203 (2): inline, the page's own text
     sign() { return buildPageEditor(editorHelpers(), "sign"); },   // A203
     merge() {
       const input = fileInput(true);
