@@ -325,3 +325,154 @@ export async function applyEdits(lib, bytes, items) {
   }
   return save(doc);
 }
+
+// ── A203 (2) (owner 11-13: "edit a pdf text as inline … just live draft, not add more text") ─────────────────────────
+//
+// Change the words a page already shows. Each edit names a text run the way pdf.js reports it (its transform and width in
+// user space) and its new words. The run's own drawing is REMOVED from the page's content stream (textEdit.stripText: the
+// operator becomes a displacement of the same advance, so nothing after it moves) and the new words are written as real
+// text at the same baseline, size, angle and colour, in the closest standard face (Helvetica / Times / Courier, bold and
+// italic). A neighbour drawn by the same operator is written back unchanged. When the run's drawing cannot be found (text
+// inside a form XObject, say), it is covered with its background colour instead — and the result says how many.
+
+const STD = {
+  sans: ["Helvetica", "HelveticaBold", "HelveticaOblique", "HelveticaBoldOblique"],
+  serif: ["TimesRoman", "TimesRomanBold", "TimesRomanItalic", "TimesRomanBoldItalic"],
+  mono: ["Courier", "CourierBold", "CourierOblique", "CourierBoldOblique"],
+};
+const stdOf = (f = {}) => (STD[f.family] || STD.sans)[(f.bold ? 1 : 0) + (f.italic ? 2 : 0)];
+const STD_BY_BASE = [[/courier/i, "mono"], [/times|roman|serif|georgia|garamond|cambria|book/i, "serif"], [/./, "sans"]];
+
+/** The page's content streams, decoded and joined (latin1). */
+function pageContent(lib, page) {
+  const { PDFArray, PDFRawStream } = lib;
+  const raw = page.node.Contents();
+  if (!raw) return "";
+  const list = raw instanceof PDFArray ? raw.asArray() : [raw];
+  let out = "";
+  for (const r of list) {
+    const s = page.doc.context.lookup(r);
+    if (!s) continue;
+    const bytes = s instanceof PDFRawStream ? lib.decodePDFRawStream(s).decode() : (s.getContents?.() ?? new Uint8Array());
+    let str = ""; for (let i = 0; i < bytes.length; i += 8192) str += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+    out += `${str}\n`;
+  }
+  return out;
+}
+
+function resourcesOf(lib, page) {
+  const { PDFName, PDFDict } = lib;
+  for (let n = page.node; n; n = n.lookupMaybe(PDFName.of("Parent"), PDFDict)) {
+    const r = n.lookupMaybe(PDFName.of("Resources"), PDFDict);
+    if (r) return r;
+  }
+  return null;
+}
+
+/** name → { width(code) (1/1000 em), bytes } from the page's font dictionaries; a standard font without Widths is measured. */
+async function fontWidthsOf(lib, doc, page) {
+  const { PDFName, PDFDict, PDFArray, PDFNumber } = lib;
+  const fonts = resourcesOf(lib, page)?.lookupMaybe(PDFName.of("Font"), PDFDict);
+  const cache = new Map();
+  if (!fonts) return () => null;
+  const numOf = (v) => (v instanceof PDFNumber ? v.asNumber() : Number(v?.asNumber?.() ?? v) || 0);
+  for (const [key, ref] of fonts.entries()) {
+    const f = doc.context.lookup(ref);
+    if (!(f instanceof PDFDict)) continue;
+    const subtype = f.get(PDFName.of("Subtype"))?.toString();
+    if (subtype === "/Type0") {
+      const desc = doc.context.lookup(f.lookupMaybe(PDFName.of("DescendantFonts"), PDFArray)?.get(0));
+      const dw = desc?.get(PDFName.of("DW")) ? numOf(desc.get(PDFName.of("DW"))) : 1000;
+      const map = new Map();
+      const W = desc?.lookupMaybe(PDFName.of("W"), PDFArray);
+      if (W) {
+        const a = W.asArray().map(v => doc.context.lookup(v) ?? v);
+        for (let i = 0; i < a.length;) {
+          const c0 = numOf(a[i]);
+          if (a[i + 1] instanceof PDFArray) { a[i + 1].asArray().forEach((w, k) => map.set(c0 + k, numOf(doc.context.lookup(w) ?? w))); i += 2; }
+          else { const c1 = numOf(a[i + 1]), w = numOf(a[i + 2]); for (let c = c0; c <= c1; c++) map.set(c, w); i += 3; }
+        }
+      }
+      cache.set(key.decodeText?.() ?? key.toString().slice(1), { width: (c) => map.get(c) ?? dw, bytes: 2 });
+      continue;
+    }
+    const first = f.get(PDFName.of("FirstChar")) ? numOf(f.get(PDFName.of("FirstChar"))) : 0;
+    const widths = f.lookupMaybe(PDFName.of("Widths"), PDFArray)?.asArray().map(v => numOf(doc.context.lookup(v) ?? v));
+    const missing = numOf(doc.context.lookup(f.get(PDFName.of("FontDescriptor")))?.get?.(PDFName.of("MissingWidth"))) || 0;
+    let width;
+    if (widths) width = (c) => widths[c - first] ?? missing;
+    else {   // a standard-14 font named only by its BaseFont: measure the face pdf-lib carries
+      const base = String(f.get(PDFName.of("BaseFont"))?.toString() || "").replace(/^\/([A-Z]{6}\+)?/, "");
+      const fam = STD_BY_BASE.find(([re]) => re.test(base))[1];
+      const std = await doc.embedFont(lib.StandardFonts[stdOf({ family: fam, bold: /bold/i.test(base), italic: /italic|oblique/i.test(base) })]);
+      width = (c) => { try { return std.widthOfTextAtSize(String.fromCharCode(c), 1000); } catch { return 500; } };
+    }
+    cache.set(key.decodeText?.() ?? key.toString().slice(1), { width, bytes: 1 });
+  }
+  return (name) => cache.get(name) ?? null;
+}
+
+/**
+ * @param edits   [{ page (0-based), transform: [a,b,c,d,e,f], width, height, text, original?, font?: { family: "sans" | "serif"
+ *                  | "mono", bold, italic }, color?: [r,g,b], bg?: [r,g,b] }] — the runs whose words changed
+ * @param others  [{ page, transform, width, height, text, font?, color? }] — every OTHER run on those pages (to write back a
+ *                  neighbour that shared an operator with an edited run)
+ * @returns { bytes, removed (operators taken out), covered (runs painted over instead), rewritten (neighbours written back) }
+ */
+export async function applyTextEdits(lib, bytes, edits, others = []) {
+  if (!Array.isArray(edits) || !edits.length) throw new ToolkitError("Change some text first.");
+  const doc = await open(lib, bytes);
+  const pages = doc.getPages();
+  const { stripText, frameOf, runTouches } = await import("./textEdit.js");
+  const faces = new Map();
+  const face = async (f) => { const k = stdOf(f); if (!faces.has(k)) faces.set(k, await doc.embedFont(lib.StandardFonts[k])); return faces.get(k); };
+  let removed = 0, covered = 0, rewritten = 0;
+  const byPage = new Map();
+  for (const e of edits) {
+    if (!pages[e?.page]) throw new ToolkitError("An edit is on a page this PDF does not have.");
+    if (!Array.isArray(e.transform) || e.transform.length !== 6) throw new ToolkitError("An edit does not say where its text is.");
+    (byPage.get(e.page) || byPage.set(e.page, []).get(e.page)).push(e);
+  }
+  for (const [n, list] of byPage) {
+    const page = pages[n];
+    const widths = await fontWidthsOf(lib, doc, page);
+    const src = pageContent(lib, page);
+    const res = stripText(src, list, widths);
+    if (res.touched.size) {
+      const enc = new Uint8Array(res.content.length);
+      for (let i = 0; i < res.content.length; i++) enc[i] = res.content.charCodeAt(i) & 255;
+      page.node.set(lib.PDFName.of("Contents"), doc.context.register(doc.context.flateStream(enc)));
+      removed += res.touched.size;
+    }
+    // neighbours an operator we took out also drew — write them back as they were
+    const back = others.filter(o => o.page === n && !list.includes(o) && String(o.text || "").trim()
+      && res.dropped.some(r => runTouches(r, frameOf(o))));
+    const draw = async (e, text) => {
+      const [a, b, c, d, x, y] = e.transform;
+      const size = Number(e.size) > 0 ? Number(e.size) : (Math.hypot(c, d) || Number(e.height) || 10);   // a size the person changed wins
+      const font = await face(e.font);
+      const safe = [...String(text)].map(ch => { try { font.encodeText(ch); return ch; } catch { return "?"; } }).join("");
+      const col = Array.isArray(e.color) && e.color.length === 3 ? e.color : [0, 0, 0];
+      page.drawText(safe, { x, y, size, font, color: lib.rgb(col[0], col[1], col[2]), rotate: lib.degrees((Math.atan2(b, a) * 180) / Math.PI) });
+      if (e.underline) {   // a line under the words, along their baseline
+        const len = font.widthOfTextAtSize(safe, size), ux = Math.cos(Math.atan2(b, a)), uy = Math.sin(Math.atan2(b, a));
+        const off = size * 0.12;
+        page.drawLine({ start: { x: x + uy * off, y: y - ux * off }, end: { x: x + ux * len + uy * off, y: y + uy * len - ux * off },
+          thickness: Math.max(0.5, size / 16), color: lib.rgb(col[0], col[1], col[2]) });
+      }
+    };
+    for (const [i, e] of list.entries()) {
+      if (!res.removed[i]) {   // its drawing was not found in this page's stream: cover it with its background
+        const fr = frameOf(e);
+        const bg = Array.isArray(e.bg) && e.bg.length === 3 ? e.bg : [1, 1, 1];
+        const [x, y] = [fr.o[0] - fr.v[0] * fr.h * 0.25, fr.o[1] - fr.v[1] * fr.h * 0.25];
+        page.drawRectangle({ x, y, width: fr.len + 1, height: fr.h * 1.3, color: lib.rgb(bg[0], bg[1], bg[2]), borderWidth: 0,
+          rotate: lib.degrees((Math.atan2(fr.u[1], fr.u[0]) * 180) / Math.PI) });
+        covered++;
+      }
+      if (String(e.text || "").trim()) await draw(e, String(e.text).replace(/\s*\n\s*/g, " "));
+    }
+    for (const o of back) { await draw(o, o.text); rewritten++; }
+  }
+  return { bytes: await save(doc), removed, covered, rewritten };
+}

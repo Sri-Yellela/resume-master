@@ -30,7 +30,7 @@ export const PDF_PAGES = [
   { slug: "compress-pdf", tool: "compress", name: "Compress PDF", h1: "Compress a PDF",
     desc: "Make a PDF smaller for an upload limit: the pictures shrink and the text stays selectable — or, at Maximum, every page becomes a picture for the smallest file.", steps: ["Choose a PDF", "Pick how much to shrink it", "Download — or keep the original if it could not get smaller"] },
   { slug: "edit-pdf", tool: "edit", name: "Edit PDF", h1: "Edit a PDF",
-    desc: "Add text, white-out, pictures, a signature and initials to a PDF — click where they go, drag and resize them, and save.", steps: ["Choose a PDF", "Pick Text, White-out, Picture or Signature, and click on the page", "Save, and download the edited PDF"] },
+    desc: "Edit the text of a PDF where it is — click any line and type, change its face, size and colour, and save a PDF whose old words are gone.", steps: ["Choose a PDF", "Click any text on the page and type", "Save, and download the edited PDF"] },
   { slug: "sign-pdf", tool: "sign", name: "Sign PDF", h1: "Sign a PDF",
     desc: "Sign a PDF with your signature and initials — drawn, typed, or traced from a photo into clean vector lines — and add the date.", steps: ["Choose a PDF", "Draw, type or upload your signature and initials", "Place them, save, and download the signed PDF"] },
   { slug: "watermark-pdf", tool: "watermark", name: "Watermark PDF", h1: "Add a watermark to a PDF",

@@ -123,3 +123,8 @@ button, select, input { font: inherit; color: inherit; }
   .menu { position: static; }
   .bar { top: 8px; }
 }
+/* A203 (2): the text colour control — the letter, with the colour swatch under it */
+.grp label.color { all: unset; position: relative; cursor: pointer; width: 32px; height: 32px; display: grid; place-items: center; border-radius: 13px; color: var(--body); font-weight: 700; font-size: 13px; }
+.grp label.color:hover { background: var(--raise); color: var(--ink); }
+.grp label.color input { position: absolute; left: 8px; right: 8px; bottom: 5px; width: 16px; height: 5px; padding: 0; border: 0; background: none; cursor: pointer; }
+.grp label.color input::-webkit-color-swatch-wrapper { padding: 0; } .grp label.color input::-webkit-color-swatch { border: 0; border-radius: 2px; }
