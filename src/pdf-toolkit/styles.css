@@ -158,3 +158,10 @@
 .pt-tx:focus { box-shadow: 0 0 0 1.5px rgba(30, 90, 200, 0.9); }
 .pt-tx--changed { box-shadow: 0 0 0 1px rgba(251, 140, 100, 0.55); }
 .pt-sb .pt-sbx--sel { width: auto; max-width: 170px; flex: 0 0 auto; }
+/* A203 (4) (owner 11-13: "it recognises the text and makes fields around the text blocks indicating editable" — PDFfiller):
+   every editable line shows its box at all times; a line read from a picture (OCR) has a dashed one. */
+.pt-tx { box-shadow: 0 0 0 1px rgba(30, 90, 200, 0.30); }
+.pt-tx--ocr { box-shadow: none; outline: 1px dashed rgba(30, 90, 200, 0.55); outline-offset: 0; }
+.pt-tx:hover { box-shadow: 0 0 0 1.5px rgba(30, 90, 200, 0.65); }
+.pt-tx--ocr:focus, .pt-tx--ocr:hover { outline-color: rgba(30, 90, 200, 0.9); }
+.pt-sb-bar { top: 64px; }   /* A203 (4): below the site's fixed 56 px bar */
