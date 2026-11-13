@@ -480,3 +480,127 @@ export async function applyTextEdits(lib, bytes, edits, others = []) {
   }
   return { bytes: await save(doc), removed, covered, rewritten };
 }
+
+// ── D189 P3 (owner 11-13: "build P3") — Fill out, Pages, Redact ─────────────────────────────────────────────────────────
+
+/**
+ * FILL OUT — the PDF's own form fields (AcroForm), the values the person typed or picked. Fields stay fillable (not
+ * flattened) with their appearances redrawn so every viewer shows the value.
+ * @param values [{ name, kind: "text" | "checkbox" | "radio" | "dropdown" | "list", value }]
+ * @returns { bytes, filled, skipped: [names a field did not take] }
+ */
+export async function fillForm(lib, bytes, values) {
+  if (!Array.isArray(values) || !values.length) throw new ToolkitError("Fill in a field first.");
+  const doc = await open(lib, bytes);
+  const form = doc.getForm();
+  let filled = 0;
+  const skipped = [];
+  for (const v of values) {
+    try {
+      const f = form.getField(v.name);
+      if (f instanceof lib.PDFTextField) f.setText(String(v.value ?? ""));
+      else if (f instanceof lib.PDFCheckBox) (v.value === true || v.value === "true" || v.value === "on") ? f.check() : f.uncheck();
+      else if (f instanceof lib.PDFRadioGroup) { if (v.value) f.select(String(v.value)); else f.clear(); }
+      else if (f instanceof lib.PDFDropdown || f instanceof lib.PDFOptionList) { if (v.value) f.select(String(v.value)); else f.clear(); }
+      else { skipped.push(v.name); continue; }
+      filled++;
+    } catch { skipped.push(v.name); }
+  }
+  try { form.updateFieldAppearances(await doc.embedFont(lib.StandardFonts.Helvetica)); } catch { /* the viewer redraws them */ }
+  return { bytes: await save(doc), filled, skipped };
+}
+
+/** A blank page at `index` (0-based; the page count = at the end), the size of its neighbour. */
+export async function insertBlankPage(lib, bytes, index) {
+  const doc = await open(lib, bytes);
+  const count = doc.getPageCount();
+  const at = Math.max(0, Math.min(count, Number(index) || 0));
+  const near = doc.getPage(Math.min(count - 1, Math.max(0, at - 1)));
+  const { width, height } = near.getSize();
+  doc.insertPage(at, [width, height]);
+  return save(doc);
+}
+
+/**
+ * REDACT — truly (D188): the text under each box LEAVES the file (its drawing is taken out of the page's content stream —
+ * textEdit.stripInRects; nothing else moves), then the box is painted (black by default). Pictures and drawings under a
+ * box are covered, not removed — the workspace offers to flatten those pages too, and says so.
+ * @param boxes [{ page, fx, fy, fw, fh }] — fractions of the SHOWN page, as Fill & sign's items are
+ * @returns { bytes, removed (text operators taken out), boxes }
+ */
+export async function redact(lib, bytes, boxes, { color = [0, 0, 0] } = {}) {
+  if (!Array.isArray(boxes) || !boxes.length) throw new ToolkitError("Draw a box over what should go first.");
+  const doc = await open(lib, bytes);
+  const pages = doc.getPages();
+  const { stripInRects } = await import("./textEdit.js");
+  let removed = 0;
+  const byPage = new Map();
+  for (const b of boxes) {
+    if (!pages[b?.page]) throw new ToolkitError("A box is on a page this PDF does not have.");
+    (byPage.get(b.page) || byPage.set(b.page, []).get(b.page)).push(b);
+  }
+  for (const [n, list] of byPage) {
+    const page = pages[n];
+    const crop = page.getCropBox();
+    const geo = { W: crop.width, H: crop.height, x0: crop.x, y0: crop.y, r: page.getRotation().angle };
+    const turned = geo.r % 180 !== 0;
+    const Dw = turned ? geo.H : geo.W, Dh = turned ? geo.W : geo.H;
+    const rects = list.map(b => {
+      const pts = [[b.fx, b.fy], [b.fx + b.fw, b.fy], [b.fx, b.fy + b.fh], [b.fx + b.fw, b.fy + b.fh]]
+        .map(([fx, fy]) => displayToPdf(geo, clamp01(fx) * Dw, clamp01(fy) * Dh));
+      return { x0: Math.min(...pts.map(p => p.x)), x1: Math.max(...pts.map(p => p.x)), y0: Math.min(...pts.map(p => p.y)), y1: Math.max(...pts.map(p => p.y)) };
+    });
+    const widths = await fontWidthsOf(lib, doc, page);
+    const res = stripInRects(pageContent(lib, page), rects, widths);
+    if (res.removed) {
+      const enc = new Uint8Array(res.content.length);
+      for (let i = 0; i < res.content.length; i++) enc[i] = res.content.charCodeAt(i) & 255;
+      page.node.set(lib.PDFName.of("Contents"), doc.context.register(doc.context.flateStream(enc)));
+      removed += res.removed;
+    }
+    for (const q of rects) page.drawRectangle({ x: q.x0, y: q.y0, width: q.x1 - q.x0, height: q.y1 - q.y0, color: lib.rgb(color[0], color[1], color[2]), borderWidth: 0 });
+  }
+  return { bytes: await save(doc), removed, boxes: boxes.length };
+}
+
+/**
+ * D189 P3 · PAGES IN PLACE — reorder, duplicate or drop pages inside the SAME document, so its form (AcroForm), links and
+ * everything else that points at its pages stay intact (selectPages copies pages into a new document, which drops the form).
+ * The page tree is flattened to one level in the new order; a page listed twice is a copy (copyPages from itself).
+ * @param order zero-based page indices, in the new order (a page left out is dropped)
+ */
+/** Pages of other PDFs (and pictures, as pages) appended to THIS document — its form and links stay (merge() would make a new one). */
+export async function appendFiles(lib, bytes, files) {
+  const doc = await open(lib, bytes);
+  for (const f of files || []) {
+    const kind = sniffImage(f.bytes);
+    if (kind) {
+      const img = kind === "jpeg" ? await doc.embedJpg(f.bytes) : await doc.embedPng(f.bytes);
+      doc.addPage([img.width, img.height]).drawImage(img, { x: 0, y: 0, width: img.width, height: img.height });
+      continue;
+    }
+    const src = await open(lib, f.bytes);
+    for (const pg of await doc.copyPages(src, src.getPageIndices())) doc.addPage(pg);
+  }
+  return save(doc);
+}
+
+export async function arrangePages(lib, bytes, order) {
+  const doc = await open(lib, bytes);
+  const pages = doc.getPages();
+  if (!Array.isArray(order) || !order.length) throw new ToolkitError("That would delete every page.");
+  for (const i of order) if (!Number.isInteger(i) || i < 0 || i >= pages.length) throw new ToolkitError(`Page ${i + 1} does not exist.`);
+  const { PDFName, PDFNumber } = lib;
+  const rootRef = doc.catalog.get(PDFName.of("Pages"));
+  const root = doc.context.lookup(rootRef);
+  const used = new Set(), kids = [];
+  for (const i of order) {
+    if (!used.has(i)) { used.add(i); kids.push(pages[i].ref); continue; }
+    const [copy] = await doc.copyPages(doc, [i]);
+    kids.push(doc.context.register(copy.node));
+  }
+  for (const ref of kids) doc.context.lookup(ref).set(PDFName.of("Parent"), rootRef);
+  root.set(PDFName.of("Kids"), doc.context.obj(kids));
+  root.set(PDFName.of("Count"), PDFNumber.of(kids.length));
+  return save(doc);
+}

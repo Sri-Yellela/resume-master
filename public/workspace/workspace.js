@@ -18,10 +18,10 @@ const put = (box, ...kids) => box.replaceChildren(...kids.flat().filter(k => k !
 const kb = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 const baseName = (n) => String(n || "document").replace(/\.pdf$/i, "").replace(/[^\w.-]+/g, "-").slice(0, 60) || "document";
 
-const [lib, pdfjs, core, S, sign, editor, pdfText, pdfToDoc] = await Promise.all([
+const [lib, pdfjs, core, S, sign, editor, pdfText, pdfToDoc, render, office] = await Promise.all([
   import("/lib/pdf-lib/pdf-lib.esm.min.js"), import("/lib/pdfjs/pdf.min.mjs"), import("/lib/pdf-toolkit/core.js"),
   import("/lib/pdf-toolkit/session.js"), import("/lib/pdf-toolkit/sign.js"), import("/lib/pdf-toolkit/editor.js"),
-  import("/lib/pdf-toolkit/pdfText.js"), import("/lib/pdf-toolkit/pdfToDoc.js")]);
+  import("/lib/pdf-toolkit/pdfText.js"), import("/lib/pdf-toolkit/pdfToDoc.js"), import("/lib/pdf-toolkit/render.js"), import("/lib/pdf-toolkit/office.js")]);
 pdfjs.GlobalWorkerOptions.workerSrc = "/lib/pdfjs/pdf.worker.min.mjs";
 const loadOcr = async () => {
   const { default: Tesseract } = await import("/lib/tesseract/tesseract.esm.min.js");
@@ -51,19 +51,95 @@ function sync() {
     el("p", { class: "ws-lbl" }, "Changes"),
     changed.length ? el("p", { class: "ws-ok" }, `${changed.length} line${changed.length === 1 ? "" : "s"} changed${changed.length - pics ? " — the old words leave the file" : ""}`) : el("p", { class: "ws-faint" }, "No text changed"),
     pics ? el("p", { class: "ws-warn" }, `${pics} read from a picture — covered with its paper colour, then written`) : null,
-    session.items.length ? el("p", { class: "ws-ok" }, `${session.items.length} item${session.items.length === 1 ? "" : "s"} placed`) : null,
+    session.items.filter(i => i.type !== "redact").length ? el("p", { class: "ws-ok" }, `${session.items.filter(i => i.type !== "redact").length} item${session.items.filter(i => i.type !== "redact").length === 1 ? "" : "s"} placed`) : null,
+    session.formValues().length ? el("p", { class: "ws-ok" }, `${session.formValues().length} form field${session.formValues().length === 1 ? "" : "s"} filled`) : null,
+    redactCount() ? el("p", { class: "ws-warn" }, `${redactCount()} redaction${redactCount() === 1 ? "" : "s"} — the text under ${redactCount() === 1 ? "it" : "them"} leaves the file when you download`) : null,
+    redactCount() ? el("label", { class: "ws-row ws-small" }, flattenBox, "Also remove pictures and drawings under them (those pages become pictures — their text is no longer selectable)") : null,
     el("p", { class: "ws-faint ws-small" }, "Solid boxes are the PDF's own text; dashed ones were read from a picture."),
   ]));
 }
 session.on("change", sync);
+const redactCount = () => session.items.filter(i => i.type === "redact").length;
+const flattenBox = el("input", { type: "checkbox", onchange: () => { session.flattenRedacted = flattenBox.checked; } });
 
 // ── modes swap the tool bar (D189: never the layout) ──
 const TOOLS = {
   edit: [["select", "⌖", "Select"], ["text", "⊞", "Text box"], ["whiteout", "⌫", "Erase"], ["image", "▣", "Image"], ["signature", "✎", "Sign"],
-    ["check", "✓", "Check"], ["cross", "✗", "Cross"], ["date", "▦", "Date"], ["|"], ["ocr", "⌕", "Find text in pictures"]],
+    ["check", "✓", "Check"], ["cross", "✗", "Cross"], ["date", "▦", "Date"], ["|"], ["redact", "■", "Redact"], ["ocr", "⌕", "Find text in pictures"]],
   sign: [["select", "⌖", "Select"], ["signature", "✎", "Signature"], ["initials", "ab", "Initials"], ["name", "Aa", "Name"], ["date", "▦", "Date"],
     ["text", "⊞", "Text"], ["check", "✓", "Check"], ["cross", "✗", "Cross"]],
+  // ⭐ D189 P3: the page strip's operations, on the current page (the strip / navigator chooses it)
+  pages: [["rotl", "⟲", "Rotate left"], ["rotr", "⟳", "Rotate right"], ["dup", "⧉", "Duplicate"], ["del", "✕", "Delete"],
+    ["up", "↑", "Move earlier"], ["down", "↓", "Move later"], ["|"], ["blank", "▢", "Blank page"], ["addfiles", "+", "Add files"]],
+  // ⭐ D189 P3: the document as something else — each from the CURRENT document (changes included)
+  convert: [["compress", "⇲", "Compress"], ["word", "W", "Word"], ["txt", "≡", "Text"], ["jpg", "▣", "Images"], ["searchable", "⌕", "Searchable (OCR)"], ["protect", "⚿", "Protect"]],
 };
+const addFiles = el("input", { type: "file", accept: "application/pdf,image/jpeg,image/png", multiple: true, hidden: true });
+document.body.append(addFiles);
+addFiles.addEventListener("change", async () => {
+  const files = [...(addFiles.files || [])]; addFiles.value = ""; if (!files.length) return;
+  await pageOp("add", { files: await Promise.all(files.map(async f => ({ name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) }))) }, `${files.length} file${files.length === 1 ? "" : "s"} added at the end`);
+});
+async function pageOp(kind, arg, done) {
+  try {
+    const had = session.changeCount();
+    say("Working on the pages…");
+    const r = await session.editPages(kind, arg);
+    await drawStrip(); fitWidth(); drawTools(); sync();
+    $("#ws-meta").textContent = `${r.pages} page${r.pages === 1 ? "" : "s"} · ${kb(session.bytes.length)}`;
+    say(`${done}.${had ? " Your other changes were written first — undo starts again from here." : ""}`, "good");
+  } catch (e) { say(e?.message || String(e), "bad"); }
+}
+const currentBytes = async () => (session.changeCount() ? (await session.save()).bytes : session.bytes);
+const nameBase = () => baseName($("#ws-name").textContent);
+function downloadAs(bytes, filename, type) {
+  const a = el("a", { href: URL.createObjectURL(new Blob([bytes], { type })), download: filename });
+  document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+}
+async function convert(id) {
+  try {
+    const b = await currentBytes();
+    if (id === "compress") {
+      const limit = Number(prompt("The form's upload limit, in MB (most accept 2–5 MB):", "2")) || 2;
+      say("Compressing…");
+      const r = await core.compress(lib, b, { reencodeJpeg: render.reencodeJpegInBrowser, maxDimension: 1600, quality: 0.72 });
+      const under = r.after <= limit * 1048576;
+      say(`${kb(r.before)} → ${kb(r.after)} — ${under ? `under your ${limit} MB limit` : `still over your ${limit} MB limit (try Compress on the PDF tools page at Maximum)`}. ${r.note}`, under ? "good" : "bad");
+      return downloadAs(r.bytes, `${nameBase()}-compressed.pdf`, "application/pdf");
+    }
+    const pages = [];
+    if (id === "word" || id === "txt") {
+      const d = await pdfjs.getDocument({ data: b.slice(), isEvalSupported: false }).promise;
+      for (let n = 1; n <= d.numPages; n++) { const pg = await d.getPage(n); pages.push({ lines: pdfText.linesOf((await pg.getTextContent()).items) }); pg.cleanup(); }
+      await d.destroy();
+      if (!pages.some(p => p.lines.length)) return say("This PDF has no text layer — make it searchable (OCR) first.", "bad");
+    }
+    if (id === "word") {
+      const { zipSync } = await import("/lib/fflate/browser.js");
+      downloadAs(office.toDocx(zipSync, office.paragraphsOf(pages), { title: nameBase() }), `${nameBase()}.docx`, "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      return say("Downloaded as Word — the text in reading order; fonts and pictures are not carried over.", "good");
+    }
+    if (id === "txt") { downloadAs(new TextEncoder().encode(pages.map(p => p.lines.map(l => l.text).join("\n")).join("\n\n")), `${nameBase()}.txt`, "text/plain"); return say("Downloaded as text.", "good"); }
+    if (id === "jpg") {
+      let n = 0;
+      for await (const img of render.renderPages(pdfjs, b, { type: "image/jpeg", quality: 0.9 })) { n++; downloadAs(new Uint8Array(await img.blob.arrayBuffer()), `${nameBase()}-p${img.page}.jpg`, "image/jpeg"); }
+      return say(`${n} page${n === 1 ? "" : "s"} downloaded as pictures.`, "good");
+    }
+    if (id === "searchable") {
+      say("Loading the text reader (once — about 15 MB)…");
+      const { createWorker, workerOptions } = await loadOcr();
+      const r = await render.ocrPdf(lib, pdfjs, createWorker, workerOptions, b, { onProgress: (n, t) => say(`Reading page ${n} of ${t}…`) });
+      downloadAs(r.bytes, `${nameBase()}-searchable.pdf`, "application/pdf");
+      return say(`A searchable copy: ${r.words} words read (confidence ${r.confidence}%).`, "good");
+    }
+    if (id === "protect") {
+      const pw = prompt("A password for the PDF (it cannot be recovered — keep it safe):");
+      if (!pw) return;
+      downloadAs(await core.protect(lib, b, pw), `${nameBase()}-protected.pdf`, "application/pdf");
+      return say("Protected with AES-256.", "good");
+    }
+  } catch (e) { say(e?.message || String(e), "bad"); }
+}
 const imagePick = el("input", { type: "file", accept: "image/jpeg,image/png", hidden: true });
 document.body.append(imagePick);
 function drawTools() {
@@ -84,6 +160,18 @@ async function pickTool(id) {
   }
   if (id === "signature" || id === "initials") { if (!sigs[id]) return maker.open(id); session.arm(id, { sig: sigs[id] }); return drawTools(); }
   if (id === "image") { imagePick.click(); return; }
+  if (mode === "pages") {
+    const i = current - 1, n = session.pages.length;
+    if (id === "rotl") return pageOp("rotate", { page: i, degrees: 270 }, `Page ${current} turned left`);
+    if (id === "rotr") return pageOp("rotate", { page: i, degrees: 90 }, `Page ${current} turned right`);
+    if (id === "dup") return pageOp("duplicate", { page: i }, `Page ${current} duplicated`);
+    if (id === "del") { if (n < 2) return say("A PDF needs at least one page.", "bad"); return pageOp("delete", { page: i }, `Page ${current} deleted`); }
+    if (id === "up") { if (!i) return; current--; return pageOp("move", { page: i, to: i - 1 }, `Page moved to ${current}`); }
+    if (id === "down") { if (i >= n - 1) return; current++; return pageOp("move", { page: i, to: i + 1 }, `Page moved to ${current}`); }
+    if (id === "blank") return pageOp("blank", { at: current }, `A blank page after page ${current}`);
+    if (id === "addfiles") { addFiles.click(); return; }
+  }
+  if (mode === "convert") return convert(id);
   session.arm(session.armed?.kind === id ? null : id);
   drawTools();
 }
@@ -100,6 +188,8 @@ for (const b of document.querySelectorAll(".ws-mode")) b.addEventListener("click
   mode = b.dataset.mode;
   for (const x of document.querySelectorAll(".ws-mode")) x.setAttribute("aria-selected", String(x === b));
   session.arm(null); drawTools();
+  if (mode === "sign" && session.formFields.length) say(`This PDF has ${new Set(session.formFields.map(f => f.name)).size} form fields — type straight into them on the page.`);
+  if (mode === "pages") say("Choose a page in the strip, then rotate, duplicate, delete, move or add.");
 });
 
 // the signature maker (A203's), in a dialog
