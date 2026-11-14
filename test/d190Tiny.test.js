@@ -70,3 +70,14 @@ test("the engine routes: T1 runs, an ambiguous request asks back, delete asks fi
   assert.equal((await bot.handle("what's the capital of France?")).tier, "ask");
   assert.ok(!ran.some(([k]) => k === "t3"));
 });
+
+test("D190 P2 / P4 · Tiny checks the document for what an ATS may trip on, and takes a spoken command through the same engine", () => {
+  const ws = read("public/workspace/workspace.js");
+  assert.match(ws, /atsWarnings: \(\) => \{/);
+  const tiny = read("public/assistant/tiny.js");
+  assert.match(tiny, /import \{ voiceSupported, listenOnce, voiceNote, VOICE_ERRORS \} from "\/assistant\/assistantVoice\.js"/);
+  assert.match(tiny, /onText: \(t\) => \{ input\.value = t; form\.requestSubmit\(\); \}/, "the spoken words are submitted like typed ones");
+  const voice = read("public/assistant/assistantVoice.js");
+  assert.match(voice, /processLocally: true/);
+  assert.doesNotMatch(voice, /\bfetch\(|XMLHttpRequest/);
+});

@@ -1,5 +1,5 @@
 {
-  "about": "D190 · the command vocabulary for Tiny (Resume Master, site rm) and Ask draft (draft, site draft). ONE file for both sites, mirrored byte-identical into resume-master at public/assistant/commands-v1.json. Each row: intent · site · tier (T1 action / T2 from the site's data / ask = asks back / T3 = the model, only on an explicit request) · patterns (shared/assistantEngine.js grammar) · calls (the handler — the SAME function the toolbar or button calls) · confirm (asked first) · examples (run by test/d190VocabularyExamplesPass). Rows are tried in order: specific before general. Adding a command = one row.",
+  "about": "D190 · the command vocabulary for Tiny (the PDF-tools site, site rm) and Ask draft (draft, site draft). ONE file for both sites, mirrored byte-identical into resume-master at public/assistant/commands-v1.json. Each row: intent · site · tier (T1 action / T2 from the site's data / ask = asks back / T3 = the model, only on an explicit request) · patterns (shared/assistantEngine.js grammar) · calls (the handler — the SAME function the toolbar or button calls) · confirm (asked first) · examples (run by test/d190VocabularyExamplesPass). Rows are tried in order: specific before general. Adding a command = one row.",
   "version": 1,
   "commands": [
     { "intent": "help", "site": "both", "tier": "T1", "calls": "help",
@@ -88,6 +88,9 @@
     { "intent": "doc_facts", "site": "rm", "tier": "T2", "calls": "docFacts",
       "patterns": ["how many (pages|lines|changes)[ (are there|is it|does it have|have i made)]", "how (big|large) is (it|this|the file)", "what'?s the file size", "how many changes"],
       "examples": [{ "say": "how many pages?", "args": {} }, { "say": "how big is it", "args": {} }] },
+    { "intent": "ats_warnings", "site": "rm", "tier": "T2", "calls": "atsWarnings",
+      "patterns": ["check[ (this|my|the)] (résumé|resume|pdf|document|file)[ for (ats|problems|ats problems|issues)]", "(any|what are the|show me the|show the) (problems|warnings|issues|ats problems|ats warnings)", "is (this|it|my resume|my résumé) (ats friendly|ats-friendly)", "will (this|it|my resume|my résumé) pass[ an] ats"],
+      "examples": [{ "say": "check my resume for ATS problems", "args": {} }, { "say": "is this ATS friendly?", "args": {} }, { "say": "any problems?", "args": {} }] },
     { "intent": "find_text", "site": "rm", "tier": "T2", "calls": "findText",
       "patterns": ["(find|where is|where'?s|search for|is there) {text}[ in (it|this|the document)]"],
       "examples": [{ "say": "find Python", "args": { "text": "Python" } }, { "say": "where is 2023?", "args": { "text": "2023" } }] },
@@ -125,6 +128,9 @@
     { "intent": "match_score", "site": "draft", "tier": "T2", "calls": "matchScore",
       "patterns": ["what'?s my (match|score|ats score|fit)[ for (this|the) job]", "how (well|good) do i (match|fit)[ (this|the) job]", "(show|what is) my (ats score|match)[ for (this|the) job]"],
       "examples": [{ "say": "what's my match for this job?", "args": {} }, { "say": "what's my ATS score", "args": {} }] },
+    { "intent": "missing_keywords", "site": "draft", "tier": "T2", "calls": "missingKeywords",
+      "patterns": ["(which|what) keywords (am i|are) missing[ for (this|the) job]", "what am i missing[ for (this|the) job]", "(which|what) keywords (do i|match)[ match][ for (this|the) job]", "(show|list) (the|my) (keywords|missing keywords)"],
+      "examples": [{ "say": "which keywords am I missing?", "args": {} }, { "say": "what am I missing for this job", "args": {} }] },
     { "intent": "sponsorship", "site": "draft", "tier": "T2", "calls": "sponsorship",
       "patterns": ["does {company} sponsor[ visas| h-?1b| h1b]", "(do|does) (this|the) (company|employer) sponsor[ visas| h-?1b]", "does it sponsor"],
       "examples": [{ "say": "does Kestrel sponsor?", "args": { "company": "Kestrel" } }, { "say": "does this company sponsor", "args": {} }] },

@@ -576,7 +576,7 @@ $("#ws-history").addEventListener("click", async () => {
     return { text: `${done}.`, undo: async () => { await reopen(before); return { text: "The pages are back as they were." }; } };
   }
   const handlers = {
-    help: () => ({ text: "I act on this document without AI: replace words (“replace 2023 with 2024 on line 3”), bold / italic / underline / size (“make the header bold”), delete, duplicate, rotate or move pages, compress, download as PDF, Word, text or pictures, print, go to a page, zoom, undo and redo — and I can read you what's on a page or find a word." }),
+    help: () => ({ text: "I act on this document without AI: replace words (“replace 2023 with 2024 on line 3”), bold / italic / underline / size (“make the header bold”), delete, duplicate, rotate or move pages, compress, download as PDF, Word, text or pictures, print, go to a page, zoom, undo and redo — and I can read you what's on a page, find a word, or check it for what an ATS may trip on." }),
     undo: () => { if (!session.canUndo) return { text: "There's nothing to undo." }; session.undo(); sync(); return { text: "Undone — the last change is taken back." }; },
     redo: () => { if (!session.canRedo) return { text: "There's nothing to redo." }; session.redo(); sync(); return { text: "Redone." }; },
     replaceText: (a) => {
@@ -675,6 +675,25 @@ $("#ws-history").addEventListener("click", async () => {
       if (!hits.length) return { text: `${q(a.text)} isn't in the document's text.` };
       goTo(hits[0].page + 1);
       return { text: `${q(a.text)} is on ${hits.slice(0, 6).map(where).join("; ")}${hits.length > 6 ? ` and ${hits.length - 6} more` : ""}.` };
+    },
+    // D190 P2 · what an applicant-tracking system may trip on, read from this document itself (still no model, no request)
+    atsWarnings: () => {
+      need();
+      const out = [], n = session.pages.length, size = session.bytes.length;
+      if (!session.fields.length) out.push("there is no text layer — an ATS reads nothing; use Convert → Searchable (OCR) first");
+      const pics = session.fields.filter(f => f.ocr).length;
+      if (pics) out.push(`${pics} line${pics === 1 ? " was" : "s were"} read from a picture — an ATS may not see ${pics === 1 ? "it" : "them"}`);
+      if (n > 2) out.push(`${n} pages — most résumés are one or two`);
+      if (size > 2 * 1048576) out.push(`${kb(size)} — many application forms cap uploads at 2 MB (say “compress it under 2 MB”)`);
+      const fonts = new Set(session.fields.map(f => f.pdfFont || `${f.font.family}${f.font.bold ? "-b" : ""}${f.font.italic ? "-i" : ""}`));
+      if (fonts.size > 4) out.push(`${fonts.size} different fonts — simpler is safer`);
+      // two columns: on a page, many lines with two runs far apart (an ATS may read straight across them)
+      for (const st of session.pages) {
+        const gs = linesOn(st.n - 1), w = st.size?.[0] || 612;
+        const split = gs.filter(g => g.fields.length > 1 && g.fields.some((f, k) => k && f.box.x - (g.fields[k - 1].box.x + g.fields[k - 1].box.w) > w * 0.12)).length;
+        if (gs.length >= 6 && split / gs.length > 0.35) { out.push(`page ${st.n} looks like two columns — some ATS read straight across them`); break; }
+      }
+      return { text: out.length ? `What an ATS may trip on: ${out.join("; ")}.` : `Nothing obvious: ${n} page${n === 1 ? "" : "s"}, a text layer, ${fonts.size} font${fonts.size === 1 ? "" : "s"}, ${kb(size)}. (An ATS score needs a job — score it against one in draft.)` };
     },
     // T3 — new writing. Not switched on in Tiny yet; nothing is sent anywhere (the routing stub, D190 P1).
     t3: () => ({ ask: "Writing new words needs the assistant, which isn't switched on in Tiny yet. Everything already in this document I can do without it — say “help” for the list." }),

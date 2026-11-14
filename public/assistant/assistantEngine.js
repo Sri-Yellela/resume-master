@@ -1,4 +1,4 @@
-// shared/assistantEngine.js — ⭐ D190 · ONE ENGINE FOR TINY (Resume Master) AND ASK DRAFT (draft).
+// shared/assistantEngine.js — ⭐ D190 · ONE ENGINE FOR TINY (the PDF-tools site) AND ASK DRAFT (draft).
 // ⛔ MIRRORED byte-identical into resume-master at public/assistant/assistantEngine.js — change both (the guard
 // test/d190EngineMirror.test.js fails when the two copies differ). Pure: no imports, no network, no DOM.
 //

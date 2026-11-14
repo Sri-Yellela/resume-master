@@ -4,6 +4,7 @@
 // ⛔ The owner's rule (11-14): nothing within the site's own data or functions calls a model — T1 / T2 run here, in this
 // browser, with no request at all. T3 (new writing the person asked for) is the only tier that may reach a server.
 import { createAssistant, TIER_LABEL } from "/assistant/assistantEngine.js";
+import { voiceSupported, listenOnce, voiceNote, VOICE_ERRORS } from "/assistant/assistantVoice.js";   // D190 P4
 
 const KEY = "rm-tiny:turns";
 
@@ -17,7 +18,20 @@ export async function mountTiny({ el, host, toggle, handlers, onOpenChange = () 
   const input = el("textarea", { class: "tiny-input", rows: "2", maxlength: "600", "aria-label": "Tell Tiny what to do", "data-tiny-input": "",
     placeholder: "e.g. replace 2023 with 2024 on line 3" });
   const send = el("button", { type: "submit", class: "ws-b ws-p", "data-tiny-send": "" }, "Send");
-  const form = el("form", { class: "tiny-form" }, input, send);
+  // ⭐ D190 P4 · voice: the browser's speech-to-text; the words go through the same engine as typed ones
+  const voiceLine = el("p", { class: "ws-faint ws-small tiny-voice", "data-tiny-voice-note": "", "aria-live": "polite" });
+  let listening = null;
+  const mic = voiceSupported(window) ? el("button", { type: "button", class: "ws-b ws-ic", "data-tiny-mic": "", "aria-pressed": "false", title: "Speak a command", "aria-label": "Speak a command",
+    onclick: async () => {
+      if (listening) { listening.stop(); return; }
+      try {
+        mic.setAttribute("aria-pressed", "true");
+        listening = await listenOnce({ onText: (t) => { input.value = t; form.requestSubmit(); },
+          onEnd: (code) => { listening = null; mic.setAttribute("aria-pressed", "false"); voiceLine.textContent = code ? (VOICE_ERRORS[code] || "Voice stopped — type instead.") : ""; } });
+        voiceLine.textContent = voiceNote(listening.local);
+      } catch (e) { listening = null; mic.setAttribute("aria-pressed", "false"); voiceLine.textContent = e.message; }
+    } }, "🎙") : null;
+  const form = el("form", { class: "tiny-form" }, input, el("div", { class: "tiny-actions" }, mic, send), voiceLine);
   const panel = el("aside", { class: "ws-tiny", id: "ws-tiny", "aria-label": "Tiny", "data-tiny": "", hidden: true },
     el("header", { class: "tiny-head" }, el("b", {}, "Tiny"),
       el("span", { class: "ws-faint ws-small" }, "Acts on this document in your browser — no AI for anything already here."),
