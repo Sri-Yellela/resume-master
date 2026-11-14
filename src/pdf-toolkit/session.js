@@ -158,9 +158,30 @@ export function createPdfSession(o) {
     new ResizeObserver(() => layer.style.setProperty("--pt-k", String(layer.clientWidth / v1.width))).observe(layer);
     const state = { canvas, ctx, v1, layer, wrap, n, ocrDone: false, rotate: page.rotate || 0, size: [v1.width, v1.height] };
     pages.push(state);
+    // ⭐ D188 LATER · Draw: with the pen armed, the pointer draws on the page; lifting it places ONE ink item (a vector path)
+    layer.addEventListener("pointerdown", (e) => {
+      if (armed?.kind !== "ink" || e.target.closest(".pt-ed-item")) return;
+      e.preventDefault();
+      const r = layer.getBoundingClientRect();
+      const pts = [[(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height]];
+      const trail = el("div", { class: "pt-ed-trail" });
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("viewBox", "0 0 1000 1000"); svg.setAttribute("preserveAspectRatio", "none");
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      svg.append(path); trail.append(svg); layer.append(trail);
+      const draw = () => path.setAttribute("d", pts.map(([x, y], i) => `${i ? "L" : "M"}${(x * 1000).toFixed(1)} ${(y * 1000).toFixed(1)}`).join(" "));
+      layer.setPointerCapture(e.pointerId);
+      const move = (m) => { pts.push([clamp((m.clientX - r.left) / r.width, 0, 1), clamp((m.clientY - r.top) / r.height, 0, 1)]); draw(); };
+      const up = () => {
+        layer.removeEventListener("pointermove", move); layer.removeEventListener("pointerup", up); layer.removeEventListener("pointercancel", up);
+        trail.remove();
+        if (pts.length > 1) placeInk(n - 1, pts, armed?.payload || {});
+      };
+      layer.addEventListener("pointermove", move); layer.addEventListener("pointerup", up); layer.addEventListener("pointercancel", up);
+    });
     layer.addEventListener("click", (e) => {
       // with a tool armed the page's fields let the click through (CSS), so a box can go over text — never over an item
-      if (!armed || e.target.closest(".pt-ed-item")) return;
+      if (!armed || armed.kind === "ink" || e.target.closest(".pt-ed-item")) return;
       const r = layer.getBoundingClientRect();
       place(armed.kind, n - 1, (e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height, armed.payload);
     });
@@ -351,7 +372,22 @@ export function createPdfSession(o) {
   }
 
   // ── items: what the person places (Fill & sign) ──
-  const ITEM_SIZE = { signature: [160, null], initials: [60, null], text: [180, 18], date: [130, 18], name: [180, 18], check: [14, 14], cross: [14, 14], whiteout: [120, 18], redact: [140, 16], image: [140, null] };
+  const ITEM_SIZE = { signature: [160, null], initials: [60, null], text: [180, 18], date: [130, 18], name: [180, 18], check: [14, 14], cross: [14, 14], whiteout: [120, 18], redact: [140, 16], image: [140, null],
+    highlight: [140, 14], box: [160, 60] };   // ⭐ D188 LATER · Annotate
+  /** ⭐ D188 LATER · one freehand stroke → an ink item: the path in its own box (0–1000 on each side), resizable like a picture. */
+  function placeInk(page, pts, { color = [0.85, 0.12, 0.12], strokeWidth = 2 } = {}) {
+    const st = pages[page]; if (!st) return null;
+    const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+    const pad = 0.004;
+    const fx = clamp(Math.min(...xs) - pad, 0, 1), fy = clamp(Math.min(...ys) - pad, 0, 1);
+    const fw = Math.max(0.01, Math.min(1 - fx, Math.max(...xs) - fx + pad)), fh = Math.max(0.01, Math.min(1 - fy, Math.max(...ys) - fy + pad));
+    const [W, H] = st.size, vbw = 1000, vbh = Math.max(1, Math.round(1000 * (fh * H) / (fw * W)));
+    const d = pts.map(([x, y], i) => `${i ? "L" : "M"}${(((x - fx) / fw) * vbw).toFixed(1)} ${(((y - fy) / fh) * vbh).toFixed(1)}`).join(" ");
+    const it = { kind: "item", type: "ink", id: nextId++, page, fx, fy, fw, fh, payload: { d, vbw, vbh, color, strokeWidth: strokeWidth * vbw / (fw * W) }, text: "", size: 12 };
+    drawItem(it);
+    record({ undo: () => unplace(it), redo: () => { items.push(it); st.layer.append(it.node); } });
+    return it;
+  }
   function place(kind, page, fx, fy, payload = {}) {
     const st = pages[page]; if (!st) return null;
     const [W, H] = st.size;
@@ -377,7 +413,14 @@ export function createPdfSession(o) {
     else if (it.type === "image") box.append(el("img", { src: it.payload.url, alt: "" }));
     else if (it.type === "check" || it.type === "cross") box.append(el("span", { class: "pt-ed-mark" }, it.type === "check" ? "✓" : "✗"));
     else if (it.type === "redact") box.append(el("span", { class: "pt-ed-redact-label" }, "Redact"));
-    else if (it.type !== "whiteout") {
+    else if (it.type === "ink") {
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("viewBox", `0 0 ${it.payload.vbw} ${it.payload.vbh}`); svg.setAttribute("preserveAspectRatio", "none"); svg.classList.add("pt-ed-ink");
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", it.payload.d); path.setAttribute("stroke-width", String(it.payload.strokeWidth));
+      svg.append(path); box.append(svg);
+    }
+    else if (it.type !== "whiteout" && it.type !== "highlight" && it.type !== "box") {
       const ta = el("textarea", { class: "pt-ed-text", rows: "1", placeholder: it.type === "name" ? "Your name" : "Type here", "aria-label": "Text on the page" });
       ta.value = it.text;
       ta.style.fontSize = `calc(var(--pt-k, 1) * ${it.size}px)`;
@@ -401,7 +444,7 @@ export function createPdfSession(o) {
       const resizing = e.target.classList.contains("pt-ed-resize");
       const r = layer.getBoundingClientRect();
       const start = { x: e.clientX, y: e.clientY, fx: it.fx, fy: it.fy, fw: it.fw, fh: it.fh };
-      const keep = ["signature", "initials", "image", "check", "cross"].includes(it.type);
+      const keep = ["signature", "initials", "image", "check", "cross", "ink"].includes(it.type);
       box.setPointerCapture(e.pointerId);
       const move = (m) => {
         const dx = (m.clientX - start.x) / r.width, dy = (m.clientY - start.y) / r.height;
@@ -502,6 +545,10 @@ export function createPdfSession(o) {
           if (it.type === "signature" || it.type === "initials") return { ...at, kind: "svg", d: it.payload.sig.d, vbw: it.payload.sig.width, vbh: it.payload.sig.height, strokeWidth: it.payload.sig.strokeWidth || null, color: it.payload.sig.color };
           if (it.type === "image") return { ...at, kind: "image", image: it.payload.bytes };
           if (it.type === "whiteout") return { ...at, kind: "whiteout" };
+          // ⭐ D188 LATER · Annotate: a highlight (see-through yellow), a box (an outline), ink (the stroke as a vector path)
+          if (it.type === "highlight") return { ...at, kind: "highlight" };
+          if (it.type === "box") return { ...at, kind: "box" };
+          if (it.type === "ink") return { ...at, kind: "svg", d: it.payload.d, vbw: it.payload.vbw, vbh: it.payload.vbh, strokeWidth: it.payload.strokeWidth, color: it.payload.color };
           // ✓ / ✗ as vector strokes (the standard fonts carry no check mark)
           if (it.type === "check" || it.type === "cross") return { ...at, kind: "svg", d: it.type === "check" ? "M2.5 8.5L6.5 12.5L13.5 3.5" : "M3.5 3.5L12.5 12.5M12.5 3.5L3.5 12.5", vbw: 16, vbh: 16, strokeWidth: 2.2 };
           return { ...at, kind: "text", text: it.text, size: it.size };

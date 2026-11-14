@@ -249,7 +249,7 @@ export async function compress(lib, bytes, { reencodeJpeg, maxDimension = 1600, 
 // are fractions of the displayed page (top-left origin), so a page with /Rotate 90 / 180 / 270 takes each item upright,
 // where the person put it. Nothing else on the page changes; a white-out covers, it does not delete the text beneath.
 
-const KINDS = new Set(["text", "whiteout", "image", "svg"]);
+const KINDS = new Set(["text", "whiteout", "image", "svg", "highlight", "box"]);   // + D188 LATER · Annotate
 
 /** The displayed page's box → PDF user space, for a page with /Rotate r (its crop box W × H at x0, y0). */
 export function displayToPdf({ W, H, x0 = 0, y0 = 0, r = 0 }, dx, dy) {
@@ -292,6 +292,14 @@ export async function applyEdits(lib, bytes, items) {
     if (it.kind === "whiteout") {
       if (!dw || !dh) continue;
       page.drawRectangle({ ...bottomLeft, width: dw, height: dh, rotate, color: colorOf(lib, it.color, [1, 1, 1]), borderWidth: 0 });
+    } else if (it.kind === "highlight") {
+      // ⭐ D188 LATER: a marker over the words — see-through (multiply), the text under it stays the text
+      if (!dw || !dh) continue;
+      page.drawRectangle({ ...bottomLeft, width: dw, height: dh, rotate, color: colorOf(lib, it.color, [1, 0.92, 0.2]), opacity: 0.38, borderWidth: 0,
+        ...(lib.BlendMode ? { blendMode: lib.BlendMode.Multiply } : {}) });
+    } else if (it.kind === "box") {
+      if (!dw || !dh) continue;
+      page.drawRectangle({ ...bottomLeft, width: dw, height: dh, rotate, borderColor: colorOf(lib, it.color, [0.85, 0.12, 0.12]), borderWidth: Math.max(0.5, Number(it.strokeWidth) || 1.5) });
     } else if (it.kind === "image") {
       const kind = it.image && sniffImage(it.image);
       if (!kind) throw new ToolkitError(`Item ${n + 1}: a picture must be a JPEG or PNG.`);
@@ -603,4 +611,71 @@ export async function arrangePages(lib, bytes, order) {
   root.set(PDFName.of("Kids"), doc.context.obj(kids));
   root.set(PDFName.of("Count"), PDFNumber.of(kids.length));
   return save(doc);
+}
+
+// ── ⭐ D188 LATER · WORD → PDF, step 2: LAY OUT the paragraphs (office.js docxBlocks) on Letter pages, in the browser ──
+// Text and headings, bold / italic, list bullets, wrapped to the margins. Set in Helvetica (the standard PDF faces — the
+// document's own fonts are not carried, and the caller says so); a character Helvetica cannot draw becomes "?" and is
+// counted. → { bytes, pages, replaced }
+export async function blocksToPdf(lib, blocks, { title = "Document", pageSize = [612, 792], margin = 72 } = {}) {
+  if (!Array.isArray(blocks) || !blocks.length) throw new ToolkitError("There is no text to lay out.");
+  const doc = await lib.PDFDocument.create();
+  doc.setTitle(String(title).slice(0, 200)); doc.setProducer("Resume Master — in your browser");
+  const F = {
+    r: await doc.embedFont(lib.StandardFonts.Helvetica), b: await doc.embedFont(lib.StandardFonts.HelveticaBold),
+    i: await doc.embedFont(lib.StandardFonts.HelveticaOblique), bi: await doc.embedFont(lib.StandardFonts.HelveticaBoldOblique),
+  };
+  const SIZE = { title: 20, h1: 15, h2: 12.5, h3: 11, p: 10.5, li: 10.5 };
+  const [W, H] = pageSize, maxW = W - margin * 2;
+  let replaced = 0;
+  // the face's own character set decides (this pdf-lib writes an unknown character as "?" without a word — count it here)
+  const sets = new Map();
+  const has = (font, ch) => {
+    if (!sets.has(font)) sets.set(font, new Set(typeof font.getCharacterSet === "function" ? font.getCharacterSet() : []));
+    const set = sets.get(font);
+    if (set.size) return set.has(ch.codePointAt(0));
+    try { font.encodeText(ch); return true; } catch { return false; }
+  };
+  const safe = (font, s) => [...s].map(ch => { if (ch === "\n" || ch === " ") return ch; if (has(font, ch)) return ch; replaced++; return "?"; }).join("");
+  let page = doc.addPage(pageSize), y = H - margin;
+  const newPage = () => { page = doc.addPage(pageSize); y = H - margin; };
+  for (const blk of blocks) {
+    const size = SIZE[blk.kind] || SIZE.p, lineH = size * 1.35;
+    const heading = /^(title|h[1-3])$/.test(blk.kind);
+    if (!blk.runs.length) { y -= lineH * 0.6; continue; }
+    if (heading) y -= size * 0.5;
+    // words with their face, across runs; "\n" is a forced line
+    const words = [];
+    for (const r of blk.runs) {
+      const font = (r.bold || heading) ? (r.italic ? F.bi : F.b) : (r.italic ? F.i : F.r);
+      for (const part of safe(font, r.text).split(/(\n| +)/)) if (part) words.push({ t: part, font });
+    }
+    const indent = blk.kind === "li" ? 14 : 0;
+    let line = [], lineW = 0, first = true;
+    const flush = () => {
+      if (y - size < margin) newPage();
+      let x = margin + indent;
+      if (first && blk.kind === "li") page.drawText("•", { x: margin + 2, y: y - size, size, font: F.r });
+      while (line.length && /^ +$/.test(line.at(-1).t)) line.pop();
+      for (const w of line) { page.drawText(w.t, { x, y: y - size, size, font: w.font }); x += w.font.widthOfTextAtSize(w.t, size); }
+      y -= lineH; line = []; lineW = 0; first = false;
+    };
+    for (const w of words) {
+      if (w.t === "\n") { flush(); continue; }
+      const ww = w.font.widthOfTextAtSize(w.t, size);
+      if (/^ +$/.test(w.t) && !line.length) continue;
+      if (lineW + ww > maxW - indent && line.length) flush();
+      if (/^ +$/.test(w.t) && !line.length) continue;
+      if (ww > maxW - indent) {   // one word wider than the line: break it by characters
+        let chunk = "";
+        for (const ch of w.t) { if (w.font.widthOfTextAtSize(chunk + ch, size) > maxW - indent) { line.push({ t: chunk, font: w.font }); flush(); chunk = ""; } chunk += ch; }
+        if (chunk) { line.push({ t: chunk, font: w.font }); lineW += w.font.widthOfTextAtSize(chunk, size); }
+        continue;
+      }
+      line.push(w); lineW += ww;
+    }
+    if (line.length) flush();
+    y -= heading ? size * 0.35 : size * 0.45;
+  }
+  return { bytes: await doc.save({ useObjectStreams: true }), pages: doc.getPageCount(), replaced };
 }

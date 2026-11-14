@@ -77,6 +77,15 @@
 .pt-ed-item { position: absolute; box-sizing: border-box; outline: 1px dashed rgba(30, 90, 200, 0.55); cursor: move; touch-action: none; }
 .pt-ed-item:focus-visible, .pt-ed-item:focus-within { outline: 2px solid rgba(30, 90, 200, 0.9); }
 .pt-ed-item--whiteout { background: #fff; }
+/* D188 LATER · Annotate — the page's own colours (the paper is white in every theme) */
+.pt-ed-item--highlight { background: rgba(255, 235, 51, .38); mix-blend-mode: multiply; }
+.pt-ed-item--box { outline: 1.5px solid #d91f1f; outline-offset: -1.5px; }
+.pt-ed-ink, .pt-ed-trail svg { width: 100%; height: 100%; overflow: visible; }
+.pt-ed-ink path, .pt-ed-trail path { fill: none; stroke: #d91f1f; stroke-linecap: round; stroke-linejoin: round; }
+.pt-ed-trail path { vector-effect: non-scaling-stroke; }
+.pt-ed-trail { position: absolute; inset: 0; pointer-events: none; }
+.pt-ed-trail path { stroke-width: 2; }
+.pt-ed-pages[data-armed="ink"] .pt-ed-layer { cursor: crosshair; touch-action: none; }
 .pt-ed-item img, .pt-ed-sig { display: block; width: 100%; height: 100%; pointer-events: none; }
 .pt-ed-text {
   display: block; width: 100%; height: 100%; box-sizing: border-box; margin: 0; padding: 0; border: 0; resize: none; overflow: hidden;

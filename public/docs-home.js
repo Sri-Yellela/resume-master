@@ -6,7 +6,8 @@ const input = drop?.querySelector("input[type=file]");
 const mode = drop?.dataset.mode || "edit";
 async function hand(file) {
   if (!file) return;
-  if (!/pdf$/i.test(file.type) && !/\.pdf$/i.test(file.name)) { drop.dataset.err = "That isn't a PDF."; drop.querySelector(".docs-drop__s").textContent = "That isn't a PDF — choose a .pdf file."; return; }
+  // ⭐ D188 LATER: a Word file (.docx) is welcome too — the workspace makes it a PDF in this browser
+  if (!/pdf$/i.test(file.type) && !/\.pdf$/i.test(file.name) && !/\.docx$/i.test(file.name) && !/wordprocessingml/i.test(file.type)) { drop.dataset.err = "That isn't a PDF."; drop.querySelector(".docs-drop__s").textContent = "That isn't a PDF or a Word file — choose a .pdf or .docx."; return; }
   await store.setHandoff(new Uint8Array(await file.arrayBuffer()), file.name, mode, drop.dataset.tool || null);
   location.href = `/workspace/?open=1&mode=${encodeURIComponent(mode)}`;
 }

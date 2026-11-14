@@ -136,3 +136,45 @@ export function toXlsx(zipSync, sheets) {
   list.forEach((s, i) => { files[`xl/worksheets/sheet${i + 1}.xml`] = enc(sheetXml(s.rows)); });
   return zipSync(files, { level: 6 });
 }
+
+// ── ⭐ D188 LATER · WORD → PDF, step 1: READ a .docx in the browser (no library beyond fflate, already here; no upload) ──
+// A .docx is a zip; word/document.xml holds the paragraphs. Read: each paragraph's style (Title / Heading 1–3 / a list item /
+// body) and its runs (bold, italic, the words; a tab is a space, a line break a new line). Tables come through as their
+// cells' paragraphs, one after another; pictures, headers / footers and fonts are not carried — the caller says so.
+const XML_ENT = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
+const unxml = (s) => String(s).replace(/&(#x[0-9a-f]+|#\d+|\w+);/gi, (m, e) => e[0] === "#" ? String.fromCodePoint(e[1].toLowerCase() === "x" ? parseInt(e.slice(2), 16) : Number(e.slice(1))) : (XML_ENT[e] ?? m));
+const on = (xml, tag) => { const m = new RegExp(`<w:${tag}(?:\\s[^>]*)?/?>`).exec(xml); return !!m && !/w:val="(0|false|none)"/.test(m[0]); };
+
+/** .docx bytes → [{ kind: 'title' | 'h1' | 'h2' | 'h3' | 'li' | 'p', runs: [{ text, bold, italic }] }]. Pure (unzipSync passed in). */
+export function docxBlocks(unzipSync, bytes) {
+  let files;
+  try { files = unzipSync(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)); } catch { throw new Error("This file couldn't be opened as a Word document (.docx)."); }
+  const doc = files["word/document.xml"];
+  if (!doc) throw new Error("This isn't a Word document (.docx) — there is no document inside it.");
+  const xml = new TextDecoder().decode(doc);
+  const body = xml.slice(Math.max(0, xml.indexOf("<w:body")));
+  const blocks = [];
+  for (const pm of body.matchAll(/<w:p(?:\s[^>]*)?(?:\/>|>([\s\S]*?)<\/w:p>)/g)) {
+    const p = pm[1] || "";
+    const style = (/<w:pStyle\s+w:val="([^"]+)"/.exec(p)?.[1] || "").toLowerCase();
+    const kind = /^title$/.test(style) ? "title" : /heading\s*1|^heading1$|^1$/.test(style) ? "h1" : /heading\s*2|^heading2$/.test(style) ? "h2"
+      : /heading\s*[3-9]|^heading[3-9]$/.test(style) ? "h3" : /<w:numPr>/.test(p) || /list/.test(style) ? "li" : "p";
+    const pBold = on(/<w:pPr>[\s\S]*?<\/w:pPr>/.exec(p)?.[0] || "", "b");
+    const runs = [];
+    for (const rm of p.matchAll(/<w:r(?:\s[^>]*)?>([\s\S]*?)<\/w:r>/g)) {
+      const r = rm[1];
+      const props = /<w:rPr>([\s\S]*?)<\/w:rPr>/.exec(r)?.[1] || "";
+      let text = "";
+      for (const t of r.matchAll(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>|<w:tab\s*\/>|<w:br\s*\/>|<w:cr\s*\/>/g)) {
+        text += t[1] != null ? unxml(t[1]) : /<w:tab/.test(t[0]) ? " " : "\n";
+      }
+      if (text) runs.push({ text, bold: pBold || on(props, "b"), italic: on(props, "i") });
+    }
+    blocks.push({ kind, runs });
+  }
+  // drop leading / trailing empty paragraphs; keep one empty paragraph between blocks as space
+  while (blocks.length && !blocks[0].runs.length) blocks.shift();
+  while (blocks.length && !blocks.at(-1).runs.length) blocks.pop();
+  if (!blocks.some(b => b.runs.some(r => r.text.trim()))) throw new Error("This Word document has no text to lay out.");
+  return blocks;
+}

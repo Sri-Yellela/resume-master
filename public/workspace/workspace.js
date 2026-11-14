@@ -69,11 +69,13 @@ const TOOLS = {
     ["check", "✓", "Check"], ["cross", "✗", "Cross"], ["date", "▦", "Date"], ["|"], ["redact", "■", "Redact"], ["ocr", "⌕", "Find text in pictures"]],
   sign: [["select", "⌖", "Select"], ["signature", "✎", "Signature"], ["initials", "ab", "Initials"], ["name", "Aa", "Name"], ["date", "▦", "Date"],
     ["text", "⊞", "Text"], ["check", "✓", "Check"], ["cross", "✗", "Cross"]],
+  // ⭐ D188 LATER · Annotate: mark a page for review — a highlight over words, a freehand pen, a box, a note
+  annotate: [["select", "⌖", "Select"], ["highlight", "▬", "Highlight"], ["ink", "✎", "Draw"], ["box", "▢", "Box"], ["text", "⊞", "Note"]],
   // ⭐ D189 P3: the page strip's operations, on the current page (the strip / navigator chooses it)
   pages: [["rotl", "⟲", "Rotate left"], ["rotr", "⟳", "Rotate right"], ["dup", "⧉", "Duplicate"], ["del", "✕", "Delete"],
     ["up", "↑", "Move earlier"], ["down", "↓", "Move later"], ["|"], ["blank", "▢", "Blank page"], ["addfiles", "+", "Add files"]],
   // ⭐ D189 P3: the document as something else — each from the CURRENT document (changes included)
-  convert: [["compress", "⇲", "Compress"], ["word", "W", "Word"], ["txt", "≡", "Text"], ["jpg", "▣", "Images"], ["searchable", "⌕", "Searchable (OCR)"], ["protect", "⚿", "Protect"]],
+  convert: [["compress", "⇲", "Compress"], ["word", "W", "Word"], ["txt", "≡", "Text"], ["jpg", "▣", "Images"], ["searchable", "⌕", "Searchable (OCR)"], ["protect", "⚿", "Protect"], ["|"], ["fromword", "W→", "From Word"]],
 };
 const addFiles = el("input", { type: "file", accept: "application/pdf,image/jpeg,image/png", multiple: true, hidden: true });
 document.body.append(addFiles);
@@ -99,6 +101,7 @@ function downloadAs(bytes, filename, type) {
   document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
 }
 async function convert(id, opts = {}) {
+  if (id === "fromword") { wordPick.click(); return; }   // D188 LATER: a .docx becomes a PDF, opened here
   try {
     const b = await currentBytes();
     if (id === "compress") {
@@ -185,7 +188,7 @@ imagePick.addEventListener("change", async () => {
   session.arm("image", { bytes: b, url: URL.createObjectURL(new Blob([b])), ratio: bmp ? bmp.height / bmp.width : 1 });
   bmp?.close?.(); drawTools(); say("Click on a page to place the picture.");
 });
-session.on("armed", (a) => { drawTools(); if (a) say(`Click on a page to place the ${a.kind === "whiteout" ? "white-out box" : a.kind}. Esc to stop.`); });
+session.on("armed", (a) => { drawTools(); if (a) say(a.kind === "ink" ? "Draw on a page with the pointer — each stroke is one mark you can move or remove. Esc to stop." : `Click on a page to place the ${a.kind === "whiteout" ? "white-out box" : a.kind}. Esc to stop.`); });
 function setMode(m) {
   const b = document.querySelector(`.ws-mode[data-mode="${m}"]`);
   if (b) b.click();
@@ -196,6 +199,7 @@ for (const b of document.querySelectorAll(".ws-mode")) b.addEventListener("click
   session.arm(null); drawTools();
   if (mode === "sign" && session.formFields.length) say(`This PDF has ${new Set(session.formFields.map(f => f.name)).size} form fields — type straight into them on the page.`);
   if (mode === "pages") say("Choose a page in the strip, then rotate, duplicate, delete, move or add.");
+  if (mode === "annotate") say("Highlight, draw or box anything on the page — the marks are written into the PDF when you download it.");
 });
 
 // the signature maker (A203's), in a dialog
@@ -293,11 +297,32 @@ function drawPage() {
 document.querySelector('[data-ptab="page"]').addEventListener("click", drawPage);
 
 // ── open a file ──
+const isDocx = (name = "", type = "", bytes = null) => /\.docx$/i.test(name) || /wordprocessingml/i.test(type) || (bytes && bytes[0] === 0x50 && bytes[1] === 0x4b && !/\.pdf$/i.test(name));
+/** ⭐ D188 LATER · Word → PDF, in this browser: the .docx's paragraphs (office.js docxBlocks) laid out on Letter pages (core.blocksToPdf). */
+async function wordToPdf(bytes, name) {
+  say("Making a PDF from the Word file…");
+  const { unzipSync } = await import("/lib/fflate/browser.js");
+  const blocks = office.docxBlocks(unzipSync, bytes);
+  const r = await core.blocksToPdf(lib, blocks, { title: baseName(String(name).replace(/\.docx$/i, "")) });
+  return { ...r, note: `Made from Word in your browser: ${r.pages} page${r.pages === 1 ? "" : "s"} — the text, headings, bold / italic and lists, set in Helvetica. Pictures, tables' layout and the document's own fonts are not carried${r.replaced ? `; ${r.replaced} character${r.replaced === 1 ? "" : "s"} Helvetica cannot draw became “?”` : ""}.` };
+}
+async function openAny(bytes, name, opts = {}) {
+  if (!isDocx(name, "", bytes)) return openBytes(bytes, name, opts);
+  try {
+    const r = await wordToPdf(bytes, name);
+    await openBytes(r.bytes, `${baseName(String(name).replace(/\.docx$/i, ""))}.pdf`, opts);
+    say(r.note, r.replaced ? "bad" : "good");
+  } catch (e) { ws.dataset.state = session.bytes ? "open" : "empty"; $("#ws-err").textContent = e?.message || String(e); say(e?.message || String(e), "bad"); }
+}
 async function openFile(file) {
   $("#ws-err").textContent = "";
-  if (!/pdf$/i.test(file.type) && !/\.pdf$/i.test(file.name)) { $("#ws-err").textContent = "That isn't a PDF."; return; }
-  return openBytes(new Uint8Array(await file.arrayBuffer()), file.name, {});
+  const docx = isDocx(file.name, file.type);
+  if (!docx && !/pdf$/i.test(file.type) && !/\.pdf$/i.test(file.name)) { $("#ws-err").textContent = "That isn't a PDF or a Word file (.docx)."; return; }
+  return openAny(new Uint8Array(await file.arrayBuffer()), file.name, {});
 }
+const wordPick = el("input", { type: "file", accept: ".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document", hidden: true });
+document.body.append(wordPick);
+wordPick.addEventListener("change", () => { const f = wordPick.files?.[0]; wordPick.value = ""; if (f) openFile(f); });
 /** Open bytes in the workspace; remembered in Recent (this browser) with a first version unless it is one already. */
 async function openBytes(bytes, fileName, { id = null, note = "Opened", openMode = null } = {}) {
   $("#ws-err").textContent = "";
@@ -492,7 +517,7 @@ $("#ws-history").addEventListener("click", async () => {
   const q = new URLSearchParams(location.search);
   if (q.has("open")) {
     const h = await store.takeHandoff();
-    if (h?.bytes) await openBytes(h.bytes, h.name || "document.pdf", { openMode: q.get("mode") || h.mode || null });
+    if (h?.bytes) await openAny(h.bytes, h.name || "document.pdf", { openMode: q.get("mode") || h.mode || null });
     history.replaceState(null, "", location.pathname + (q.get("mode") ? `?mode=${q.get("mode")}` : ""));
   } else if (q.get("doc")) {
     const d = await store.getDoc(q.get("doc"));

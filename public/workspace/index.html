@@ -35,6 +35,7 @@
     </header>
     <nav class="ws-modes" role="tablist" aria-label="Modes">
       <button role="tab" class="ws-mode" data-mode="edit" aria-selected="true">Edit</button>
+      <button role="tab" class="ws-mode" data-mode="annotate" aria-selected="false">Annotate</button>
       <button role="tab" class="ws-mode" data-mode="sign" aria-selected="false">Fill &amp; sign</button>
       <button role="tab" class="ws-mode" data-mode="pages" aria-selected="false">Pages</button>
       <button role="tab" class="ws-mode" data-mode="convert" aria-selected="false">Convert</button>
@@ -45,7 +46,7 @@
       <main class="ws-canvas" id="ws-canvas" aria-label="The document">
         <div class="ws-empty" id="ws-empty">
           <p class="ws-empty__t">Drop a PDF here</p>
-          <p class="ws-empty__s">or <label class="ws-b ws-p"><input type="file" id="ws-open" accept="application/pdf,.pdf" hidden>Open a PDF</label> — it opens here and never leaves this device.</p>
+          <p class="ws-empty__s">or <label class="ws-b ws-p"><input type="file" id="ws-open" accept="application/pdf,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>Open a PDF</label> — or a Word file (.docx), made into a PDF here. Nothing leaves this device.</p>
           <p class="ws-empty__err" id="ws-err" role="alert"></p>
         </div>
         <div class="ws-zoom" id="ws-zoom"></div>
