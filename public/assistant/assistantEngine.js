@@ -43,6 +43,7 @@ export function compilePattern(template) {
     } else if (c === "[") { out += "(?:"; i++; }
     else if (c === "]") { out += ")?"; i++; }
     else if (c === "?") { out += "?"; i++; }   // the character or group before it is optional ("what'?s")
+    else if (c === "|") throw new Error(`a | outside ( ) in "${template}" — write the choices as (a|b)`);
     else if (/\s/.test(c)) { while (i < t.length && /\s/.test(t[i])) i++; out += "\\s+"; }
     else { out += esc(c); i++; }
   }
