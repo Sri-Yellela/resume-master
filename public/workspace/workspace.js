@@ -81,7 +81,7 @@ addFiles.addEventListener("change", async () => {
   const files = [...(addFiles.files || [])]; addFiles.value = ""; if (!files.length) return;
   await pageOp("add", { files: await Promise.all(files.map(async f => ({ name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) }))) }, `${files.length} file${files.length === 1 ? "" : "s"} added at the end`);
 });
-async function pageOp(kind, arg, done) {
+async function pageOp(kind, arg, done, { rethrow = false } = {}) {
   try {
     const had = session.changeCount();
     say("Working on the pages…");
@@ -90,7 +90,7 @@ async function pageOp(kind, arg, done) {
     await drawStrip(); fitWidth(); drawTools(); sync();
     $("#ws-meta").textContent = `${r.pages} page${r.pages === 1 ? "" : "s"} · ${kb(session.bytes.length)}`;
     say(`${done}.${had ? " Your other changes were written first — undo starts again from here." : ""}`, "good");
-  } catch (e) { say(e?.message || String(e), "bad"); }
+  } catch (e) { say(e?.message || String(e), "bad"); if (rethrow) throw e; }
 }
 const currentBytes = async () => (session.changeCount() ? (await session.save()).bytes : session.bytes);
 const nameBase = () => baseName($("#ws-name").textContent);
@@ -98,11 +98,11 @@ function downloadAs(bytes, filename, type) {
   const a = el("a", { href: URL.createObjectURL(new Blob([bytes], { type })), download: filename });
   document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
 }
-async function convert(id) {
+async function convert(id, opts = {}) {
   try {
     const b = await currentBytes();
     if (id === "compress") {
-      const limit = Number(prompt("The form's upload limit, in MB (most accept 2–5 MB):", "2")) || 2;
+      const limit = Number(opts.limit) || Number(prompt("The form's upload limit, in MB (most accept 2–5 MB):", "2")) || 2;
       say("Compressing…");
       const r = await core.compress(lib, b, { reencodeJpeg: render.reencodeJpegInBrowser, maxDimension: 1600, quality: 0.72 });
       const under = r.after <= limit * 1048576;
@@ -501,4 +501,188 @@ $("#ws-history").addEventListener("click", async () => {
     else $("#ws-err").textContent = "That document isn't kept in this browser any more.";
   } else if (q.get("mode")) setMode(q.get("mode"));
 }
+// ── ⭐ D190 · TINY — the chat that acts on this document (public/assistant/tiny.js; the engine is draft's, mirrored) ──
+// Every handler calls what the tool bar / navigator / properties call. Nothing here makes a request: the owner's rule
+// (11-14) — nothing within the site's own data or functions calls a model.
+{
+  const need = () => { if (!session.bytes) throw new Error("Open a PDF first — drop it on the page, or press Open a PDF."); };
+  const statusText = (fallback) => $("#ws-status").textContent || fallback;
+  /** The page's text as visual lines (runs sharing a baseline band), top to bottom, each line's runs left to right. */
+  function linesOn(pageIdx) {
+    const fs = session.fields.filter(f => f.page === pageIdx).slice().sort((a, b) => a.box.top - b.box.top || a.box.x - b.box.x);
+    const groups = [];
+    for (const f of fs) {
+      const g = groups[groups.length - 1];
+      if (g && Math.abs(g.top - f.box.top) <= Math.max(1.5, Math.min(g.h, f.box.h) * 0.5)) g.fields.push(f);
+      else groups.push({ top: f.box.top, h: f.box.h, fields: [f] });
+    }
+    for (const g of groups) { g.fields.sort((a, b) => a.box.x - b.box.x); g.text = g.fields.map(f => f.text).join(" "); }
+    return groups;
+  }
+  const lineNoOf = (f) => linesOn(f.page).findIndex(g => g.fields.includes(f)) + 1;
+  const where = (f) => `page ${f.page + 1}, line ${lineNoOf(f)}`;
+  const q = (s) => `“${s}”`;
+  function pageIndex(page) {
+    const n = session.pages.length;
+    const p = page == null ? current : page;
+    if (p < 1 || p > n) throw new Error(`There ${n === 1 ? "is 1 page" : `are ${n} pages`} — page ${p} isn't one of them.`);
+    return p - 1;
+  }
+  function lineGroup(line, page) {
+    const pi = pageIndex(page);
+    const gs = linesOn(pi);
+    if (line < 1 || line > gs.length) throw new Error(`Page ${pi + 1} has ${gs.length} line${gs.length === 1 ? "" : "s"} of text — line ${line} isn't one of them.`);
+    return { pi, g: gs[line - 1] };
+  }
+  /** "line 3 [on page 2]" · "the header / title / name" · "the first line" · any words on the page. */
+  function targetFields(target) {
+    const t = String(target || "").trim();
+    let m = /^line (\d{1,4})(?: (?:on|of) page (\d{1,4}))?$/i.exec(t);
+    if (m) return { fields: lineGroup(Number(m[1]), m[2] ? Number(m[2]) : null).g.fields, what: `line ${m[1]}${m[2] ? ` on page ${m[2]}` : ""}` };
+    if (/^(the )?(first|top) line$/i.test(t)) return { fields: lineGroup(1, null).g.fields, what: "the first line" };
+    if (/^(the )?(header|heading|title|name|my name|headline)$/i.test(t)) {
+      const on1 = session.fields.filter(f => f.page === 0);
+      if (!on1.length) throw new Error("Page 1 has no text to style.");
+      const big = Math.max(...on1.map(f => f.size));
+      const hits = on1.filter(f => f.size >= big - 0.01);
+      return { fields: hits, what: `the header (${q(hits.map(f => f.text).join(" ").slice(0, 40))})` };
+    }
+    const lower = t.toLowerCase();
+    const hits = session.fields.filter(f => f.text.toLowerCase().includes(lower));
+    if (!hits.length) throw new Error(`I couldn't find ${q(t)} in the document's text.`);
+    if (hits.length > 1) return { ask: `${q(t)} is in ${hits.length} places (${hits.slice(0, 4).map(where).join("; ")}${hits.length > 4 ? "; …" : ""}). Say which — e.g. “make line ${lineNoOf(hits[0])} bold”.` };
+    return { fields: hits, what: q(t) };
+  }
+  const styleOf = (f) => ({ family: f.font.family, bold: f.font.bold, italic: f.font.italic, size: f.size, color: f.color.slice(), underline: !!f.underline });
+  function restyle(target, patchFor, verb) {
+    need();
+    const r = targetFields(target);
+    if (r.ask) return { ask: r.ask };
+    const before = r.fields.map(f => [f, styleOf(f)]);
+    for (const f of r.fields) session.styleField(f, patchFor(f));
+    sync();
+    return { text: `${verb} ${r.what}.`, undo: () => { for (const [f, st] of before) session.styleField(f, st); sync(); return { text: `${r.what[0].toUpperCase()}${r.what.slice(1)} is back as it was.` }; } };
+  }
+  async function reopen(bytes) {
+    await session.open(bytes, session.name);
+    if (docId) await store.addVersion(docId, session.bytes, "Undone (Tiny)");
+    await drawStrip(); fitWidth(); drawTools(); sync();
+    $("#ws-meta").textContent = `${session.pages.length} page${session.pages.length === 1 ? "" : "s"} · ${kb(session.bytes.length)}`;
+  }
+  async function pages(kind, arg, done) {
+    need();
+    const before = await currentBytes();
+    await pageOp(kind, arg, done, { rethrow: true });
+    return { text: `${done}.`, undo: async () => { await reopen(before); return { text: "The pages are back as they were." }; } };
+  }
+  const handlers = {
+    help: () => ({ text: "I act on this document without AI: replace words (“replace 2023 with 2024 on line 3”), bold / italic / underline / size (“make the header bold”), delete, duplicate, rotate or move pages, compress, download as PDF, Word, text or pictures, print, go to a page, zoom, undo and redo — and I can read you what's on a page or find a word." }),
+    undo: () => { if (!session.canUndo) return { text: "There's nothing to undo." }; session.undo(); sync(); return { text: "Undone — the last change is taken back." }; },
+    redo: () => { if (!session.canRedo) return { text: "There's nothing to redo." }; session.redo(); sync(); return { text: "Redone." }; },
+    replaceText: (a) => {
+      need();
+      let pool = session.fields, scope = "";
+      if (a.line != null) { const { pi, g } = lineGroup(a.line, a.page); pool = g.fields; scope = ` on page ${pi + 1}, line ${a.line}`; }
+      else if (a.page != null) { const pi = pageIndex(a.page); pool = pool.filter(f => f.page === pi); scope = ` on page ${pi + 1}`; }
+      if (a.old == null) {   // "replace line 3 with …" — the whole line, only when the line is one run
+        if (pool.length > 1) return { ask: `Line ${a.line} has ${pool.length} parts (${pool.map(f => q(f.text)).join(", ")}). Say which words to change — e.g. “replace ${pool[0].text.split(" ")[0]} with … on line ${a.line}”.` };
+        const f = pool[0], was = f.text;
+        session.setText(f, a.new); sync();
+        return { text: `Line ${a.line}${scope.replace(/, line \d+$/, "")} now reads ${q(a.new)} (was ${q(was)}).`, undo: () => { session.setText(f, was); sync(); return { text: `Line ${a.line} reads ${q(was)} again.` }; } };
+      }
+      let hits = pool.filter(f => f.text.includes(a.old));
+      if (!hits.length) hits = pool.filter(f => f.text.toLowerCase().includes(a.old.toLowerCase()));
+      if (!hits.length) throw new Error(`I couldn't find ${q(a.old)}${scope} in the document's text${session.fields.some(f => f.ocr) ? "" : " (if it's in a picture, use Find text in pictures first)"}.`);
+      if (hits.length > 1) return { ask: `${q(a.old)} is in ${hits.length} places${scope} (${hits.slice(0, 4).map(where).join("; ")}${hits.length > 4 ? "; …" : ""}). Say which line — e.g. “replace ${a.old} with ${a.new} on line ${lineNoOf(hits[0])}${a.page == null && hits[0].page ? ` of page ${hits[0].page + 1}` : ""}”.` };
+      const f = hits[0], was = f.text;
+      const at = was.includes(a.old) ? was.indexOf(a.old) : was.toLowerCase().indexOf(a.old.toLowerCase());
+      session.setText(f, was.slice(0, at) + a.new + was.slice(at + a.old.length)); sync();
+      return { text: `Replaced ${q(a.old)} with ${q(a.new)} on ${where(f)}.`, undo: () => { session.setText(f, was); sync(); return { text: `${q(a.old)} is back on ${where(f)}.` }; } };
+    },
+    deletePage: (a) => { need(); const i = pageIndex(a.page); if (session.pages.length < 2) throw new Error("A PDF needs at least one page."); current = i + 1; return pages("delete", { page: i }, `Page ${i + 1} deleted`); },
+    deleteAllPages: async () => {
+      need();
+      const n = session.pages.length; if (n < 2) return { text: "There's only one page — a PDF needs at least one." };
+      const before = await currentBytes();
+      for (let k = n - 1; k >= 1; k--) await session.editPages("delete", { page: k });
+      current = 1; await drawStrip(); fitWidth(); drawTools(); sync();
+      if (docId) await store.addVersion(docId, session.bytes, "Pages changed");
+      return { text: `Deleted pages 2–${n}; page 1 is kept.`, undo: async () => { await reopen(before); return { text: "All the pages are back." }; } };
+    },
+    duplicatePage: (a) => { const i = pageIndex(a.page); return pages("duplicate", { page: i }, `Page ${i + 1} duplicated`); },
+    rotatePage: (a) => {
+      const i = pageIndex(a.page), d = String(a.dir || "right").toLowerCase();
+      const deg = /left|anti|counter/.test(d) ? 270 : /upside|around|180/.test(d) ? 180 : /right|clockwise|90/.test(d) ? 90 : null;
+      if (deg == null) return { ask: `Which way — left, right or upside down?` };
+      return pages("rotate", { page: i, degrees: deg }, `Page ${i + 1} turned ${deg === 270 ? "left" : deg === 90 ? "right" : "upside down"}`);
+    },
+    movePage: (a, ctx) => {
+      need();
+      const i = pageIndex(a.page), n = session.pages.length;
+      const to = a.to != null ? a.to : /start|front|beginning/i.test(ctx.said) ? 1 : /end/i.test(ctx.said) ? n : null;
+      if (to == null || to < 1 || to > n) return { ask: `Move page ${i + 1} to which position (1–${n})?` };
+      if (to - 1 === i) return { text: `Page ${i + 1} is already there.` };
+      current = to; return pages("move", { page: i, to: to - 1 }, `Page ${i + 1} moved to position ${to}`);
+    },
+    boldText: (a, ctx) => { const off = /\b(not bold|unbold)\b/i.test(ctx.said); return restyle(a.target, () => ({ bold: !off }), off ? "Took the bold off" : "Made bold:"); },
+    italicText: (a) => restyle(a.target, () => ({ italic: true }), "Made italic:"),
+    underlineText: (a) => restyle(a.target, () => ({ underline: true }), "Underlined"),
+    sizeText: (a, ctx) => {
+      const n = Number(String(a.size || "").replace(/[^\d.]/g, ""));
+      const step = /bigger|larger/i.test(ctx.said) ? 2 : /smaller/i.test(ctx.said) ? -2 : 0;
+      if (!step && !(n >= 4 && n <= 96)) return { ask: "What size, in points? (4 to 96 — body text is usually 10 to 12)" };
+      return restyle(a.target, (f) => ({ size: step ? Math.min(96, Math.max(4, f.size + step)) : n }), step ? (step > 0 ? "Made bigger:" : "Made smaller:") : `Set to ${n} pt:`);
+    },
+    convert: async (a) => {
+      need();
+      const f = String(a.format || "").toLowerCase().replace(/^(a|an)\s+/, "").replace(/\s+(file|document|doc)$/, "");
+      const id = /^(word|docx|doc|ms word|microsoft word)$/.test(f) ? "word" : /^(text|txt|plain text)$/.test(f) ? "txt"
+        : /^(images?|pictures?|jpe?gs?|photos?)$/.test(f) ? "jpg" : /^(searchable|ocr|searchable pdf)$/.test(f) ? "searchable" : /^pdf$/.test(f) ? "pdf" : null;
+      if (!id) return { ask: `I can make it Word, text, pictures (JPG) or a searchable PDF — which one?` };
+      if (id === "pdf") { await download(); return { text: statusText("Downloaded.") }; }
+      say(""); await convert(id); return { text: statusText("Done.") };
+    },
+    compress: async (a) => { need(); say(""); await convert("compress", { limit: Number(a.limit) || 2 }); return { text: statusText("Compressed.") }; },
+    download: async () => { need(); say(""); await download(); return { text: statusText("Downloaded.") }; },
+    print: () => { need(); $("#ws-print").click(); return { text: "Opened the print dialog." }; },
+    goToPage: (a, ctx) => { need(); const n = session.pages.length; const p = a.page != null ? a.page : /last/i.test(ctx.said) ? n : 1; pageIndex(p); goTo(p); return { text: `Page ${p} of ${n}.` }; },
+    nextPage: () => { need(); if (current >= session.pages.length) return { text: "This is the last page." }; goTo(current + 1); return { text: `Page ${current} of ${session.pages.length}.` }; },
+    previousPage: () => { need(); if (current <= 1) return { text: "This is the first page." }; goTo(current - 1); return { text: `Page ${current} of ${session.pages.length}.` }; },
+    zoom: (a) => {
+      need();
+      const h = String(a.how || "").toLowerCase().trim(), was = zoom;
+      const pct = /(\d{2,3})\s*(%|percent)?$/.exec(h);
+      if (/^in$/.test(h)) setZoom(zoom + 0.1); else if (/^out$/.test(h)) setZoom(zoom - 0.1);
+      else if (/(fit|to fit)?\s*(the )?page$/.test(h) && /page/.test(h)) fitPage();
+      else if (/fit|width/.test(h)) fitWidth();
+      else if (pct) setZoom(Number(pct[1]) / 100);
+      else return { ask: "Zoom how — in, out, fit width, fit page, or a percentage like 125%?" };
+      return { text: `Zoom ${Math.round(zoom * 100)} %.`, undo: () => { setZoom(was); return { text: `Zoom ${Math.round(was * 100)} % again.` }; } };
+    },
+    // T2 — read from the document itself (its text layer), still no model
+    pageText: (a) => {
+      need();
+      if (a.line != null) { const { pi, g } = lineGroup(a.line, a.page); return { text: `Page ${pi + 1}, line ${a.line}: ${q(g.text)}` }; }
+      const pi = pageIndex(a.page), gs = linesOn(pi);
+      if (!gs.length) return { text: `Page ${pi + 1} has no text layer${session.pages[pi] ? " — try Find text in pictures" : ""}.` };
+      const body = gs.map((g, k) => `${k + 1}. ${g.text}`).join("\n");
+      return { text: `Page ${pi + 1} (${gs.length} line${gs.length === 1 ? "" : "s"}):\n${body.length > 1200 ? `${body.slice(0, 1200)}…` : body}` };
+    },
+    docFacts: () => { need(); const n = session.changeCount(); return { text: `${session.pages.length} page${session.pages.length === 1 ? "" : "s"} · ${session.fields.length} lines of text · ${kb(session.bytes.length)} · ${n} change${n === 1 ? "" : "s"} not downloaded yet.` }; },
+    findText: (a) => {
+      need();
+      const hits = session.fields.filter(f => f.text.toLowerCase().includes(String(a.text).toLowerCase()));
+      if (!hits.length) return { text: `${q(a.text)} isn't in the document's text.` };
+      goTo(hits[0].page + 1);
+      return { text: `${q(a.text)} is on ${hits.slice(0, 6).map(where).join("; ")}${hits.length > 6 ? ` and ${hits.length - 6} more` : ""}.` };
+    },
+    // T3 — new writing. Not switched on in Tiny yet; nothing is sent anywhere (the routing stub, D190 P1).
+    t3: () => ({ ask: "Writing new words needs the assistant, which isn't switched on in Tiny yet. Everything already in this document I can do without it — say “help” for the list." }),
+  };
+  const tinyBtn = $("#ws-tiny-toggle");
+  const tiny = await import("/assistant/tiny.js").then(m => m.mountTiny({ el, host: $(".ws-body"), toggle: tinyBtn, handlers,
+    onOpenChange: (open) => { ws.dataset.tiny = open ? "open" : ""; if (session.bytes) setTimeout(fitWidth, 0); } }));
+  window.__rmTiny = tiny;   // for the walks
+}
+
 window.__rmWorkspace = session;   // for the walks

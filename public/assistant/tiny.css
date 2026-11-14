@@ -1,0 +1,27 @@
+/* D190 · Tiny — a fourth column of the workspace that MOVES THE PAGE OVER (D167: never on top of it); a bottom sheet on phones.
+   Tokens only (workspace.css's :root); no capsules (D60). */
+.ws[data-tiny="open"] .ws-body { grid-template-columns: 150px minmax(0, 1fr) 290px 320px; }
+@media (max-width: 1400px) { .ws[data-tiny="open"] .ws-body { grid-template-columns: 110px minmax(0, 1fr) 300px; } .ws[data-tiny="open"] .ws-props { display: none; } }
+.ws-tiny { border-left: 1px solid var(--line); display: grid; grid-template-rows: auto 1fr auto; min-height: 0; background: var(--bg); }
+.tiny-head { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.tiny-head > b { font-size: 15px; }
+.tiny-head > span { grid-column: 1; }
+.tiny-head > button { grid-row: 1 / span 2; grid-column: 2; }
+.tiny-turns { list-style: none; margin: 0; padding: 12px 14px; overflow-y: auto; display: grid; gap: 10px; align-content: start; }
+.tiny-turn { display: grid; gap: 4px; padding: 9px 11px; border-radius: 12px; background: var(--card); }
+.tiny-turn[data-tiny-turn="you"] { background: var(--well); justify-self: end; max-width: 92%; }
+.tiny-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
+.tiny-label { font-size: 11px; color: var(--faint); }
+.tiny-label[data-tiny-label="T3"] { color: var(--warn); }
+.tiny-link { justify-self: start; border: 0; background: none; padding: 0; color: var(--accent); font-weight: 700; font-size: 12.5px; cursor: pointer; text-decoration: underline; }
+.tiny-link:disabled { opacity: .5; cursor: default; }
+.tiny-confirm { display: flex; gap: 6px; }
+.tiny-form { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 10px 14px 14px; border-top: 1px solid var(--line); align-items: end; }
+.tiny-input { resize: none; border-radius: 10px; border: 1px solid var(--line); background: var(--well); color: var(--ink); padding: 8px 10px; font: inherit; font-size: 13px; }
+.tiny-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+@media (max-width: 820px) {
+  .ws[data-tiny="open"] .ws-body { grid-template-columns: minmax(0, 1fr); }
+  .ws[data-tiny="open"] .ws-props { display: grid; }
+  .ws-tiny { position: fixed; left: 0; right: 0; bottom: 0; z-index: 17; height: 62vh; border: 0; border-top: 1px solid var(--line);
+    border-radius: 18px 18px 0 0; box-shadow: 0 -12px 32px rgba(0,0,0,.5); background: var(--card); }
+}

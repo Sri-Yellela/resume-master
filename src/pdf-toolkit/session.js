@@ -457,6 +457,18 @@ export function createPdfSession(o) {
       return c.toDataURL("image/jpeg", 0.75);
     },
     setStyle, revert,
+    // ⭐ D190 (Tiny): the same edits a person makes by clicking a line, made from the chat — each one undoable.
+    /** Set a line's words (its font, size and place stay). */
+    setText(f, text) {
+      if (!f || f.kind !== "field") return false;
+      const before = snap(f);
+      f.text = String(text).replace(/\n/g, " "); f.changed = isChanged(f); f.node.textContent = f.text; paint(f);
+      const after = snap(f);
+      record({ undo: () => restore(f, before), redo: () => restore(f, after) });
+      return true;
+    },
+    /** The style buttons on a line that isn't focused (bold / italic / underline / size / colour / face). */
+    styleField(f, p) { if (!f || f.kind !== "field") return false; const was = active; active = f; try { setStyle(p); } finally { active = was ?? f; } return true; },
     revertActive() { if (active?.kind === "field") revert(active); },
     arm(kind, payload) { armed = kind ? { kind, payload } : null; pagesEl.dataset.armed = kind || ""; emit("armed", armed); },
     place, removeItem,
