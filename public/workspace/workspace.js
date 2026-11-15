@@ -723,9 +723,8 @@ $("#ws-history").addEventListener("click", async () => {
     // T3 — new writing. Not switched on in Tiny yet; nothing is sent anywhere (the routing stub, D190 P1).
     t3: () => ({ ask: "Writing new words needs the assistant, which isn't switched on in Tiny yet. Everything already in this document I can do without it — say “help” for the list." }),
   };
-  const tinyBtn = $("#ws-tiny-toggle");
-  const tiny = await import("/assistant/tiny.js").then(m => m.mountTiny({ el, host: $(".ws-body"), toggle: tinyBtn, handlers,
-    onOpenChange: (open) => { ws.dataset.tiny = open ? "open" : ""; if (session.bytes) setTimeout(fitWidth, 0); } }));
+  // ⭐ 46n (owner 11-15): Tiny is a FLOATING bot — the fox bubble at the bottom-right, its card over the page (no column)
+  const tiny = await import("/assistant/tiny.js").then(m => m.mountTiny({ handlers, onDocument: true }));
   window.__rmTiny = tiny;   // for the walks
 }
 

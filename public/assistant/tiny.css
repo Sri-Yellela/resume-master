@@ -1,30 +1,68 @@
-/* D190 · Tiny — a fourth column of the workspace that MOVES THE PAGE OVER (D167: never on top of it); a bottom sheet on phones.
-   Tokens only (workspace.css's :root); no capsules (D60). */
-.ws[data-tiny="open"] .ws-body { grid-template-columns: 150px minmax(0, 1fr) 290px 320px; }
-@media (max-width: 1400px) { .ws[data-tiny="open"] .ws-body { grid-template-columns: 110px minmax(0, 1fr) 300px; } .ws[data-tiny="open"] .ws-props { display: none; } }
-.ws-tiny { border-left: 1px solid var(--line); display: grid; grid-template-rows: auto 1fr auto; min-height: 0; background: var(--bg); }
-.tiny-head { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--line); }
-.tiny-head > b { font-size: 15px; }
-.tiny-head > span { grid-column: 1; }
-.tiny-head > button { grid-row: 1 / span 2; grid-column: 2; }
-.tiny-turns { list-style: none; margin: 0; padding: 12px 14px; overflow-y: auto; display: grid; gap: 10px; align-content: start; }
-.tiny-turn { display: grid; gap: 4px; padding: 9px 11px; border-radius: 12px; background: var(--card); }
-.tiny-turn[data-tiny-turn="you"] { background: var(--well); justify-self: end; max-width: 92%; }
-.tiny-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
-.tiny-label { font-size: 11px; color: var(--faint); }
-.tiny-label[data-tiny-label="T3"] { color: var(--warn); }
-.tiny-link { justify-self: start; border: 0; background: none; padding: 0; color: var(--accent); font-weight: 700; font-size: 12.5px; cursor: pointer; text-decoration: underline; }
-.tiny-link:disabled { opacity: .5; cursor: default; }
-.tiny-confirm { display: flex; gap: 6px; }
-.tiny-form { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 10px 14px 14px; border-top: 1px solid var(--line); align-items: end; }
-.tiny-actions { display: flex; gap: 6px; align-items: end; }
-.tiny-voice { grid-column: 1 / -1; margin: 0; min-height: 0; }
-.tiny-voice:empty { display: none; }
-.tiny-input { resize: none; border-radius: 10px; border: 1px solid var(--line); background: var(--well); color: var(--ink); padding: 8px 10px; font: inherit; font-size: 13px; }
-.tiny-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
-@media (max-width: 820px) {
-  .ws[data-tiny="open"] .ws-body { grid-template-columns: minmax(0, 1fr); }
-  .ws[data-tiny="open"] .ws-props { display: grid; }
-  .ws-tiny { position: fixed; left: 0; right: 0; bottom: 0; z-index: 17; height: 62vh; border: 0; border-top: 1px solid var(--line);
-    border-radius: 18px 18px 0 0; box-shadow: 0 -12px 32px rgba(0,0,0,.5); background: var(--card); }
+/* D190 · Tiny — the floating bot (owner 11-15: "a floating bot on the site rather than a panel button"): a fox bubble fixed at
+   the bottom-right of every page, opening a floating chat card above it; a bottom sheet on phones.
+   Colours come from the page's own tokens — the workspace's (--card / --line / --muted) or the rest of the site's
+   (--glass-strong / --glass-edge / --ink-muted) — never a literal (d189 tokens-only). No capsules (D60): the bubble is a perfect
+   circle, everything else is a rectangle with a radius. */
+.tiny-root {
+  --t-card: var(--card, var(--glass-strong));
+  --t-well: var(--well, var(--glass));
+  --t-line: var(--line, var(--glass-edge));
+  --t-ink: var(--ink);
+  --t-muted: var(--muted, var(--ink-muted));
+  --t-faint: var(--faint, var(--ink-faint));
+  --t-accent: var(--accent);
+  --t-on-accent: var(--on-accent);
+  --t-warn: var(--warn);
+  position: fixed; right: 20px; bottom: 20px; z-index: 40; display: grid; justify-items: end; gap: 12px;
+  font: 14px/1.45 var(--font, var(--font-body, system-ui)); color: var(--t-ink);
 }
+.tiny-launch {
+  width: 60px; height: 60px; border-radius: 50%; padding: 0; display: grid; place-items: center; cursor: pointer;
+  background: var(--t-card); border: 1px solid var(--t-line);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .35);
+  transition: transform .18s, box-shadow .18s;
+}
+.tiny-launch:hover, .tiny-launch:focus-visible { transform: translateY(-3px) rotate(-4deg); box-shadow: 0 14px 32px rgba(0, 0, 0, .42), 0 0 0 3px var(--t-accent); }
+.tiny-launch svg { display: block; }
+.tiny-root[data-open="true"] .tiny-launch { transform: scale(.9); }
+.tiny-card {
+  width: min(380px, calc(100vw - 40px)); height: min(560px, calc(100vh - 120px)); display: grid; grid-template-rows: auto 1fr auto;
+  background: var(--t-card); border: 1px solid var(--t-line); border-radius: 16px; overflow: hidden;
+  box-shadow: 0 22px 60px rgba(0, 0, 0, .45);
+  transform-origin: bottom right; animation: tiny-in .18s ease-out;
+}
+.tiny-card[hidden] { display: none; }
+@keyframes tiny-in { from { opacity: 0; transform: translateY(8px) scale(.97); } to { opacity: 1; transform: none; } }
+.tiny-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--t-line); }
+.tiny-face { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; background: var(--t-well); flex-shrink: 0; }
+.tiny-who { display: grid; gap: 1px; flex: 1; min-width: 0; }
+.tiny-who b { font-size: 15px; }
+.tiny-who span { font-size: 11.5px; color: var(--t-faint); }
+.tiny-turns { list-style: none; margin: 0; padding: 12px; overflow-y: auto; display: grid; gap: 8px; align-content: start; }
+.tiny-turn { display: grid; gap: 4px; padding: 8px 10px; border-radius: 12px; background: var(--t-well); max-width: 92%; justify-self: start; }
+.tiny-turn[data-tiny-turn="you"] { justify-self: end; background: var(--t-accent); color: var(--t-on-accent); }
+.tiny-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
+.tiny-text--warn { color: var(--t-warn); }
+.tiny-label { font-size: 11px; color: var(--t-faint); }
+.tiny-label[data-tiny-label="T3"] { color: var(--t-warn); }
+.tiny-link { justify-self: start; border: 0; background: none; padding: 0; color: var(--t-accent); font: inherit; font-weight: 700; font-size: 12.5px; cursor: pointer; text-decoration: underline; }
+.tiny-link:disabled { opacity: .5; cursor: default; }
+.tiny-confirm, .tiny-actions { display: flex; gap: 6px; align-items: end; }
+.tiny-form { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 10px 12px 12px; border-top: 1px solid var(--t-line); align-items: end; }
+.tiny-input { resize: none; border-radius: 10px; border: 1px solid var(--t-line); background: var(--t-well); color: var(--t-ink); padding: 8px 10px; font: inherit; font-size: 13px; }
+.tiny-input:focus { outline: 2px solid var(--t-accent); outline-offset: 1px; }
+.tiny-btn { height: 32px; min-width: 32px; padding: 0 10px; border-radius: 9px; border: 1px solid var(--t-line); background: var(--t-well); color: var(--t-ink); font: inherit; font-weight: 700; font-size: 12.5px; cursor: pointer; }
+.tiny-btn:hover:not(:disabled), .tiny-btn:focus-visible { border-color: var(--t-accent); color: var(--t-accent); }
+.tiny-btn--p { background: var(--t-accent); color: var(--t-on-accent); border-color: var(--t-accent); }
+.tiny-btn--p:hover:not(:disabled) { color: var(--t-on-accent); }
+.tiny-btn:disabled { opacity: .45; cursor: default; }
+.tiny-btn[aria-pressed="true"] { border-color: var(--t-accent); color: var(--t-accent); }
+.tiny-voice { grid-column: 1 / -1; margin: 0; font-size: 11.5px; color: var(--t-faint); }
+.tiny-voice:empty { display: none; }
+@media (max-width: 600px) {
+  .tiny-root { right: 12px; bottom: 12px; }
+  .tiny-root[data-open="true"] { left: 0; right: 0; bottom: 0; justify-items: stretch; }
+  .tiny-root[data-open="true"] .tiny-launch { display: none; }
+  .tiny-card { width: 100%; height: 72vh; border-radius: 18px 18px 0 0; border-bottom: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .tiny-launch, .tiny-card { transition: none; animation: none; } }

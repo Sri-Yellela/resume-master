@@ -19,10 +19,14 @@
       "patterns": [
         "(replace|change|swap|switch) line {line:int} on page {page:int} (with|to|for|into) {new}",
         "(replace|change|swap|switch) line {line:int} (with|to|for|into) {new}",
-        "(replace|change|swap|switch|update) {old} (with|to|for|into|by) {new} (on|in|at) line {line:int} (on|of) page {page:int}",
-        "(replace|change|swap|switch|update) {old} (with|to|for|into|by) {new} (on|in) page {page:int}[ line {line:int}]",
-        "(replace|change|swap|switch|update) {old} (with|to|for|into|by) {new} (on|in|at) line {line:int}",
-        "(replace|change|swap|switch|update) {old} (with|to|for|into|by) {new}",
+        "(replace|change|swap|switch|update) {old} (with|to|for|into|by|as) {new} (on|in|at) line {line:int} (on|of) page {page:int}",
+        "(rewrite|write|turn|make) {old} (as|into) {new} (on|in|at) line {line:int} (on|of) page {page:int}",
+        "(replace|change|swap|switch|update) {old} (with|to|for|into|by|as) {new} (on|in) page {page:int}[ line {line:int}]",
+        "(rewrite|write|turn|make) {old} (as|into) {new} (on|in) page {page:int}[ line {line:int}]",
+        "(replace|change|swap|switch|update) {old} (with|to|for|into|by|as) {new} (on|in|at) line {line:int}",
+        "(rewrite|write|turn|make) {old} (as|into) {new} (on|in|at) line {line:int}",
+        "(replace|change|swap|switch|update) {old} (with|to|for|into|by|as) {new}",
+        "(rewrite|write|turn|make) {old} (as|into) {new}",
         "(replace|change|swap|switch) {old} on line {line:int} (with|to|for|into) {new}"
       ],
       "examples": [
@@ -31,7 +35,9 @@
         { "say": "swap 2023 for 2024 on page 2", "args": { "old": "2023", "new": "2024", "page": 2 } },
         { "say": "replace Boston with New York on line 4 of page 1", "args": { "old": "Boston", "new": "New York", "line": 4, "page": 1 } },
         { "say": "replace line 2 with Data Engineer", "args": { "line": 2, "new": "Data Engineer" } },
-        { "say": "please replace 2019 with 2020.", "args": { "old": "2019", "new": "2020" } }
+        { "say": "please replace 2019 with 2020.", "args": { "old": "2019", "new": "2020" } },
+        { "say": "rewrite letter as page", "args": { "old": "letter", "new": "page" } },
+        { "say": "make Boston into New York", "args": { "old": "Boston", "new": "New York" } }
       ] },
     { "intent": "delete_page", "site": "rm", "tier": "T1", "calls": "deletePage", "confirm": "Delete page {page}? Undo brings it back.",
       "patterns": ["(delete|remove) page {page:int}", "(delete|remove) (this|the current) page"],
@@ -94,6 +100,10 @@
     { "intent": "find_text", "site": "rm", "tier": "T2", "calls": "findText",
       "patterns": ["(find|where is|where'?s|search for|is there) {text}[ in (it|this|the document)]"],
       "examples": [{ "say": "find Python", "args": { "text": "Python" } }, { "say": "where is 2023?", "args": { "text": "2023" } }] },
+
+    { "intent": "site_navigate", "site": "rm", "tier": "T1", "calls": "openPlace",
+      "patterns": ["(open|take me to|show me|go to|launch)[ (my|the|a)] {place}[ (tool|page)]", "(take me|go) {place}"],
+      "examples": [{ "say": "open the compress tool", "args": { "place": "compress" } }, { "say": "take me to the workspace", "args": { "place": "workspace" } }, { "say": "go to merge", "args": { "place": "merge" } }] },
 
     { "intent": "open_resume_editor", "site": "draft", "tier": "T1", "calls": "openResumeEditor",
       "patterns": ["(open|show) the (résumé|resume) editor[ for (this|the) job]", "(edit|open) my (résumé|resume) for (this|the) job", "(edit|tailor) (the|this) (résumé|resume)"],

@@ -71,10 +71,72 @@ export function normalise(text) {
 }
 const unquote = (v) => String(v).trim().replace(/^["'“‘`](.*)["'”’`]$/s, "$1").trim();
 
-/** Text → the first matching row and its arguments, or null. Rows are tried in file order. */
+/** The words a command can start with — every pattern's leading word(s), for the typo fix. */
+function leadWords(compiled) {
+  if (compiled.leads) return compiled.leads;
+  const out = new Set();
+  for (const row of compiled) for (const t of row.patterns || []) {
+    const m = /^\s*(\(([^)]*)\)|[a-z']+)/i.exec(t);
+    if (!m) continue;
+    for (const w of (m[2] != null ? m[2].split("|") : [m[1]])) { const first = w.trim().split(/\s+/)[0].toLowerCase(); if (/^[a-z']{3,}$/.test(first)) out.add(first); }
+  }
+  Object.defineProperty(compiled, "leads", { value: out, enumerable: false });
+  return out;
+}
+/** Edit distance, capped (for a short word against a short word). */
+function distance(a, b, cap = 3) {
+  if (Math.abs(a.length - b.length) > cap) return cap + 1;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[b.length];
+}
+/** "rewrute …" → "rewrite …": the first word corrected to the nearest command word (1 edit; 2 for long words), or null. */
+export function correctFirstWord(text, compiled) {
+  const m = /^(\S+)(\s.*)?$/.exec(text);
+  if (!m) return null;
+  const w = m[1].toLowerCase();
+  const leads = leadWords(compiled);
+  if (w.length < 4 || leads.has(w)) return null;
+  let best = null, bestD = 9;
+  for (const l of leads) { const d = distance(w, l); if (d < bestD) { best = l; bestD = d; } }
+  return best && bestD <= (w.length >= 7 ? 2 : 1) ? `${best}${m[2] || ""}` : null;
+}
+
+/** Text → the first matching row and its arguments, or null. Rows are tried in file order; a typo in the first word is
+ *  corrected once ("rewrute" → "rewrite") when nothing matched as typed. */
 export function parse(text, compiled) {
   const s = normalise(text);
   if (!s) return null;
+  const hit = parseExact(s, compiled);
+  if (hit) return hit;
+  const fixed = correctFirstWord(s, compiled);
+  const again = fixed ? parseExact(fixed, compiled) : null;
+  return again ? { ...again, corrected: fixed } : null;
+}
+
+/** "replace a with b and c with d" → two commands; a part with no verb borrows the first part's ("… and c as d").
+ *  Returns the parsed parts when EVERY part is a command that runs straight away (no asking, no confirm), else null. */
+export function parseCompound(text, compiled) {
+  const s = normalise(text);
+  const parts = s.split(/\s*(?:;|,\s*(?:and\s+|then\s+)?|\s+and\s+then\s+|\s+then\s+|\s+and\s+(?:also\s+)?)\s*/i).filter(Boolean);
+  if (parts.length < 2 || parts.length > 6) return null;
+  const first = parse(parts[0], compiled);
+  if (!first) return null;
+  const verb = (first.corrected || first.said).split(/\s+/)[0];
+  const out = [first];
+  for (const part of parts.slice(1)) {
+    const hit = parse(part, compiled) || parse(`${verb} ${part}`, compiled);
+    if (!hit) return null;
+    out.push(hit);
+  }
+  return out.every(h => (h.row.tier === "T1" || h.row.tier === "T2") && !h.row.confirm) ? out : null;
+}
+
+function parseExact(s, compiled) {
   for (const row of compiled) {
     for (const p of row.compiled) {
       const m = p.re.exec(s);
@@ -102,7 +164,7 @@ const fill = (tpl, args) => String(tpl).replace(/\{(\w+)\}/g, (_, k) => (args[k]
  *             help — never a model). Return null when nothing covers it.
  *   ledger:   an array the engine appends { tier, intent } to — the tests read it (0 T3 during T1 / T2).
  */
-export function createAssistant({ commands, site, handlers = {}, fallback = null, ledger = null, examples = null }) {
+export function createAssistant({ commands, site, handlers = {}, fallback = null, ledger = null, examples = null, unavailable = null }) {
   const compiled = compileCommands(commands, site);
   let pending = null;
   const note = (tier, intent) => { if (ledger) ledger.push({ tier, intent, at: Date.now() }); };
@@ -112,14 +174,20 @@ export function createAssistant({ commands, site, handlers = {}, fallback = null
     return ex.length ? ` Try: ${ex.map(e => `“${e}”`).join(", ")}.` : "";
   };
 
+  /** `unavailable(row)` (the site's own words: where the command works) or a plain line. */
+  function notHere(row) {
+    note("none", row.intent);
+    const r = (typeof unavailable === "function" ? unavailable(row) : null) || {};
+    return msg("ask", r.ask || r.text || "That isn't available on this page.", { intent: row.intent, failed: true, ...(r.extra || {}) });
+  }
   async function run(row, args, said = "") {
     const fn = handlers[row.calls];
-    if (typeof fn !== "function") { note("none", row.intent); return msg("ask", "That isn't available on this page.", { intent: row.intent, failed: true }); }
+    if (typeof fn !== "function") return notHere(row);
     try {
       const r = (await fn(args, { intent: row.intent, row, said })) || {};
       // the ledger records the tier the reply HAD: a T3 row that only asks back (or isn't switched on) called no model
       note(r.ask ? "ask" : row.tier, row.intent);
-      if (r.ask) return msg("ask", r.ask, { intent: row.intent, args });
+      if (r.ask) return msg("ask", r.ask, { intent: row.intent, args, ...(r.extra || {}) });
       const undo = typeof r.undo === "function" ? r.undo : null;
       return msg(row.tier, r.text || "Done.", { intent: row.intent, args, undo, ...(r.extra || {}) });
     } catch (e) {
@@ -141,6 +209,17 @@ export function createAssistant({ commands, site, handlers = {}, fallback = null
         if (YES.test(s)) return run(p.row, p.args, p.said);
         if (NO.test(s)) { note("ask", p.row.intent); return msg("ask", "Cancelled — nothing changed.", { intent: p.row.intent }); }
       }
+      // "replace a with b and c with d": each part its own command (before the single parse, which would read
+      // "b and c with d" as the new text)
+      const parts = parseCompound(s, compiled);
+      if (parts) {
+        const done = [];
+        for (const h of parts) done.push(await run(h.row, h.args, h.said));
+        const undos = done.map(m => m.undo).filter(Boolean);
+        return msg(done.every(m => m.tier === "T2") ? "T2" : "T1", done.map(m => m.text).join(" "), {
+          intent: parts.map(h => h.row.intent).join("+"), failed: done.some(m => m.failed), steps: done.length,
+          undo: undos.length ? async () => { const said = []; for (const u of undos.reverse()) { const r = await u(); if (r?.text) said.push(r.text); } return { text: said.join(" ") || "Undone." }; } : null });
+      }
       const hit = parse(s, compiled);
       if (!hit) {
         if (fallback) {
@@ -152,12 +231,14 @@ export function createAssistant({ commands, site, handlers = {}, fallback = null
       }
       const { row, args } = hit;
       if (row.tier === "ask") { note("ask", row.intent); return msg("ask", row.reply || "What should I change?", { intent: row.intent }); }
+      // a command this page can't run says so FIRST — never "Are you sure?" for something that then can't happen
+      if (row.tier !== "ask" && typeof handlers[row.calls] !== "function") return notHere(row);
       if (row.confirm) {
         pending = { row, args, said: s };
         note("ask", row.intent);
         return msg("ask", fill(row.confirm, args), { intent: row.intent, args, confirm: true });
       }
-      return run(row, args, s);
+      return run(row, args, hit.corrected || s);
     },
     /** The confirm buttons: yes / no on the pending question. */
     async decide(yes) { return this.handle(yes ? "yes" : "no"); },

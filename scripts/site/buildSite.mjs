@@ -121,6 +121,7 @@ ${FOOTER}
   <script src="/chrome.js" defer></script>
   <script type="module" src="/pdf-tools.js"></script>
   <script type="module" src="/docs-home.js"></script>
+  <script type="module" src="/assistant/tiny-boot.js"></script>
 </body>
 </html>
 `;

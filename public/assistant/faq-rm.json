@@ -1,0 +1,31 @@
+{
+  "about": "Tiny's answers about the PDF-tools site (D190 T2 — no model). Written from the site as it is (11-15): every answer is a fact the site's own pages or code state; every href is a real page here.",
+  "entries": [
+    { "id": "upload", "q": "Is my file uploaded?", "keywords": ["upload", "uploaded", "server", "private", "privacy", "safe", "secure", "leave", "stored", "store", "send"],
+      "a": "No. The PDF tools and the workspace run in your browser — the file is read and changed on this device and never sent to a server. Versions you keep are saved in this browser only.", "href": "/privacy" },
+    { "id": "free", "q": "Is it free?", "keywords": ["free", "price", "cost", "pay", "paid", "subscription", "pro"],
+      "a": "Yes — every PDF tool here is free, with no account needed.", "href": "/pdf/" },
+    { "id": "edit", "q": "How do I edit the text in a PDF?", "keywords": ["edit", "change text", "fix text", "typo", "text"],
+      "a": "Open the PDF in the workspace and click any line on the page — you edit it where it is, in its own font where the PDF carries it. Or tell me, e.g. “replace 2023 with 2024”.", "href": "/workspace/" },
+    { "id": "compress", "q": "How do I make a PDF smaller?", "keywords": ["compress", "smaller", "size", "big", "large", "mb", "limit", "shrink"],
+      "a": "Compress re-encodes the pictures inside the PDF; text stays text. Application forms usually cap uploads at 2–5 MB — in the workspace say “compress it under 2 MB”.", "href": "/pdf/compress-pdf/" },
+    { "id": "merge", "q": "How do I join PDFs?", "keywords": ["merge", "join", "combine", "together", "add files", "one file"],
+      "a": "Merge puts several PDFs (or pictures) into one file in the order you choose. In the workspace, Pages → Add files adds them after the open document.", "href": "/pdf/merge-pdf/" },
+    { "id": "word", "q": "Can I convert Word to PDF, or PDF to Word?", "keywords": ["word", "docx", "doc", "convert"],
+      "a": "Both. Open a .docx in the workspace and it becomes a PDF here (text, headings, lists — set in Helvetica). From a PDF, Convert → Word gives a .docx of its text in reading order.", "href": "/workspace/?mode=convert" },
+    { "id": "sign", "q": "How do I sign a PDF?", "keywords": ["sign", "signature", "initials", "fill", "form"],
+      "a": "In the workspace's Fill & sign mode: draw, type or upload your signature once, then click where it goes. A PDF's own form fields can be typed into directly.", "href": "/pdf/sign-pdf/" },
+    { "id": "redact", "q": "How do I remove my phone number or address?", "keywords": ["redact", "remove", "hide", "phone", "address", "black out", "personal"],
+      "a": "Use Redact in the workspace's Edit mode and draw over it — the words under it are taken out of the file when you download, not just covered.", "href": "/workspace/" },
+    { "id": "ocr", "q": "My PDF is a scan — can I search or edit it?", "keywords": ["scan", "scanned", "ocr", "picture", "image", "photo", "searchable"],
+      "a": "Yes: OCR reads the text in the pictures (in your browser — the reader downloads once, about 15 MB). In the workspace, Find text in pictures makes those lines editable.", "href": "/pdf/ocr-pdf/" },
+    { "id": "annotate", "q": "Can I highlight or draw on a PDF?", "keywords": ["highlight", "draw", "annotate", "mark", "pen", "box", "comment"],
+      "a": "Yes — the workspace's Annotate mode has Highlight, Draw, Box and Note. The marks are written into the PDF when you download it.", "href": "/workspace/?mode=annotate" },
+    { "id": "pages", "q": "How do I delete, rotate or reorder pages?", "keywords": ["pages", "page", "delete", "rotate", "reorder", "move", "duplicate", "order"],
+      "a": "The workspace's Pages mode, or just tell me: “delete page 2”, “rotate page 1 left”, “move page 3 to 1”.", "href": "/pdf/organize-pdf/" },
+    { "id": "undo", "q": "I made a mistake — can I undo?", "keywords": ["undo", "mistake", "revert", "back", "history", "version", "restore"],
+      "a": "Undo / Redo (Ctrl+Z) in the workspace, and ↺ Version history restores any earlier version kept in this browser.", "href": "/workspace/" },
+    { "id": "tiny", "q": "What can Tiny do?", "keywords": ["tiny", "you", "bot", "assistant", "help", "commands"],
+      "a": "I act on your document without AI — replace words, style a line, delete / rotate / move pages, compress, convert, download, find a word, read a page — and I answer questions about the site. Say “help” for examples.", "href": null }
+  ]
+}
