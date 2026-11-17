@@ -5,7 +5,7 @@ design D21 step 2 needs before a `parse_resume_pdf` tool can be added to `/mcp`.
 
 ## Why a design first
 
-- **D17 no longer blocks it.** `/v1/resumes/parse-pdf` reads the PDF's own text layer since `1636a01`
+- **D17 no longer blocks it.** `/v1/resumes/parse-pdf` reads the PDF's own text layer since `dd1fc14`
   (`src/parsing/extractPdfText.js`) — no model call.
 - **But an assistant does not send base64.** ChatGPT hands a tool a **file reference**. Verified
   10-04 in OpenAI's Apps SDK reference (developers.openai.com/apps-sdk/reference): a tool lists its
