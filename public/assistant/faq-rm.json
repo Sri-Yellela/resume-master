@@ -25,7 +25,7 @@
       "a": "The workspace's Pages mode, or just tell me: “delete page 2”, “rotate page 1 left”, “move page 3 to 1”.", "href": "/pdf/organize-pdf/" },
     { "id": "undo", "q": "I made a mistake — can I undo?", "keywords": ["undo", "mistake", "revert", "back", "history", "version", "restore"],
       "a": "Undo / Redo (Ctrl+Z) in the workspace, and ↺ Version history restores any earlier version kept in this browser.", "href": "/workspace/" },
-    { "id": "tiny", "q": "What can Tiny do?", "keywords": ["tiny", "you", "bot", "assistant", "help", "commands"],
+    { "id": "tiny", "q": "What can the assistant do?", "keywords": ["tiny", "you", "bot", "assistant", "help", "commands"],
       "a": "I act on your document without AI — replace words, style a line, delete / rotate / move pages, compress, convert, download, find a word, read a page — and I answer questions about the site. Say “help” for examples.", "href": null }
   ]
 }

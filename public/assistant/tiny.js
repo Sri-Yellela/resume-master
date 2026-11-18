@@ -7,7 +7,19 @@
 // ⛔ The owner's rule (11-14): nothing within the site's own data or functions calls a model — no request at all here.
 import { createAssistant, TIER_LABEL } from "/assistant/assistantEngine.js";
 import { voiceSupported, listenOnce, voiceNote, VOICE_ERRORS } from "/assistant/assistantVoice.js";   // D190 P4
-import { tinySvg, TINY_NAME } from "/assistant/tinyMascot.js";
+// 46v (draft owner 11-18: "change to their respective short logos on resume master and draft" ... "drop 'tiny'"): the fox
+// and the name "Tiny" are retired. Here the assistant wears THIS site's short logo - the RM card of favicon.svg - and the
+// site's name. (draft's shared/tinyMascot.js, mirrored as /assistant/tinyMascot.js, now draws draft's "/d" only.)
+// The card's colours are the logo's own (favicon.svg), the same in every theme.
+const TINY_NAME = "Resume Master";
+function tinySvg({ size = 40, title = null } = {}) {
+  const label = title ? `<title>${String(title).replace(/[<&>"]/g, "")}</title>` : "";
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="${size}" height="${size}" ${title ? 'role="img"' : 'aria-hidden="true"'} focusable="false">${label}`
+    + '<rect width="64" height="64" rx="12" fill="#00283f"/>'
+    + '<g transform="rotate(-4 32 32)"><rect x="8" y="18" width="48" height="28" rx="2" fill="#ffffff" stroke="#0f0f0f" stroke-width="3"/>'
+    + '<text x="32" y="41" text-anchor="middle" font-family="Arial Narrow, Arial, sans-serif" font-weight="800" font-style="italic" font-size="22" fill="#0f0f0f">RM</text></g>'
+    + "</svg>";
+}
 import { PLACES, faqAnswer, placeHref } from "/assistant/tinySite.js";
 
 const KEY = "rm-tiny:turns";

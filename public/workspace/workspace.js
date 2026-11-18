@@ -590,7 +590,7 @@ $("#ws-history").addEventListener("click", async () => {
   }
   async function reopen(bytes) {
     await session.open(bytes, session.name);
-    if (docId) await store.addVersion(docId, session.bytes, "Undone (Tiny)");
+    if (docId) await store.addVersion(docId, session.bytes, "Undone (assistant)");
     await drawStrip(); fitWidth(); drawTools(); sync();
     $("#ws-meta").textContent = `${session.pages.length} page${session.pages.length === 1 ? "" : "s"} · ${kb(session.bytes.length)}`;
   }
@@ -721,7 +721,7 @@ $("#ws-history").addEventListener("click", async () => {
       return { text: out.length ? `What an ATS may trip on: ${out.join("; ")}.` : `Nothing obvious: ${n} page${n === 1 ? "" : "s"}, a text layer, ${fonts.size} font${fonts.size === 1 ? "" : "s"}, ${kb(size)}. (An ATS score needs a job — score it against one in draft.)` };
     },
     // T3 — new writing. Not switched on in Tiny yet; nothing is sent anywhere (the routing stub, D190 P1).
-    t3: () => ({ ask: "Writing new words needs the assistant, which isn't switched on in Tiny yet. Everything already in this document I can do without it — say “help” for the list." }),
+    t3: () => ({ ask: "Writing new words needs the assistant, which isn't switched on here yet. Everything already in this document I can do without it — say “help” for the list." }),
   };
   // ⭐ 46n (owner 11-15): Tiny is a FLOATING bot — the fox bubble at the bottom-right, its card over the page (no column)
   const tiny = await import("/assistant/tiny.js").then(m => m.mountTiny({ handlers, onDocument: true }));

@@ -1,23 +1,20 @@
-// shared/tinyMascot.js — ⭐ D190 (46n, owner 11-15: "make tiny a floating bot … give it a cute logo animal") · TINY'S FACE.
-// An original small fox head, drawn here once and used by draft (client/src/components/AppNav.jsx), the PDF-tools site and
-// the extension. ⛔ MIRRORED byte-identical into resume-master public/assistant/tinyMascot.js and extension/tinyMascot.js —
-// test/d190Assistant.test.js fails when a copy differs.
-// The fox's own colours are ILLUSTRATION, not theme: they stay the same in every theme (like a logo), which is why they are
-// literals here and not tokens. A mascot made of perfect circles and curves — no capsule shapes (D60).
+// shared/tinyMascot.js — the assistant's face and name, drawn here once and used by draft (client/src/components/AppNav.jsx)
+// and the extension. ⛔ MIRRORED byte-identical into extension/tinyMascot.js and the PDF-tools repo's
+// public/assistant/tinyMascot.js — test/d190Assistant.test.js fails when a copy differs.
+// ⭐ 46v 0c (owner 11-18: "change to their respective short logos on [the PDF-tools site] and draft" … "drop 'tiny' for the newly
+// suggested ones"): the fox and the name "Tiny" are retired. On draft the assistant wears draft's SHORT LOGO, "/d", in the
+// logo's colourway (the slash in LOGO_SLASH, the letter in LOGO_WORD — the theme's own CSS variables, so every theme's logo
+// rule holds and there is no colour literal here), and is called by the site's name. The PDF-tools site draws its own short
+// logo in its own public/assistant/tiny.js (its name and host may not appear in this product's files — the brand guard).
+// The code names (TINY_NAME, tinySvg, data-tiny-*) stay; only what a person sees changed. No capsule shape (D60).
 
-export const TINY_NAME = "Tiny";
+export const TINY_NAME = "draft";
 
-/** The fox, as an SVG string (64 × 64). `title` gives it an accessible name; without one it is decorative. */
+/** draft's short logo "/d", as an SVG string (64 × 64). `title` gives it an accessible name; without one it is decorative. */
 export function tinySvg({ size = 40, title = null } = {}) {
-  const label = title ? `<title>${String(title).replace(/[<&>]/g, "")}</title>` : "";
+  const label = title ? `<title>${String(title).replace(/[<&>"]/g, "")}</title>` : "";
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="${size}" height="${size}" ${title ? 'role="img"' : 'aria-hidden="true"'} focusable="false">${label}`
-    + '<path d="M9 7 L27 21 L16 33 Z" fill="#E8743B"/><path d="M55 7 L37 21 L48 33 Z" fill="#E8743B"/>'
-    + '<path d="M13 12 L23 21 L17 27 Z" fill="#5B3426"/><path d="M51 12 L41 21 L47 27 Z" fill="#5B3426"/>'
-    + '<path d="M32 17 C18 17 9 27 9 38 C9 50 19 57 32 57 C45 57 55 50 55 38 C55 27 46 17 32 17 Z" fill="#E8743B"/>'
-    + '<path d="M9.5 39 C13 49 21 55 32 55 C43 55 51 49 54.5 39 C47 42 40 44.5 32 50.5 C24 44.5 17 42 9.5 39 Z" fill="#FFF3E6"/>'
-    + '<circle cx="23.5" cy="36" r="3.4" fill="#2B1D17"/><circle cx="40.5" cy="36" r="3.4" fill="#2B1D17"/>'
-    + '<circle cx="24.6" cy="34.9" r="1.1" fill="#FFFFFF"/><circle cx="41.6" cy="34.9" r="1.1" fill="#FFFFFF"/>'
-    + '<ellipse cx="32" cy="47.5" rx="3.4" ry="2.5" fill="#2B1D17"/>'
-    + '<circle cx="17" cy="44" r="2.6" fill="#F6A98A" opacity="0.7"/><circle cx="47" cy="44" r="2.6" fill="#F6A98A" opacity="0.7"/>'
+    + '<text x="31" y="45" text-anchor="middle" font-family="Poppins, sans-serif" font-weight="800" font-style="italic" font-size="38" letter-spacing="-1">'
+    + '<tspan style="fill: var(--c-logo-slash)">/</tspan><tspan style="fill: var(--c-logo-word)">d</tspan></text>'
     + "</svg>";
 }

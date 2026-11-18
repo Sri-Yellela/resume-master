@@ -198,7 +198,13 @@ test("46n · Tiny's fox is draft's: public/assistant/tinyMascot.js is byte-ident
   if (!fs.existsSync(draft)) { t.skip("draft is not checked out beside resume-master"); return; }
   assert.equal(mine, fs.readFileSync(draft, "utf8").replace(/\r\n/g, "\n"), "re-mirror shared/tinyMascot.js from draft");
   const { tinySvg, TINY_NAME } = await import("../public/assistant/tinyMascot.js");
-  assert.equal(TINY_NAME, "Tiny");
+  // 46v (draft owner 11-18: "change to their respective short logos ... drop 'tiny'"), changed on purpose: the mirror now
+  // draws draft's "/d" and is named draft; THIS site's assistant wears its own short logo (the RM card) and name in tiny.js.
+  assert.equal(TINY_NAME, "draft");
   assert.match(tinySvg({ size: 44 }), /^<svg [^>]*width="44" height="44" aria-hidden="true"/);
   assert.match(tinySvg({ title: "Tiny <fox>" }), /role="img"[^>]*><title>Tiny fox<\/title>/);
+  const own = read("public/assistant/tiny.js");
+  assert.doesNotMatch(own, /from "\/assistant\/tinyMascot\.js"/, "this site draws its own short logo, not draft's");
+  assert.match(own, /const TINY_NAME = "Resume Master";/);
+  assert.match(own, />RM<\/text>/, "the RM card of favicon.svg");
 });
