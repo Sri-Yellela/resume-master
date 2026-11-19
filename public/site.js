@@ -27,45 +27,65 @@ function say(el, text, kind = "") { el.className = `msg ${kind}`; el.textContent
 const bandClass = (s) => (typeof s !== "number" ? "nosignal" : s >= 44 ? "strong" : s >= 26 ? "moderate" : "weak");
 const pctHtml = (s, extra = "") => `<span class="ats-num ${bandClass(s)}${extra}">${typeof s === "number" ? `${Math.round(s)}%` : "—"}</span>`;
 
-// ── the contextual score (draft D192 (4d), the owner's option A): the four parts, What fits, What to do ──────────────
-// Words from the v2 block's own fields (no model). A part without data is left out.
-const CTX_NAMES = { skill_match: "Skill match", role_fit: "Role fit", responsibility_overlap: "What you have done", tech_stack: "Their stack" };
-function ctxWhy(id, p) {
-  if (id === "skill_match") return "the terms you both use";
-  if (id === "responsibility_overlap") return `${(p.matched || []).length} of the ${p.phrases} things the role does`;
-  if (id === "tech_stack") return [(p.exact || []).length ? `${p.exact.length} you share` : "", (p.ecosystem || []).length ? `${p.ecosystem.length} close` : "",
-    // the gaps counted are the ones What to do lists (at least 10 % of their postings — the package's GAP_MIN_SHARE)
-    (p.gaps || []).filter(g => (g.share ?? (g.of ? g.postings / g.of : 0)) >= 0.1).length
-      ? `${(p.gaps || []).filter(g => (g.share ?? (g.of ? g.postings / g.of : 0)) >= 0.1).length} you don't show` : ""].filter(Boolean).join(" · ");
-  if (id === "role_fit") return ({ same_role: "the same role", also_fits: "a role your résumé also fits", same_family: "the same family, another role", other_family: "another family" })[p.relation] || "";
-  return "";
-}
-function contextualHtml(c) {
-  if (!c || typeof c.score !== "number") return "";
-  const parts = Object.keys(CTX_NAMES).map(id => [id, c.parts?.[id]]).filter(([, p]) => p && p.status === "ok" && typeof p.score === "number");
-  const s = c.similarities || {};
-  const fits = [
-    ["Skills you both have", (s.skills || []).slice(0, 6).join(" · ")],
-    ["Same purpose", (s.ecosystem || []).slice(0, 4).map(e => `you: ${e.yours} → they: ${e.theirs}`).join(" · ")],
-    ["Their stack, yours too", (s.stack || []).slice(0, 6).join(" · ")],
-    ["Both in", (s.domains || []).join(" · ")],
-    ["You've done", (s.responsibilities || []).slice(0, 3).map(r => `“${r}”`).join(" · ")],
-  ].filter(([, v]) => v);
-  const todo = [], notes = [];
-  for (const d of c.dissimilarities || []) {
-    if (d.kind === "stack_gap") todo.push(`They use ${d.tech}${typeof d.share === "number" ? ` (in ${Math.round(d.share * 100)}% of their postings)` : ""}`);
-    else if (d.kind === "responsibility") todo.push(`“${d.phrase}” — your résumé doesn't show it`);
-    else if (d.kind === "domain") notes.push(`They're in ${d.theirs}${(d.yours || []).length ? `; your experience is ${d.yours.join(", ")}` : " — your résumé doesn't name it"}. Not counted against you.`);
+// ── THE ATS CARD (draft D192, the owner's option C, 11-19): the number, the four parts as one bar and one plain line each,
+// the single biggest gain — no lists of terms, no band word (each number is painted by its band). The same words as draft's
+// shared/contextualView.js atsCardView, over the same v2 block; no model.
+const CASING = Object.fromEntries(["AWS", "GCP", "Azure", "SQL", "NoSQL", "PostgreSQL", "MySQL", "MongoDB", "Redis", "Kafka", "Docker", "Kubernetes",
+  "gRPC", "GraphQL", "REST", "TypeScript", "JavaScript", "Node.js", "React", "Terraform", "Python", "Java", "Go", "Ruby", "Rust",
+  "C++", "C#", "Scala", "Kotlin", "Swift", "Spark", "Airflow", "Snowflake", "dbt", "Linux", "CI/CD", "API", "APIs", "HTML", "CSS",
+  "Elasticsearch", "DynamoDB", "BigQuery", "Databricks", "Tableau", "Excel", "PyTorch", "TensorFlow", "Jenkins", "Git", "iOS", "Android"]
+  .map(n => [n.toLowerCase(), n]));
+const showTerm = (t) => { const s = String(t?.term ?? t ?? "").trim(), k = s.toLowerCase(); return CASING[k] || (s === k && /^[a-z]/.test(s) ? s[0].toUpperCase() + s.slice(1) : s); };
+const bareTech = (t) => String(t || "").replace(/^(Apache|Amazon|Google|Microsoft)\s+/, "");
+const andJoin = (xs) => (xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
+const shortTxt = (s, n = 60) => { const t = String(s || "").replace(/\s+/g, " ").trim(); return t.length <= n ? t : `${t.slice(0, n).replace(/\s+\S*$/, "")}…`; };
+const shareOfGap = (g) => (typeof g?.share === "number" ? g.share : g?.of ? g.postings / g.of : 0);
+const subName = (id) => { const t = String(id || "").split(".").pop().replace(/-/g, " "); return t ? t[0].toUpperCase() + t.slice(1) : ""; };
+const LEVELS = { entry: "entry level", early: "early career", junior: "junior", mid: "mid level", senior: "senior", executive: "executive" };
+function cardLines(rep, c) {
+  const parts = [];
+  const have = (rep.tier1_matched || []).slice(0, 5).map(showTerm), miss = (rep.tier1_missing || []).slice(0, 3).map(showTerm);
+  parts.push(["Skills", rep.score ?? c?.parts?.skill_match?.score,
+    !miss.length ? (have.length ? `${have.join(", ")} — everything it asks for` : "") : `${have.length ? `${have.join(", ")} — ` : ""}missing ${miss.join(", ")}`]);
+  const role = c?.parts?.role_fit, work = c?.parts?.responsibility_overlap, stack = c?.parts?.tech_stack;
+  if (role?.status === "ok") {
+    const job = [subName(role.posting?.subcategory), LEVELS[role.posting?.level] || ""].filter(Boolean).join(", ");
+    parts.push(["Role", role.score, role.relation === "same_role" && !role.level_gap ? `${job} — the same as the job` : `The job is ${job || "another role"}`]);
   }
-  return `<section class="ctx" aria-label="In context">
-    <div class="ctx-nums"><div class="ctx-card"><div class="note">Skill match</div>${pctHtml(c.parts?.skill_match?.score)}</div>
-      <div class="ctx-card"><div class="note">In context</div>${pctHtml(c.score)}</div></div>
-    <div class="ctx-parts">${parts.map(([id, p]) => `<div class="ctx-card"><div class="ctx-row"><span>${esc(CTX_NAMES[id])}</span><span class="ats-num sm ${bandClass(p.score)}">${Math.round(p.score)}</span></div>
-      <div class="ctx-bar" aria-hidden="true"><i class="${bandClass(p.score)}" style="width:${Math.max(0, Math.min(100, p.score))}%"></i></div><div class="note">${esc(ctxWhy(id, p))}</div></div>`).join("")}</div>
-    ${fits.length ? `<h3>What fits</h3>${fits.map(([k, v]) => `<p class="ctx-line"><span class="note">${esc(k)}</span> · ${esc(v)}</p>`).join("")}` : ""}
-    ${todo.length || notes.length ? `<h3>What to do</h3>${todo.slice(0, 6).map(t => `<p class="ctx-card ctx-line">${esc(t)}</p>`).join("")}${notes.map(n => `<p class="note">${esc(n)}</p>`).join("")}` : ""}
+  if (work?.status === "ok") {
+    const done = work.matched || [], left = work.missing || [];
+    parts.push(["The work", work.score, !left.length ? `You have done all ${work.phrases} things it describes`
+      : done.length ? `You have done ${done.length} of ${work.phrases} — not “${shortTxt(left[0], 48)}”` : `Not on your résumé yet: “${shortTxt(left[0])}”`]);
+  }
+  if (stack?.status === "ok") {
+    const bits = [];
+    const yes = (stack.exact || []).slice(0, 2).map(x => bareTech(x.tech));
+    if (yes.length) bits.push(`${andJoin(yes)} yes`);
+    const eco = (stack.ecosystem || []).find(e => !(stack.exact || []).some(x => x.tech === e.yours));
+    if (eco) bits.push(`${bareTech(eco.yours)} ≈ their ${bareTech(eco.theirs)}`);
+    const gap = [...(stack.gaps || [])].sort((a, b) => shareOfGap(b) - shareOfGap(a))[0];
+    if (gap && shareOfGap(gap) >= 0.1) bits.push(`${bareTech(gap.tech)} no`);
+    parts.push(["Their stack", stack.score, bits.join(" · ")]);
+  }
+  let gain = "";
+  const g = (c?.dissimilarities || []).find(d => d.kind === "stack_gap");
+  if (g) gain = `${g.tech}${shareOfGap(g) ? ` — in ${Math.round(shareOfGap(g) * 100)}% of their jobs` : ""}`;
+  else if (miss.length) gain = `${miss[0]} — the posting asks for it`;
+  else if ((work?.missing || []).length) gain = `Show “${shortTxt(work.missing[0])}” on your résumé`;
+  return { parts: parts.filter(([, s]) => typeof s === "number"), gain };
+}
+function atsCardHtml(rep, c) {
+  const score = typeof c?.score === "number" ? c.score : rep.score;
+  const { parts, gain } = cardLines(rep, c);
+  return `<section class="atsc" aria-label="Your résumé against this job">
+    <p class="atsc-num">${pctHtml(score)}</p>
+    ${parts.map(([name, s, line]) => `<div class="atsc-row"><span>${esc(name)}</span>
+      <span class="atsc-mid"><span class="ctx-bar" aria-hidden="true"><i class="${bandClass(s)}" style="width:${Math.max(0, Math.min(100, s))}%"></i></span>${line ? `<span class="note">${esc(line)}</span>` : ""}</span>
+      <span class="ats-num sm ${bandClass(s)}">${Math.round(s)}</span></div>`).join("")}
+    ${gain ? `<p class="atsc-gain">Biggest gain: ${esc(gain)}</p>` : ""}
   </section>`;
 }
+
 const chips = (arr, miss) => (arr || []).slice(0, 24).map(t => `<span class="chip${miss ? " miss" : ""}">${esc(t?.term ?? t)}</span>`).join("");
 
 // ── tabs and dialogs ────────────────────────────────────────────────────────────────────────────
@@ -113,20 +133,10 @@ $("#ats-form").addEventListener("submit", async (e) => {
       store: f.store?.checked === true,
     });
     const rep = r.report || {};
-    const group = (title, list, miss) => (list && list.length ? `<h3>${title}</h3><div class="chips">${chips(list, miss)}</div>` : "");
     out.innerHTML = `
-      ${r.outcome === "scored" ? (contextualHtml(r.contextual) || `<p class="ats-head">${pctHtml(r.score)}</p>`)
-        : `<p class="ats-head"><strong>Not enough signal</strong> — the scorer declined: too few scorable terms. This is not a low score.</p>`}
-      ${r.outcome === "scored" ? `
-        ${group("Skills the posting asks for that your résumé shows", rep.tier1_matched)}
-        ${group("Skills it asks for that your résumé does not show", rep.tier1_missing, true)}
-        ${group("Competencies shown", rep.competencies_matched)}
-        ${group("Competencies not shown", rep.competencies_missing, true)}
-        ${group("Action verbs the posting uses that you use too", rep.action_verbs_matched)}
-        ${group("Hard requirements not met", (rep.hard_constraint_misses || []).map(h => h.label || h.term || h), true)}
-        ${rep.experience?.summary ? `<p class="note">Experience: ${esc(rep.experience.summary)}</p>` : ""}
-        <p class="note">Only add a skill you actually have. Matching is about evidence, not keywords.</p>`
-      : `<p class="note">Why: ${esc((rep.decline_reasons || []).join("; ") || "too few scorable terms")}. Paste the FULL job description, or a fuller résumé.</p>`}
+      ${r.outcome === "scored" ? atsCardHtml(rep, r.contextual)
+        : `<p class="ats-head"><strong>Not enough signal</strong> — the scorer declined: too few scorable terms. This is not a low score.</p>
+          <p class="note">Why: ${esc((rep.decline_reasons || []).join("; ") || "too few scorable terms")}. Paste the FULL job description, or a fuller résumé.</p>`}
       ${savedNote(r.saved)}`;
   } catch (err) { out.innerHTML = `<p class="msg bad">${esc(err.message)}</p>`; }
 });

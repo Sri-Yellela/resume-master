@@ -78,12 +78,15 @@ test("the lookup is on in production (or with RM_COMPANY_STACK_URL), off in test
   assert.match(site, /const v2 = await scoreAtsV2\(req\.body, \{ lookupCompany \}\);\n\s+const out = \{ \.\.\.atsOutcome\(v2\.report\), contextual: v2\.contextual \};/);
 });
 
-test("the site's ATS check (owner 11-19, option A): the number painted by its band, no band word; the four parts, What fits, What to do", () => {
+test("the site's ATS check is the ATS card (owner 11-19, option C): no band word, no term lists", () => {
   const site = fs.readFileSync(path.join(import.meta.dirname, "..", "public", "site.js"), "utf8").replace(/\r\n/g, "\n");
   assert.doesNotMatch(site, /Strong match|Moderate match|Weak match|bandOf\(/, "no band word or blurb");
   assert.match(site, /const bandClass = \(s\) => \(typeof s !== "number" \? "nosignal" : s >= 44 \? "strong" : s >= 26 \? "moderate" : "weak"\);/, "draft's cutpoints");
-  assert.match(site, /function contextualHtml\(c\)/);
-  for (const words of ["What fits", "What to do", "Skill match", "In context", "Not counted against you."]) assert.ok(site.includes(words), words);
+  // option C (owner 11-19): the ATS card — the number, four rows of bar + line, the biggest gain; no lists of terms
+  assert.match(site, /function atsCardHtml\(rep, c\)/);
+  assert.ok(site.includes('${r.outcome === "scored" ? atsCardHtml(rep, r.contextual)'));
+  for (const words of ['"Skills"', '"Role"', '"The work"', '"Their stack"', "Biggest gain: "]) assert.ok(site.includes(words), words);
+  assert.doesNotMatch(site, /contextualHtml|What fits|Skills the posting asks for that your résumé shows|Competencies shown/, "no lists of terms");
   assert.match(site, /company: f\.company\.value\.trim\(\)/, "the optional company field feeds the lookup");
   const css = fs.readFileSync(path.join(import.meta.dirname, "..", "public", "site.css"), "utf8");
   assert.match(css, /\.ats-num\.strong \{ color: var\(--good\); \}/, "the colour is a token");

@@ -200,6 +200,13 @@ textarea { min-height: 160px; resize: vertical; }
 .ctx-bar i { display: block; height: 6px; background: var(--ink-muted); }
 .ctx-bar i.strong { background: var(--good); } .ctx-bar i.moderate { background: var(--warn); } .ctx-bar i.weak { background: var(--bad); }
 .ctx-line { margin: 2px 0; }
+/* the ATS card (draft D192, option C): the number, four rows of name · bar + line · number, the biggest gain */
+.atsc { display: flex; flex-direction: column; gap: 14px; margin: 4px 0 14px; }
+.atsc-num { margin: 0; } .atsc-num .ats-num { font-size: 44px; }
+.atsc-row { display: grid; grid-template-columns: minmax(84px, 110px) minmax(0, 1fr) 36px; align-items: center; gap: 12px; }
+.atsc-mid { display: flex; flex-direction: column; gap: 5px; min-width: 0; } .atsc-mid .ctx-bar { margin: 0; }
+.atsc-row .ats-num.sm { text-align: right; }
+.atsc-gain { margin: 0; border-top: 1px solid var(--glass-edge); padding-top: 12px; }
 .chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 10px; }
 .chip { font-size: var(--t-xs); padding: 2px 8px; border-radius: 999px; background: var(--glass-strong); }
 .chip.miss { color: var(--bad); }
