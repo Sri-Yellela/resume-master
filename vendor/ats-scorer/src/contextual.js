@@ -3,7 +3,7 @@
 // just plainly matching skill against skill … as usual no ai").
 //
 // Pure. No database, no network, no model, no embedding: every input is an argument and every part is arithmetic over
-// tokens and ids. The caller (draft, Resume Master) reads its own tables — the posting's and the résumé's taxonomy
+// tokens and ids. The caller (draft, the tools service) reads its own tables — the posting's and the résumé's taxonomy
 // placement, the company's stack with its evidence — and passes them in, as with term weights and synonyms.
 //
 //   scoreContextual({ skillMatch, posting, resume, company, weights })  → the v2 `contextual` block (ATS contract 2.0.0)
@@ -195,7 +195,7 @@ export const ecosystemOf = (tech) => FAMILY_OF.get(key(tech)) || null;
  */
 /**
  * The contract's request shape (D192 (3), owner 11-14): company.techStack = [{ name, category, postingShare }] — the share of
- * the company's postings naming it (0–1). draft fills it from its own tables; Resume Master standing alone fills it from
+ * the company's postings naming it (0–1). draft fills it from its own tables; the tools service standing alone fills it from
  * draft's public GET /api/public/company-stack. Either way this function reads only what it is given.
  * Normalised here to { tech, postings, of } with `of` = 1000 so the share arithmetic is the same as the counted form.
  */
@@ -239,7 +239,7 @@ export function techStackFit(company, resumeTech = []) {
 
 /**
  * The technologies a résumé's text names, out of `names` (the company's stack and every ECOSYSTEMS member): whole word, any
- * case, and "Apache Kafka" also as "Kafka". For a caller with no vocabulary of its own (Resume Master standing alone); draft
+ * case, and "Apache Kafka" also as "Kafka". For a caller with no vocabulary of its own (the tools service standing alone); draft
  * sends `resume.tech` from its own (shared/techVocabulary.js).
  */
 const escRe = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

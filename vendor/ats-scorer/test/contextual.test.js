@@ -169,7 +169,7 @@ test("the contract's request shape — company.techStack [{ name, category, post
   assert.ok(c.dissimilarities.some(d => d.kind === "stack_gap" && d.tech === "Terraform" && d.share === 0.09 && d.action === "learn"));
 });
 
-test("with no resume.tech, the technologies are read from the résumé text (Resume Master standing alone)", async () => {
+test("with no resume.tech, the technologies are read from the résumé text (the tools service standing alone)", async () => {
   const { techMentionedIn } = await import("../src/index.js");
   assert.deepEqual(techMentionedIn("Built pipelines on Kafka and airflow; some C++", ["Apache Kafka", "Apache Airflow", "Go", "C++", "Terraform"]),
     ["Apache Kafka", "Apache Airflow", "C++"]);
