@@ -69,3 +69,11 @@ test("a failed lookup is no data, never an error", async () => {
   assert.equal(r.contextual.parts.tech_stack.status, "no_data");
   assert.equal(typeof r.contextual.score, "number");
 });
+
+test("the lookup is on in production (or with RM_COMPANY_STACK_URL), off in tests and staging; the site's check uses v2", () => {
+  const app = fs.readFileSync(path.join(import.meta.dirname, "..", "src", "http", "app.js"), "utf8").replace(/\r\n/g, "\n");
+  assert.match(app, /: env\.RAILWAY_ENVIRONMENT_NAME === "production" \? createCompanyLookup\(\{ log \}\) : null;/);
+  assert.match(app, /siteRoutes\(\{ store, anthropic, env, metering, lookupCompany, \.\.\.siteOptions \}\)/);
+  const site = fs.readFileSync(path.join(import.meta.dirname, "..", "src", "http", "siteRoutes.js"), "utf8").replace(/\r\n/g, "\n");
+  assert.match(site, /const v2 = await scoreAtsV2\(req\.body, \{ lookupCompany \}\);\n\s+const out = \{ \.\.\.atsOutcome\(v2\.report\), contextual: v2\.contextual \};/);
+});

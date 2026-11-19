@@ -127,7 +127,10 @@ export function createApp({ anthropic = null, version = {}, log = defaultLog, en
   // ATS contract 2.0.0 (draft D192): the v1 report unchanged, the contextual score beside it. v1 above keeps being served.
   // The company lookup runs only when the request carries no company.techStack (RM_COMPANY_STACK_URL; "off" disables it).
   const lookupCompany = companyLookup !== undefined ? companyLookup
-    : (env.RM_COMPANY_STACK_URL === "off" ? null : createCompanyLookup({ url: env.RM_COMPANY_STACK_URL || undefined, log }));
+    // On in production (Railway names the environment) or when a URL is set; off in tests and staging unless set.
+    : env.RM_COMPANY_STACK_URL === "off" ? null
+    : env.RM_COMPANY_STACK_URL ? createCompanyLookup({ url: env.RM_COMPANY_STACK_URL, log })
+    : env.RAILWAY_ENVIRONMENT_NAME === "production" ? createCompanyLookup({ log }) : null;
   app.post("/v2/ats/score", client, freeCap("ats.score"), json, async (req, res, next) => {
     try { res.json(await scoreAtsV2(req.body, { lookupCompany })); } catch (e) { next(e); }
   });
@@ -165,7 +168,7 @@ export function createApp({ anthropic = null, version = {}, log = defaultLog, en
   app.post("/v1/resumes/gists", client, json, metered("resumes.gists", req => generateGists(anthropic, req.body || {})));
 
   // ── the site (A54) and a person's routes (A57) ──────────────────────────────────────────────
-  app.use("/v1/site", siteRoutes({ store, anthropic, env, metering, ...siteOptions }));
+  app.use("/v1/site", siteRoutes({ store, anthropic, env, metering, lookupCompany, ...siteOptions }));
   // A69: the PDF tools run in the visitor's browser. Their libraries are served from HERE — the site
   // makes no third-party request — and the component is src/pdf-toolkit, the same file the server's
   // PDF → text reads with. Static middleware, like public/ — files, not API routes, so the contract's route

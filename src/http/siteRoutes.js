@@ -40,7 +40,7 @@ import { sendResetEmail, emailConfigured } from "../accounts/email.js";
 import { generateResume } from "../generation/generate.js";
 import { enhanceResume } from "../generation/enhance.js";
 import { extractPdfText } from "../parsing/extractPdfText.js";
-import { scoreAts, formatResume, atsOutcome } from "../tools/deterministic.js";
+import { scoreAtsV2, formatResume, atsOutcome } from "../tools/deterministic.js";
 import { createAddressHasher } from "./metering.js";
 
 const COOKIE = "rm_session";
@@ -97,7 +97,7 @@ export function createRateLimiter({ perMinute = 30, now = () => Date.now() } = {
   return allow;
 }
 
-export function siteRoutes({ store, anthropic = null, env = process.env, metering, sendEmail = sendResetEmail,
+export function siteRoutes({ store, anthropic = null, env = process.env, metering, sendEmail = sendResetEmail, lookupCompany = null,
                              publicLimiter = createRateLimiter({ perMinute: Number(env.RM_PUBLIC_RATE_PER_MIN) || 30 }),
                              pdfDailyLimiter = createDailyLimiter({ perDay: env.RM_PDF_TEXT_PER_DAY != null && env.RM_PDF_TEXT_PER_DAY !== ""
                                ? Number(env.RM_PDF_TEXT_PER_DAY) : 100 }),
@@ -244,9 +244,13 @@ export function siteRoutes({ store, anthropic = null, env = process.env, meterin
     return saveArtifact(store, req.user.id, { kind, title, content }, env);
   };
 
-  r.post("/tools/ats", limited, writeGuard, small, (req, res, next) => {
+  // draft D192 (owner 11-14: "what if i want the ats scorer in rm to check my ats with the technographics and contextual score"):
+  // the site's check is the v2 scorer — the report exactly as before, the contextual block beside it, the company looked up on
+  // draft's public stack (24 h in memory) when the request carries none. The page shows the block once the owner picks its display.
+  r.post("/tools/ats", limited, writeGuard, small, async (req, res, next) => {
     try {
-      const out = atsOutcome(scoreAts(req.body).report);
+      const v2 = await scoreAtsV2(req.body, { lookupCompany });
+      const out = { ...atsOutcome(v2.report), contextual: v2.contextual };
       metering?.record(req.user ? "site-user" : "site-anon", "ats.score", [], { via: "site" });
       res.json({ ...out, saved: keep(req, "ats_report", req.body?.job?.title, out) });
     } catch (e) { next(e); }
