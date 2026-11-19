@@ -186,6 +186,20 @@ textarea { min-height: 160px; resize: vertical; }
 .band.moderate { background: rgba(245, 195, 91, .16); color: var(--warn); }
 .band.weak { background: rgba(255, 154, 139, .14); color: var(--bad); }
 .band.nosignal { border: 1px dashed var(--glass-edge); color: var(--ink-muted); }
+/* draft D192 (owner 11-19): the ATS number's colour is its band — no band word, no badge */
+.ats-num { font-weight: 700; font-size: 40px; line-height: 1.1; }
+.ats-num.sm { font-size: var(--t-sm); }
+.ats-num.strong { color: var(--good); } .ats-num.moderate { color: var(--warn); } .ats-num.weak { color: var(--bad); } .ats-num.nosignal { color: var(--ink-muted); }
+.ats-head { margin: 4px 0 10px; }
+.ctx { display: flex; flex-direction: column; gap: 10px; margin: 6px 0 14px; }
+.ctx-nums { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.ctx-parts { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; }
+.ctx-card { background: var(--glass-strong); border-radius: 10px; padding: 10px 12px; margin: 0; }
+.ctx-row { display: flex; justify-content: space-between; }
+.ctx-bar { height: 6px; border-radius: 2px; background: var(--glass-edge); overflow: hidden; margin: 6px 0; }
+.ctx-bar i { display: block; height: 6px; background: var(--ink-muted); }
+.ctx-bar i.strong { background: var(--good); } .ctx-bar i.moderate { background: var(--warn); } .ctx-bar i.weak { background: var(--bad); }
+.ctx-line { margin: 2px 0; }
 .chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 10px; }
 .chip { font-size: var(--t-xs); padding: 2px 8px; border-radius: 999px; background: var(--glass-strong); }
 .chip.miss { color: var(--bad); }

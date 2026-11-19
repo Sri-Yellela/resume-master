@@ -63,9 +63,10 @@ test("⛔ the site makes no third-party request, and every write sends X-RM-Clie
 
 test("bands on the site are draft's cutpoints, and 'not enough signal' is never shown as a low score", () => {
   const js = fs.readFileSync("public/site.js", "utf8");
-  assert.match(js, /if \(s >= 44\) return \{ cls: "strong"/);
-  assert.match(js, /if \(s >= 26\) return \{ cls: "moderate"/);
-  assert.match(js, /if \(out\.outcome !== "scored"\) return \{ cls: "nosignal", label: "Not enough signal"/);
+  // Moved on purpose (draft D192, owner 11-19: "the font color on the ats number should do it no need for the words"):
+  // the band is the number's colour class, the same cutpoints; "not enough signal" is still said in words, never a number.
+  assert.match(js, /s >= 44 \? "strong" : s >= 26 \? "moderate" : "weak"/);
+  assert.match(js, /<strong>Not enough signal<\/strong>/);
   assert.match(js, /This is not a low score/);
 });
 

@@ -166,7 +166,10 @@ test("the contract's request shape — company.techStack [{ name, category, post
   assert.equal(techStackFit({ techStack: [] }, ["Go"]).status, "no_data");
   const c = scoreContextual({ skillMatch: 70, posting: { text: "Build services." }, resume: { text: "fintech payments" }, company });
   assert.ok(c.dissimilarities.some(d => d.kind === "domain" && d.theirs === "healthcare"), "industry read as the posting's domain");
-  assert.ok(c.dissimilarities.some(d => d.kind === "stack_gap" && d.tech === "Terraform" && d.share === 0.09 && d.action === "learn"));
+  // 46x: a gap is LISTED from GAP_MIN_SHARE (10 % of their postings) — Tableau at 30 % is, Terraform at 9 % is not (it still costs)
+  assert.ok(c.dissimilarities.some(d => d.kind === "stack_gap" && d.tech === "Tableau" && d.share === 0.3 && d.action === "learn"));
+  assert.ok(!c.dissimilarities.some(d => d.kind === "stack_gap" && d.tech === "Terraform"), "under 10 % of their postings: not advice");
+  assert.ok(c.parts.tech_stack.gaps.some(g => g.tech === "Terraform"), "…but the part still counts it");
 });
 
 test("with no resume.tech, the technologies are read from the résumé text (the tools service standing alone)", async () => {
@@ -178,4 +181,15 @@ test("with no resume.tech, the technologies are read from the résumé text (the
     company: { techStack: [{ name: "Apache Kafka", postingShare: 0.5 }, { name: "Prefect", postingShare: 0.5 }] } });
   assert.deepEqual(c.similarities.stack, ["Apache Kafka"]);
   assert.deepEqual(c.similarities.ecosystem.map(e => e.theirs), ["Prefect"]);
+});
+
+test("46x tidy: a phrase ends on a word; a same-purpose pair is said only where yours isn't already an exact match", async () => {
+  const { responsibilityPhrases, PHRASE_CHARS } = await import("../src/index.js");
+  const long = "What you'll do\n- Build payment infrastructure that moves money for millions of businesses across forty countries every single day of the year";
+  const [p] = responsibilityPhrases(long);
+  assert.ok(p.text.length <= PHRASE_CHARS + 1 && p.text.endsWith("…") && !/\b(of|for|the)…$/.test(p.text), p.text);
+  const c = scoreContextual({ skillMatch: 60, posting: { text: "x" }, resume: { text: "x", tech: ["Java", "Apache Airflow"] },
+    company: { techStack: [{ name: "Java", postingShare: 0.5 }, { name: "Scala", postingShare: 0.3 }, { name: "Prefect", postingShare: 0.2 }] } });
+  assert.deepEqual(c.similarities.ecosystem.map(e => [e.yours, e.theirs]), [["Apache Airflow", "Prefect"]], "Java → Scala is not said: Java already matches");
+  assert.ok(c.parts.tech_stack.ecosystem.some(e => e.theirs === "Scala"), "…but it still earns its half in the part");
 });

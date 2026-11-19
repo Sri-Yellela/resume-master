@@ -104,3 +104,5 @@ A part with no data (no placement, no responsibility lines, no stack) is left ou
 Weights come from the caller (`resolveContextualWeights` refuses unknown parts and negatives). The block also lists
 **similarities** (skills, stack, ecosystem pairs, domains, role, responsibilities) and **dissimilarities**, each with
 a `kind`, a `penalty` flag and an `action` where one exists (`learn` for a stack gap, `evidence` for a responsibility).
+
+**1.5.1 (46x, the owner's display pick):** what the block LISTS is tidier. Its numbers do not change. A stack gap is listed only from 10 % of their postings (`GAP_MIN_SHARE`), so a payments company's Excel at 5 % is not advice. Every gap still costs in `parts.tech_stack` at its own share. A same-purpose pair is not listed when your side already matches exactly. A responsibility phrase is the line cut on a word at 90 characters (`PHRASE_CHARS`).

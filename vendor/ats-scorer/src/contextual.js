@@ -110,6 +110,15 @@ export function contentTokens(text) {
 }
 
 /** The posting's responsibility lines as short phrases: [{ text, tokens }] — at most MAX_PHRASES, each once. */
+// The line as the person reads it: whole words, up to PHRASE_CHARS (a cut line ends on a word, never mid-thought "…of").
+export const PHRASE_CHARS = 90;
+function phraseText(raw) {
+  const t = String(raw).replace(/\s+/g, " ").trim().replace(/[,.;:]+$/, "");
+  if (t.length <= PHRASE_CHARS) return t;
+  const cut = t.slice(0, PHRASE_CHARS + 1).replace(/\s+\S*$/, "");
+  return cut.replace(/[,.;:]+$/, "").replace(/\s+(and|or|of|for|to|with|in|on|the|a|an)$/i, "") + "…";
+}
+
 export function responsibilityPhrases(postingText) {
   const lines = String(postingText || "").split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   let inResp = false;
@@ -129,7 +138,7 @@ export function responsibilityPhrases(postingText) {
     if (seen.has(key)) continue;
     seen.add(key);
     const core = tokens.length >= 4 ? tokens.slice(1, 1 + CORE_TOKENS) : tokens;
-    out.push({ text: raw.split(/\s+/).slice(0, 9).join(" ").replace(/[,.;:]+$/, ""), tokens, core });
+    out.push({ text: phraseText(raw), tokens, core });
     if (out.length >= MAX_PHRASES) break;
   }
   return out;
@@ -272,6 +281,7 @@ export function resolveContextualWeights(input) {
 
 // ── the block ────────────────────────────────────────────────────────────────────────────────────────────────────────
 export const MAX_LISTED = 8;
+export const GAP_MIN_SHARE = 0.1;
 
 /**
  * @param {object} a
@@ -306,14 +316,21 @@ ${company?.industry || ""}`), resumeDomains = domainsIn(resume?.text);
 
   const similarities = {
     skills: (skillsBoth || []).slice(0, MAX_LISTED),
-    ecosystem: tech.ecosystem.slice(0, MAX_LISTED).map(({ yours, theirs, family }) => ({ yours, theirs, family })),
+    // a pair is said only where it adds something: not when the same technology of yours already matches exactly
+    ecosystem: tech.ecosystem.filter(e => !tech.exact.some(x => x.tech === e.yours)).slice(0, MAX_LISTED)
+      .map(({ yours, theirs, family }) => ({ yours, theirs, family })),
     stack: tech.exact.slice(0, MAX_LISTED).map(x => x.tech),
     domains: sharedDomains,
     role: role.status === "ok" && (role.relation === "same_role" || role.relation === "also_fits") && !role.level_gap ? [role.relation] : [],
     responsibilities: resp.matched.slice(0, MAX_LISTED),
   };
   const dissimilarities = [];
-  for (const { tech: name, ...share } of tech.gaps.slice(0, MAX_LISTED)) dissimilarities.push({ kind: "stack_gap", tech: name, ...share, action: "learn", penalty: true });
+  // A gap is LISTED when it is a real part of their stack — at least GAP_MIN_SHARE of their postings (a company's whole stack
+  // carries its sales and finance tools too: Excel in 5 % of a payments company's postings is not advice). Every gap still
+  // costs in the score at its own share.
+  const shareOf = (g) => (Number.isFinite(g.share) ? g.share : Number.isFinite(g.postings) && g.of ? g.postings / g.of : 0);
+  for (const { tech: name, ...share } of tech.gaps.filter(g => shareOf(g) >= GAP_MIN_SHARE).sort((a, b) => shareOf(b) - shareOf(a)).slice(0, MAX_LISTED))
+    dissimilarities.push({ kind: "stack_gap", tech: name, ...share, action: "learn", penalty: true });
   for (const m of resp.missing.slice(0, 4)) dissimilarities.push({ kind: "responsibility", phrase: m, action: "evidence", penalty: true });
   if (role.status === "ok" && role.relation !== "same_role" && role.relation !== "also_fits") {
     dissimilarities.push({ kind: "role", relation: role.relation, posting: role.posting.subcategory, resume: role.resume.subcategory, penalty: true });

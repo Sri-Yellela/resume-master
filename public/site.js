@@ -22,14 +22,49 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<"
 const show = (el, on = true) => { el.hidden = !on; };
 function say(el, text, kind = "") { el.className = `msg ${kind}`; el.textContent = text || ""; }
 
-// ── bands: the same cutpoints as draft's public tool (shared/atsBands.js) — coarse by design ──────
-function bandOf(out) {
-  if (out.outcome !== "scored") return { cls: "nosignal", label: "Not enough signal",
-    blurb: "The scorer declined: the posting or the résumé had too few scorable terms. This is not a low score." };
-  const s = out.score;
-  if (s >= 44) return { cls: "strong", label: "Strong match", blurb: "Most of what the posting asks for, your résumé shows." };
-  if (s >= 26) return { cls: "moderate", label: "Moderate match", blurb: "A real overlap, with gaps worth closing." };
-  return { cls: "weak", label: "Weak match", blurb: "Little of what this posting asks for appears on the résumé." };
+// ── bands: the same cutpoints as draft's (shared/atsBands.js). draft D192 (owner 11-19): "the font color on the ats number
+// should do it no need for the words" — the band is the NUMBER's colour (a class), never a word or a blurb beside it.
+const bandClass = (s) => (typeof s !== "number" ? "nosignal" : s >= 44 ? "strong" : s >= 26 ? "moderate" : "weak");
+const pctHtml = (s, extra = "") => `<span class="ats-num ${bandClass(s)}${extra}">${typeof s === "number" ? `${Math.round(s)}%` : "—"}</span>`;
+
+// ── the contextual score (draft D192 (4d), the owner's option A): the four parts, What fits, What to do ──────────────
+// Words from the v2 block's own fields (no model). A part without data is left out.
+const CTX_NAMES = { skill_match: "Skill match", role_fit: "Role fit", responsibility_overlap: "What you have done", tech_stack: "Their stack" };
+function ctxWhy(id, p) {
+  if (id === "skill_match") return "the terms you both use";
+  if (id === "responsibility_overlap") return `${(p.matched || []).length} of the ${p.phrases} things the role does`;
+  if (id === "tech_stack") return [(p.exact || []).length ? `${p.exact.length} you share` : "", (p.ecosystem || []).length ? `${p.ecosystem.length} close` : "",
+    // the gaps counted are the ones What to do lists (at least 10 % of their postings — the package's GAP_MIN_SHARE)
+    (p.gaps || []).filter(g => (g.share ?? (g.of ? g.postings / g.of : 0)) >= 0.1).length
+      ? `${(p.gaps || []).filter(g => (g.share ?? (g.of ? g.postings / g.of : 0)) >= 0.1).length} you don't show` : ""].filter(Boolean).join(" · ");
+  if (id === "role_fit") return ({ same_role: "the same role", also_fits: "a role your résumé also fits", same_family: "the same family, another role", other_family: "another family" })[p.relation] || "";
+  return "";
+}
+function contextualHtml(c) {
+  if (!c || typeof c.score !== "number") return "";
+  const parts = Object.keys(CTX_NAMES).map(id => [id, c.parts?.[id]]).filter(([, p]) => p && p.status === "ok" && typeof p.score === "number");
+  const s = c.similarities || {};
+  const fits = [
+    ["Skills you both have", (s.skills || []).slice(0, 6).join(" · ")],
+    ["Same purpose", (s.ecosystem || []).slice(0, 4).map(e => `you: ${e.yours} → they: ${e.theirs}`).join(" · ")],
+    ["Their stack, yours too", (s.stack || []).slice(0, 6).join(" · ")],
+    ["Both in", (s.domains || []).join(" · ")],
+    ["You've done", (s.responsibilities || []).slice(0, 3).map(r => `“${r}”`).join(" · ")],
+  ].filter(([, v]) => v);
+  const todo = [], notes = [];
+  for (const d of c.dissimilarities || []) {
+    if (d.kind === "stack_gap") todo.push(`They use ${d.tech}${typeof d.share === "number" ? ` (in ${Math.round(d.share * 100)}% of their postings)` : ""}`);
+    else if (d.kind === "responsibility") todo.push(`“${d.phrase}” — your résumé doesn't show it`);
+    else if (d.kind === "domain") notes.push(`They're in ${d.theirs}${(d.yours || []).length ? `; your experience is ${d.yours.join(", ")}` : " — your résumé doesn't name it"}. Not counted against you.`);
+  }
+  return `<section class="ctx" aria-label="In context">
+    <div class="ctx-nums"><div class="ctx-card"><div class="note">Skill match</div>${pctHtml(c.parts?.skill_match?.score)}</div>
+      <div class="ctx-card"><div class="note">In context</div>${pctHtml(c.score)}</div></div>
+    <div class="ctx-parts">${parts.map(([id, p]) => `<div class="ctx-card"><div class="ctx-row"><span>${esc(CTX_NAMES[id])}</span><span class="ats-num sm ${bandClass(p.score)}">${Math.round(p.score)}</span></div>
+      <div class="ctx-bar" aria-hidden="true"><i class="${bandClass(p.score)}" style="width:${Math.max(0, Math.min(100, p.score))}%"></i></div><div class="note">${esc(ctxWhy(id, p))}</div></div>`).join("")}</div>
+    ${fits.length ? `<h3>What fits</h3>${fits.map(([k, v]) => `<p class="ctx-line"><span class="note">${esc(k)}</span> · ${esc(v)}</p>`).join("")}` : ""}
+    ${todo.length || notes.length ? `<h3>What to do</h3>${todo.slice(0, 6).map(t => `<p class="ctx-card ctx-line">${esc(t)}</p>`).join("")}${notes.map(n => `<p class="note">${esc(n)}</p>`).join("")}` : ""}
+  </section>`;
 }
 const chips = (arr, miss) => (arr || []).slice(0, 24).map(t => `<span class="chip${miss ? " miss" : ""}">${esc(t?.term ?? t)}</span>`).join("");
 
@@ -74,14 +109,14 @@ $("#ats-form").addEventListener("submit", async (e) => {
   try {
     const r = await call("POST", "/tools/ats", {
       resumeText: f.resumeText.value,
-      job: { title: f.title.value, description: f.description.value },
+      job: { title: f.title.value, description: f.description.value, ...(f.company?.value.trim() ? { company: f.company.value.trim() } : {}) },
       store: f.store?.checked === true,
     });
-    const b = bandOf(r), rep = r.report || {};
+    const rep = r.report || {};
     const group = (title, list, miss) => (list && list.length ? `<h3>${title}</h3><div class="chips">${chips(list, miss)}</div>` : "");
     out.innerHTML = `
-      <span class="band ${b.cls}">${b.label}</span>
-      <p>${esc(b.blurb)}</p>
+      ${r.outcome === "scored" ? (contextualHtml(r.contextual) || `<p class="ats-head">${pctHtml(r.score)}</p>`)
+        : `<p class="ats-head"><strong>Not enough signal</strong> — the scorer declined: too few scorable terms. This is not a low score.</p>`}
       ${r.outcome === "scored" ? `
         ${group("Skills the posting asks for that your résumé shows", rep.tier1_matched)}
         ${group("Skills it asks for that your résumé does not show", rep.tier1_missing, true)}
