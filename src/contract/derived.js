@@ -8,7 +8,7 @@
 // any scenario below would be declared non-null. So every scenario exists to hit a VARIANT, and is
 // named for it; the envelope harness then checks real responses against the result, which is what
 // catches a variant these missed.
-import { scoreAtsLocally, buildRuntimeAtsBasis, scoreContextual } from "@draft/ats-scorer";
+import { scoreAtsLocally, buildRuntimeAtsBasis, scoreContextual, experienceEntries, checkPlausibility } from "@draft/ats-scorer";
 import { callAnthropic, countsAttempts, noteAttempt } from "../model/anthropicCall.js";
 import { checkResumeClaims } from "../integrity/resumeClaimGuard.js";
 import { infer } from "./schema.js";
@@ -77,6 +77,21 @@ export const CONTEXTUAL_SCENARIOS = {
   "the skill match declined": () => scoreContextual({ skillMatch: null, posting: { text: "Join us." }, resume: { text: "Python" } }),
 };
 
+// 1.11.0 (draft D192 (4d)): the plausibility results — every status (all confirmed · no data · flags) and every flag kind.
+const PLAUS_RESUME = [
+  "Experience", "Senior Engineer — Kestrel ML", "2019 – 2021", "- Trained models in PyTorch", "- Integrated Salesforce for the revenue team",
+  "- Designed a sales incentive compensation model", "- Shipped GPT-4 features", "Engineering Intern — Tiny Labs", "2017 – 2018",
+  "- Led a team of 12 engineers", "Engineer — Nobody Inc", "2022 – present", "- Built services in Go",
+].join("\n");
+const PLAUS_KESTREL = { name: "Kestrel ML", techStack: [{ name: "PyTorch", postingShare: 0.8 }, { name: "Python", postingShare: 0.9 }, { name: "Kubernetes", postingShare: 0.4 }],
+  families: { "data-ai": 20, "software-engineering": 12 }, industry: "machine learning", employees: 40 };
+export const PLAUSIBILITY_SCENARIOS = {
+  "every status and every flag kind": () => checkPlausibility({ entries: experienceEntries(PLAUS_RESUME), vocabulary: ["Salesforce"], asOf: 2026,
+    companyFor: (e) => (e.parts.includes("Kestrel ML") ? PLAUS_KESTREL : e.parts.includes("Tiny Labs") ? { name: "Tiny Labs", techStack: [], employees: 15 } : null) }),
+  "a clean résumé": () => checkPlausibility({ entries: experienceEntries(["Experience", "Engineer — Kestrel ML", "2020 – 2022", "- Trained models in PyTorch"].join("\n")),
+    companyFor: () => PLAUS_KESTREL, asOf: 2026 }),
+};
+
 /** Paths of arrays whose item type was never observed — a scenario gap, not a shape. */
 export function unknownItemPaths(schema, path = "$") {
   const out = [];
@@ -132,6 +147,7 @@ export async function deriveSchemas() {
   const usage = await usageSamples();
   const claims = claimResults();
   const ctx = Object.values(CONTEXTUAL_SCENARIOS).map(f => f());
+  const plaus = Object.values(PLAUSIBILITY_SCENARIOS).flatMap(f => f());
   const note = (source, n) => `DERIVED BY EXECUTING ${source} over ${n} scenarios. Do not hand-edit — ` +
     `regenerate with \`node scripts/generateContract.mjs\`.`;
   return {
@@ -143,6 +159,8 @@ export async function deriveSchemas() {
       " `claimed`/`allowed` are numbers for a years violation and strings for a seniority one." },
     ClaimInspection: { ...infer(claims.map(r => r.checked.inspected)), description: note("the claim guard", claims.length) +
       " What the guard READ. documentChars > 0 on every returned document: the guard refuses to pass one it did not read." },
+    PlausibilityResult: { ...infer(plaus), description: note("@draft/ats-scorer checkPlausibility", plaus.length) +
+      " One per experience entry. status: all_confirmed · no_data (the employer has no record — never flagged on tech or domain) · flags. A flag is a warning; no score reads it." },
     ContextualBlock: { ...infer(ctx), description: note("@draft/ats-scorer scoreContextual", ctx.length) +
       " ATS contract 2.0.0. score is null when the skill match declined. A part without data has score null, status no_data and weight 0;" +
       " the other parts' weights are rescaled to sum to 1. A dissimilarity with penalty false (a different industry) never lowers the score." },

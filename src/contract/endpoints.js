@@ -40,7 +40,10 @@ const capped = (maxLength, description) => ({ type: "string", maxLength, descrip
 // beside it, the contextual score (role fit, responsibility overlap, tech-stack compatibility; no model). The caller sends what it
 // knows (posting / resume placements, company.techStack, company.industry); with no company.techStack the service looks the
 // company up on draft's public company-stack endpoint (24 h in memory). POST /v1/ats/score is unchanged. No 1.9.0 shape changed.
-export const CONTRACT_VERSION = "1.10.0";
+// 1.11.0 (draft's WORKLOG D192 (4d)): additive — AtsScoreV2Response.plausibility { version, entries: PlausibilityResult[] }: each
+// experience entry's bullets checked against what is known about its employer (tech · domain · role · timeline). Warnings only;
+// neither score reads them. No 1.10.0 shape changed.
+export const CONTRACT_VERSION = "1.11.0";
 
 const usage = arr(ref("UsageRecord"));
 
@@ -166,8 +169,10 @@ export const DECLARED_SCHEMAS = {
     { optional: ["signalProfile", "domainProfile", "claims", "termWeights", "synonyms", "posting", "resume", "company", "weights"],
       description: "1.10.0 · AtsScoreRequest plus the context. The report is computed exactly as on /v1/ats/score." }),
   AtsScoreV2Response: obj({ contract: enumOf("2.0.0"), report: ref("AtsReport"), contextual: ref("ContextualBlock"),
-    company: obj({ source: enumOf("request", "lookup", "none") }) },
-    { description: "1.10.0 · report is the v1 report, field for field. contextual sits beside it and never changes it." }),
+    company: obj({ source: enumOf("request", "lookup", "none") }),
+    plausibility: obj({ version: str, entries: arr(ref("PlausibilityResult")) }) },
+    { optional: ["plausibility"], description: "1.10.0 · report is the v1 report, field for field. contextual sits beside it and never changes it. " +
+      "1.11.0 · plausibility: each experience entry's bullets against what is known about its employer — warnings, never in a score." }),
 
   // ── MCP (E1) ────────────────────────────────────────────────────────────────────────────────────
   // A tool result's structuredContent. It WRAPS the HTTP shape (`report` is the same AtsReport,

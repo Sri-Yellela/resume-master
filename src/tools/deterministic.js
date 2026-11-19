@@ -7,7 +7,8 @@
 //
 // ⛔ NOTHING HERE CAN REACH A MODEL. No import below leads to src/model/ or src/generation/;
 // test/mcp.test.js walks this file's import graph and fails if one ever does.
-import { scoreAtsLocally, buildRuntimeAtsBasis, scoreContextual, resolveContextualWeights, CONTEXTUAL_CONTRACT } from "@draft/ats-scorer";
+import { scoreAtsLocally, buildRuntimeAtsBasis, scoreContextual, resolveContextualWeights, CONTEXTUAL_CONTRACT,
+  experienceEntries, checkPlausibility, PLAUSIBILITY_VERSION } from "@draft/ats-scorer";
 import { normalizeResumeHtml } from "../formatting/resumeFormatter.js";
 import { InvalidRequestError } from "../errors.js";
 
@@ -74,7 +75,8 @@ const placementOf = (p, name) => {
   return out;
 };
 
-/** AtsScoreV2Request -> { contract, report, contextual, company }. `lookupCompany` = createCompanyLookup(), or null. */
+export const PLAUS_ENTRIES = 6;
+/** AtsScoreV2Request -> { contract, report, contextual, company, plausibility }. `lookupCompany` = createCompanyLookup(), or null. */
 export async function scoreAtsV2(body, { lookupCompany = null } = {}) {
   const { report } = scoreAts(body);
   const b = body || {};
@@ -97,7 +99,20 @@ export async function scoreAtsV2(body, { lookupCompany = null } = {}) {
     else if (typeof b.company?.industry === "string") { company = { industry: b.company.industry, techStack: [] }; source = "request"; }
   } else if (typeof b.company?.industry === "string") { company = { industry: b.company.industry, techStack: [] }; source = "request"; }
   const contextual = scoreContextual({ skillMatch: report.score, skillsBoth: report.tier1_matched || [], posting, resume, company, weights });
-  return { contract: CONTEXTUAL_CONTRACT, report, contextual, company: { source } };
+  // draft D192 (4d) · does the résumé add up — each experience entry's employer looked up (the same 24 h lookup), the bullets
+  // checked against it. Warnings only: neither score above reads them. No lookup configured → tech / domain read "no data".
+  const entries = experienceEntries(b.resumeText).slice(0, PLAUS_ENTRIES);
+  const known = new Map();
+  if (lookupCompany) {
+    for (const e of entries) for (const part of (e.parts || []).slice(0, 2)) {
+      if (known.has(part)) continue;
+      const hit = await lookupCompany(part);
+      known.set(part, hit?.matched ? { name: hit.name || part, techStack: hit.techStack, industry: hit.industry, families: hit.families || {}, employees: hit.employees ?? null } : null);
+    }
+  }
+  const plausibility = { version: PLAUSIBILITY_VERSION,
+    entries: checkPlausibility({ entries, companyFor: (e) => (e.parts || []).map(p => known.get(p)).find(Boolean) || null }) };
+  return { contract: CONTEXTUAL_CONTRACT, report, contextual, company: { source }, plausibility };
 }
 
 /** FormatRequest -> { html }. */

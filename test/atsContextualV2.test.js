@@ -62,6 +62,24 @@ test("d192RmCaches24h — one lookup per company per day, in memory; a failure i
   assert.doesNotMatch(src.replace(/^\s*\/\/.*$/gm, ""), /writeFile|node:fs|better-sqlite3|anthropic/, "memory only, no model");
 });
 
+test("d192RmPlausibility — standing alone, each employer is looked up and the bullets checked; flags never touch the scores", async () => {
+  const calls = [];
+  const ml = { matched: true, name: "Kestrel ML", industry: "machine learning", techStack: [{ name: "PyTorch", postingShare: 0.8 }, { name: "Python", postingShare: 0.9 }, { name: "Kubernetes", postingShare: 0.4 }],
+    families: { "data-ai": 20, "software-engineering": 12 }, employees: 40 };
+  const lookupCompany = createCompanyLookup({ fetchImpl: async (url) => { calls.push(url); return { ok: true, json: async () => (/Kestrel/.test(decodeURIComponent(url)) ? ml : { matched: false }) }; } });
+  const resumeText = "Experience\nML Engineer — Kestrel ML\n2019 – 2021\n- Trained models in PyTorch\n- Designed a sales incentive compensation model for the field team\nSkills: PyTorch";
+  const job = { title: "ML Engineer", company: "Acme", description: "What you'll do\n- Train models in PyTorch and Python on Kubernetes" };
+  const r = await scoreAtsV2({ job, resumeText }, { lookupCompany });
+  const e = r.plausibility.entries[0];
+  assert.equal(e.employer, "Kestrel ML");
+  assert.deepEqual(e.confirmed.map(c => c.tech), ["PyTorch"]);
+  assert.ok(e.flags.some(f => f.kind === "domain"), "the owner's example: a sales-incentive bullet at an ML company");
+  const v1 = scoreAts({ job, resumeText });
+  assert.deepEqual(r.report, v1.report, "the skill match is unchanged");
+  const site = fs.readFileSync(path.join(import.meta.dirname, "..", "public", "site.js"), "utf8");
+  assert.ok(site.includes("atsCardHtml(rep, r.contextual) + plausibilityHtml(r.plausibility)"));
+});
+
 test("a failed lookup is no data, never an error", async () => {
   const lookupCompany = createCompanyLookup({ fetchImpl: async () => ({ ok: false, status: 503 }) });
   const r = await scoreAtsV2({ job: JOB, resumeText: RESUME }, { lookupCompany });
@@ -75,7 +93,8 @@ test("the lookup is on in production (or with RM_COMPANY_STACK_URL), off in test
   assert.match(app, /: env\.RAILWAY_ENVIRONMENT_NAME === "production" \? createCompanyLookup\(\{ log \}\) : null;/);
   assert.match(app, /siteRoutes\(\{ store, anthropic, env, metering, lookupCompany, \.\.\.siteOptions \}\)/);
   const site = fs.readFileSync(path.join(import.meta.dirname, "..", "src", "http", "siteRoutes.js"), "utf8").replace(/\r\n/g, "\n");
-  assert.match(site, /const v2 = await scoreAtsV2\(req\.body, \{ lookupCompany \}\);\n\s+const out = \{ \.\.\.atsOutcome\(v2\.report\), contextual: v2\.contextual \};/);
+  // + plausibility (draft D192 (4d), 46x)
+  assert.match(site, /const v2 = await scoreAtsV2\(req\.body, \{ lookupCompany \}\);\n\s+const out = \{ \.\.\.atsOutcome\(v2\.report\), contextual: v2\.contextual, plausibility: v2\.plausibility \};/);
 });
 
 test("the site's ATS check is the ATS card (owner 11-19, option C): no band word, no term lists", () => {

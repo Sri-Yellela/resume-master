@@ -74,6 +74,15 @@ function cardLines(rep, c) {
   else if ((work?.missing || []).length) gain = `Show “${shortTxt(work.missing[0])}” on your résumé`;
   return { parts: parts.filter(([, s]) => typeof s === "number"), gain };
 }
+// draft D192 (4d) · does the résumé add up: a quiet ⚠ per bullet that doesn't line up with what is known about its employer,
+// its one-line reason. Warnings only — the number above never reads them. Nothing to say → nothing drawn.
+function plausibilityHtml(p) {
+  const flags = (p?.entries || []).flatMap(e => (e.flags || []).map(f => ({ ...f, employer: e.employer })));
+  if (!flags.length) return "";
+  return `<section class="plaus" aria-label="Does your résumé add up?"><p class="plaus-head">Does your résumé add up? <span class="note">· ${flags.length} to check</span></p>
+    ${flags.map(f => `<div class="plaus-row"><span class="plaus-mark" aria-hidden="true">⚠</span><span><span>${esc(f.reason)}</span>
+      <span class="note">${esc(f.employer)} · “${esc(shortTxt(f.bullet, 90))}”</span></span></div>`).join("")}</section>`;
+}
 function atsCardHtml(rep, c) {
   const score = typeof c?.score === "number" ? c.score : rep.score;
   const { parts, gain } = cardLines(rep, c);
@@ -134,7 +143,7 @@ $("#ats-form").addEventListener("submit", async (e) => {
     });
     const rep = r.report || {};
     out.innerHTML = `
-      ${r.outcome === "scored" ? atsCardHtml(rep, r.contextual)
+      ${r.outcome === "scored" ? atsCardHtml(rep, r.contextual) + plausibilityHtml(r.plausibility)
         : `<p class="ats-head"><strong>Not enough signal</strong> — the scorer declined: too few scorable terms. This is not a low score.</p>
           <p class="note">Why: ${esc((rep.decline_reasons || []).join("; ") || "too few scorable terms")}. Paste the FULL job description, or a fuller résumé.</p>`}
       ${savedNote(r.saved)}`;

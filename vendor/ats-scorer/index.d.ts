@@ -162,3 +162,18 @@ export function responsibilityOverlap(postingText: string, resumeText: string): 
 export function techStackFit(company: CompanyContext | null, resumeTech?: string[]): Omit<ContextualPartResult, "weight">;
 export function ecosystemOf(tech: string): string | null;
 export function domainsIn(text: string): { domain: string; terms: string[] }[];
+
+// ── D192 (4d) · claim plausibility ────────────────────────────────────────────────────────────────────────────────
+export const PLAUSIBILITY_VERSION: string;
+export interface ExperienceEntry { header: string; parts: string[]; title: string | null; start: number | null; end: number | null; ongoing: boolean; bullets: string[] }
+export interface PlausibilityCompany {
+  name?: string; stack?: { tech: string; postings: number }[]; techStack?: { name: string; postingShare: number }[]; ofPostings?: number;
+  families?: Record<string, number>; classified?: number; industry?: string | null; employees?: number | null;
+}
+export interface PlausibilityFlag { kind: "tech" | "domain" | "role" | "timeline"; bullet: string; tech?: string; key: string; reason: string }
+export interface PlausibilityResult {
+  employer: string; header: string; start: number | null; end: number | null; known: boolean;
+  status: "all_confirmed" | "no_data" | "flags"; confirmed: { tech: string; evidence: string }[]; flags: PlausibilityFlag[];
+}
+export function experienceEntries(text: string): ExperienceEntry[];
+export function checkPlausibility(args: { entries: ExperienceEntry[]; companyFor: (e: ExperienceEntry) => PlausibilityCompany | null; vocabulary?: string[]; asOf?: number | Date }): PlausibilityResult[];

@@ -207,6 +207,12 @@ textarea { min-height: 160px; resize: vertical; }
 .atsc-mid { display: flex; flex-direction: column; gap: 5px; min-width: 0; } .atsc-mid .ctx-bar { margin: 0; }
 .atsc-row .ats-num.sm { text-align: right; }
 .atsc-gain { margin: 0; border-top: 1px solid var(--glass-edge); padding-top: 12px; }
+/* draft D192 (4d): does the résumé add up — a quiet ⚠ per bullet, its reason */
+.plaus { display: flex; flex-direction: column; gap: 8px; margin: 0 0 14px; border-top: 1px solid var(--glass-edge); padding-top: 12px; }
+.plaus-head { margin: 0; }
+.plaus-row { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; font-size: var(--t-sm); }
+.plaus-row > span:last-child { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.plaus-mark { color: var(--warn); }
 .chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 10px; }
 .chip { font-size: var(--t-xs); padding: 2px 8px; border-radius: 999px; background: var(--glass-strong); }
 .chip.miss { color: var(--bad); }

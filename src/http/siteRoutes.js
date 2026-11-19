@@ -250,7 +250,7 @@ export function siteRoutes({ store, anthropic = null, env = process.env, meterin
   r.post("/tools/ats", limited, writeGuard, small, async (req, res, next) => {
     try {
       const v2 = await scoreAtsV2(req.body, { lookupCompany });
-      const out = { ...atsOutcome(v2.report), contextual: v2.contextual };
+      const out = { ...atsOutcome(v2.report), contextual: v2.contextual, plausibility: v2.plausibility };   // draft D192 (4d)
       metering?.record(req.user ? "site-user" : "site-anon", "ats.score", [], { via: "site" });
       res.json({ ...out, saved: keep(req, "ats_report", req.body?.job?.title, out) });
     } catch (e) { next(e); }

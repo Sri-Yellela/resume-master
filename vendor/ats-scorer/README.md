@@ -106,3 +106,19 @@ Weights come from the caller (`resolveContextualWeights` refuses unknown parts a
 a `kind`, a `penalty` flag and an `action` where one exists (`learn` for a stack gap, `evidence` for a responsibility).
 
 **1.5.1 (46x, the owner's display pick):** what the block LISTS is tidier. Its numbers do not change. A stack gap is listed only from 10 % of their postings (`GAP_MIN_SHARE`), so a payments company's Excel at 5 % is not advice. Every gap still costs in `parts.tech_stack` at its own share. A same-purpose pair is not listed when your side already matches exactly. A responsibility phrase is the line cut on a word at 90 characters (`PHRASE_CHARS`).
+
+## Claim plausibility (1.6.0, D192 (4d))
+
+`experienceEntries(text)` reads the résumé's experience entries: header, title, dates and bullets.
+`checkPlausibility({ entries, companyFor, vocabulary, asOf })` checks each entry's bullets against what the caller knows
+about that employer. Four checks:
+- **tech:** confirmed when the employer's own postings name the technology. Unlikely only when its stack is known (at
+  least 3 technologies) and neither the technology nor anything of the same purpose is in it.
+- **domain:** sales incentives, payroll, patient care and similar work are unlikely when the employer has at least 10
+  classified postings and none in a family that does that work.
+- **role:** leading 5 or more people as an intern or junior, or at a company with fewer than twice that many people.
+- **timeline:** a technology named in a role that ended before it first existed (`TECH_FIRST_YEAR`).
+
+An employer with no record is never flagged on tech or domain. A flag is a warning and never changes a score: no scorer
+reads this module. Each flag carries a stable `key`, so a dismissal survives a re-score. The module is pure: no model,
+no network, no database.

@@ -34,9 +34,12 @@ export function createCompanyLookup({ url = DEFAULT_STACK_URL, fetchImpl = globa
       if (res.ok) {
         const body = await res.json();
         value = body && body.matched === true && Array.isArray(body.techStack)
-          ? { matched: true, industry: typeof body.industry === "string" ? body.industry : null,
+          ? { matched: true, name: typeof body.name === "string" ? body.name : String(name), industry: typeof body.industry === "string" ? body.industry : null,
               techStack: body.techStack.filter(t => t && typeof t.name === "string" && typeof t.postingShare === "number")
-                .map(t => ({ name: t.name, category: typeof t.category === "string" ? t.category : null, postingShare: t.postingShare })) }
+                .map(t => ({ name: t.name, category: typeof t.category === "string" ? t.category : null, postingShare: t.postingShare })),
+              // D192 (4d): the kinds of roles it posts and its size, for the plausibility check (public facts)
+              families: body.families && typeof body.families === "object" ? Object.fromEntries(Object.entries(body.families).filter(([, n]) => Number.isFinite(n))) : {},
+              employees: Number.isFinite(body.employees) ? body.employees : null }
           : { matched: false, industry: null, techStack: [] };
       } else log({ event: "company_lookup_failed", status: res.status });
     } catch (e) { log({ event: "company_lookup_failed", error: e.name === "AbortError" ? "timeout" : e.message }); }
