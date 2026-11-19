@@ -1,10 +1,10 @@
 {
-  "contractVersion": "1.9.0",
-  "shapeHash": "7b403d6cdad719b67e8fb7d05d40dc2423f63f2fb8d14499f7ae91efeecb59e4",
+  "contractVersion": "1.10.0",
+  "shapeHash": "503455ddd8c30e2c6d2f59255a444aa1014bcf26b4cd9c71ef9303c3ab0d2f88",
   "algorithm": "sha256 over LF-normalised UTF-8",
   "note": "LF-normalised on purpose: checkouts differ in line endings, and a raw-byte hash would fail spuriously.",
   "files": {
-    "resume-master-api.v1.json": "5b24b520ab8bfa82b70931886f3390f666625820bf14652e443883d9264e61a8",
-    "resume-master-api.v1.d.ts": "1cdd1cd05a5619d4012e3297dfe3fdd7f35a5d9c6f0933a46fbd778f12118ec4"
+    "resume-master-api.v1.json": "7321bca9c49c8c70bc972faef80f10c8e7d933f2461b0fd59dc6c5775ccf5663",
+    "resume-master-api.v1.d.ts": "ec96e0abf6fcb89e4090132c7dac0f4c016c10d366c87f1901bae4997019d709"
   }
 }

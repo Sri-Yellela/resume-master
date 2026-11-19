@@ -711,6 +711,32 @@ function jobSkillTerms(job) {
 }
 
 /**
+ * ⭐ D170 (3) · THE TERMS THIS POSTING IS SCORED AGAINST, as normalised keys — the extraction scoreAtsLocally runs
+ * (candidateTermsFromJob with no candidate: the posting's own skills_json, the company's stack and the registry
+ * vocabulary found in its text, capped as the report caps them). A document frequency counted over THESE is a
+ * frequency over the terms the scorer actually weighs (weightedRatio looks weights up by normaliseAtsTerm).
+ *
+ * ⛔ Why it exists: services/atsTermWeights.js counted df over skills_json ALONE, which only the retired feeds and
+ * the offline enrichment imports ever filled — so as those postings aged out, the corpus shrank (production 11-06:
+ * a rebuild of 1666 rows would have written 362, and was refused) while the scorer kept reading every posting's
+ * description. Same text fields, same order, as scoreAtsLocally's jobText.
+ */
+export function postingTermKeys(job = {}) {
+  const jobText = [job.title, job.company, job.category, job.description, job.requirements, job.skills]
+    .filter(v => typeof v === "string" && v).join("\n");
+  const { skills, competencies } = candidateTermsFromJob(jobText, { skills: [] }, {
+    company: job.company || "",
+    jobSkills: jobSkillTerms(job),
+  });
+  const keys = new Set();
+  for (const term of [...skills, ...competencies]) {
+    const key = normaliseAtsTerm(term);
+    if (key) keys.add(key);
+  }
+  return keys;
+}
+
+/**
  * How far apart the words of a multi-word term may sit and still count as that term.
  *
  * A phrase match is the honest case ("distributed systems" really appears). The slack exists only so

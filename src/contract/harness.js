@@ -120,6 +120,23 @@ export const SCENARIOS = [
     raw: "{\"not json", status: 429 },
   { name: "ats: oversize", route: "POST /v1/ats/score", raw: JSON.stringify({ resumeText: OVERSIZE }), status: 413 },
 
+  // v2 ats/score — ATS contract 2.0.0 (1.10.0)
+  { name: "ats v2: the caller sends the stack — no lookup, the v1 report beside the block", route: "POST /v2/ats/score", status: 200, live: true,
+    body: { job: ATS_JOB, resumeText: "Python Kubernetes Kafka engineer", posting: { category: "software-engineering", subcategory: "swe.backend", level: "mid" },
+      resume: { category: "software-engineering", subcategory: "swe.backend", level: "mid" },
+      company: { industry: "fintech", techStack: [{ name: "Apache Kafka", category: "data", postingShare: 0.5 }, { name: "Terraform", postingShare: 0.2 }] } },
+    expect: b => (b.contract === "2.0.0" && b.company.source === "request" && b.contextual.parts.tech_stack.status === "ok" &&
+      typeof b.report.score === "number") || "expected a scored v2 answer from the request's own stack" },
+  { name: "ats v2: an empty stack is no data, not a lookup", route: "POST /v2/ats/score", status: 200, live: true,
+    body: { job: ATS_JOB, resumeText: "Python Kubernetes", company: { techStack: [] } },
+    expect: b => (b.contextual.parts.tech_stack.status === "no_data" && b.company.source === "request") || "an empty stack must not be looked up" },
+  { name: "ats v2: unknown weights are refused", route: "POST /v2/ats/score", status: 400, live: true,
+    body: { job: ATS_JOB, resumeText: "x", weights: { vibes: 1 } } },
+  { name: "ats v2: no token", route: "POST /v2/ats/score", auth: "none", body: {}, status: 401, live: true },
+  { name: "ats v2: no clients configured", route: "POST /v2/ats/score", service: "no-clients", body: {}, status: 503 },
+  { name: "ats v2: the free daily cap is reached", route: "POST /v2/ats/score", service: "refuse-free", raw: "{\"not json", status: 429 },
+  { name: "ats v2: oversize", route: "POST /v2/ats/score", raw: JSON.stringify({ resumeText: OVERSIZE }), status: 413 },
+
   // generate — metered
   { name: "generate: honest document", route: "POST /v1/resumes/generate", body: GENERATE, model: honestHtml(4), status: 200,
     expect: b => b.claimCheck.inspected.documentChars > 0 || "the guard read nothing" },

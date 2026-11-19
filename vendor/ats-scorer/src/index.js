@@ -4,3 +4,5 @@ export * from "./scorer.js";
 export * from "./vocabulary.js";
 // A81 — years and a stated clearance read from résumé text (opt-in via buildRuntimeAtsBasis factsFromText).
 export { yearsFromResumeText, clearanceFromResumeText } from "./textFacts.js";
+// D192 (4) — the contextual score (ATS contract 2.0.0): role fit, responsibility overlap, tech-stack compatibility.
+export * from "./contextual.js";

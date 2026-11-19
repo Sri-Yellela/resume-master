@@ -85,3 +85,22 @@ had. Measured: 0 of 1,284 computing / engineering reports changed in any field; 
   those tests re-hashes every file against `CHECKSUMS.json` (LF-normalised). So a hand-edit to a
   vendored copy fails, and so does an edit here without `npm run checksums`. Change it in draft,
   regenerate, and copy it across.
+
+## The contextual score (1.5.0, D192 (4) — ATS contract 2.0.0)
+
+`scoreContextual({ skillMatch, skillsBoth, posting, resume, company, weights })` (`src/contextual.js`) adds a second
+number beside the skill match. **It never changes `scoreAtsLocally`'s report.** It is pure: no model, no embedding, no
+network, no database. Every input is an argument. The caller reads its own placements and the company's stack and
+passes them in.
+
+| part | default weight | what it reads |
+|---|---|---|
+| `skill_match` | 0.50 | the report's `score`, unchanged |
+| `role_fit` | 0.20 | the posting's subcategory and level vs the résumé's placement. Same role = 100, the role the résumé also fits = 85, same family = 65, another family = 20. The level gap then costs 10 / 25 / 40 for 1 / 2 / 3 steps short, and half that over-levelled. A shared industry adds 10; a different one is listed, never a penalty |
+| `responsibility_overlap` | 0.15 | the posting's responsibility lines (the *What you'll do* section, else its bullets) as short phrases. A phrase counts when one résumé line has at least 2 and at least half of its core tokens |
+| `tech_stack` | 0.15 | `company.techStack [{ name, category, postingShare }]`, each item weighted by its share of the company's postings. An exact match earns it, a same-purpose match (`ECOSYSTEMS`: Airflow ↔ Prefect) earns half, a gap earns nothing. The résumé's extras are neutral |
+
+A part with no data (no placement, no responsibility lines, no stack) is left out, and the other weights are rescaled.
+Weights come from the caller (`resolveContextualWeights` refuses unknown parts and negatives). The block also lists
+**similarities** (skills, stack, ecosystem pairs, domains, role, responsibilities) and **dissimilarities**, each with
+a `kind`, a `penalty` flag and an `action` where one exists (`learn` for a stack gap, `evidence` for a responsibility).

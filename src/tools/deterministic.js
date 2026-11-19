@@ -7,7 +7,7 @@
 //
 // ⛔ NOTHING HERE CAN REACH A MODEL. No import below leads to src/model/ or src/generation/;
 // test/mcp.test.js walks this file's import graph and fails if one ever does.
-import { scoreAtsLocally, buildRuntimeAtsBasis } from "@draft/ats-scorer";
+import { scoreAtsLocally, buildRuntimeAtsBasis, scoreContextual, resolveContextualWeights, CONTEXTUAL_CONTRACT } from "@draft/ats-scorer";
 import { normalizeResumeHtml } from "../formatting/resumeFormatter.js";
 import { InvalidRequestError } from "../errors.js";
 
@@ -43,6 +43,61 @@ export function scoreAts(body) {
     if (e instanceof TypeError && /termWeights|synonyms/.test(e.message)) throw new InvalidRequestError(e.message);
     throw e;
   }
+}
+
+// ── ATS contract 2.0.0 (draft's WORKLOG D192): the v1 report UNCHANGED, plus the contextual score beside it ──────────
+// POST /v1/ats/score keeps answering exactly as before; POST /v2/ats/score answers { contract, report, contextual, company }.
+// The caller sends what it knows: posting / resume placements (category, subcategory, level), company.techStack and
+// company.industry. draft always sends them. When company.techStack is ABSENT (a caller with no data of its own, or this
+// site), the company's name — company.name, job.company, or read from the posting — is looked up (src/tools/companyLookup.js).
+// An EMPTY array means "the caller knows of none": no lookup, tech_stack is no_data.
+
+/** "… at Kestrel Payments, we …" / "About Kestrel Payments" → the name. A guess for the lookup only; null when unsure. */
+export function companyNameFromPosting(text) {
+  const t = String(text || "");
+  const about = /^\s*About\s+([A-Z][A-Za-z0-9&.'\-]*(?:\s+[A-Z][A-Za-z0-9&.'\-]*){0,3})\s*:?\s*$/m.exec(t);
+  if (about && !/^(the|us|you|this)$/i.test(about[1])) return about[1].trim();
+  const at = /\b(?:[Aa]t|[Jj]oin)\s+([A-Z][A-Za-z0-9&.'\-]+(?:\s+[A-Z][A-Za-z0-9&.'\-]+){0,3})(?=[,.!]|\s+(?:we|is|are|you)\b)/.exec(t);
+  return at ? at[1].trim() : null;
+}
+
+const NL = String.fromCharCode(10);
+const placementOf = (p, name) => {
+  if (p == null) return {};
+  if (typeof p !== "object" || Array.isArray(p)) throw new InvalidRequestError(`${name} must be an object`);
+  const out = {};
+  for (const k of ["category", "subcategory", "level"]) {
+    if (p[k] != null && typeof p[k] !== "string") throw new InvalidRequestError(`${name}.${k} must be a string`);
+    if (p[k]) out[k] = p[k];
+  }
+  if (p.also?.subcategory && typeof p.also.subcategory === "string") out.also = { subcategory: p.also.subcategory };
+  return out;
+};
+
+/** AtsScoreV2Request -> { contract, report, contextual, company }. `lookupCompany` = createCompanyLookup(), or null. */
+export async function scoreAtsV2(body, { lookupCompany = null } = {}) {
+  const { report } = scoreAts(body);
+  const b = body || {};
+  let weights = null;
+  try { weights = b.weights == null ? null : resolveContextualWeights(b.weights); }
+  catch (e) { throw new InvalidRequestError(e.message); }
+  const posting = { ...placementOf(b.posting, "posting"), text: [b.job.title, b.job.description, b.job.requirements].filter(x => typeof x === "string").join(NL) };
+  const resume = { ...placementOf(b.resume, "resume"), text: b.resumeText };
+  if (b.company != null && (typeof b.company !== "object" || Array.isArray(b.company))) throw new InvalidRequestError("company must be an object");
+  if (b.company?.techStack != null && !Array.isArray(b.company.techStack)) throw new InvalidRequestError("company.techStack must be an array");
+  let company = null, source = "none";
+  if (Array.isArray(b.company?.techStack)) {
+    company = { industry: typeof b.company.industry === "string" ? b.company.industry : null,
+      techStack: b.company.techStack.filter(t => t && typeof t.name === "string" && typeof t.postingShare === "number") };
+    source = "request";
+  } else if (lookupCompany) {
+    const name = b.company?.name || b.job.company || companyNameFromPosting(b.job.description);
+    const found = name ? await lookupCompany(name) : null;
+    if (found?.matched) { company = { industry: found.industry, techStack: found.techStack }; source = "lookup"; }
+    else if (typeof b.company?.industry === "string") { company = { industry: b.company.industry, techStack: [] }; source = "request"; }
+  } else if (typeof b.company?.industry === "string") { company = { industry: b.company.industry, techStack: [] }; source = "request"; }
+  const contextual = scoreContextual({ skillMatch: report.score, skillsBoth: report.tier1_matched || [], posting, resume, company, weights });
+  return { contract: CONTEXTUAL_CONTRACT, report, contextual, company: { source } };
 }
 
 /** FormatRequest -> { html }. */

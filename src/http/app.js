@@ -15,7 +15,8 @@ import { isStaging } from "../stagingGuard.js";   // ⛔ draft A188
 import { generateResume, generateGists, InvalidRequestError } from "../generation/generate.js";
 import { enhanceResume } from "../generation/enhance.js";
 import { extractPdfText } from "../parsing/extractPdfText.js";
-import { scoreAts, formatResume } from "../tools/deterministic.js";
+import { scoreAts, scoreAtsV2, formatResume } from "../tools/deterministic.js";
+import { createCompanyLookup } from "../tools/companyLookup.js";
 import { requireClient, mcpCaller } from "./auth.js";
 import { createMetering } from "./metering.js";
 import { mcpHandlers } from "../mcp/server.js";
@@ -55,7 +56,7 @@ export const SERVICE = "resume-master";
  */
 export function createApp({ anthropic = null, version = {}, log = defaultLog, env = process.env,
                             clients = null, metering = createMetering({ log }), store = null,
-                            anonymous = null, siteOptions = {} } = {}) {
+                            anonymous = null, siteOptions = {}, companyLookup = undefined } = {}) {
   const app = express();
   app.disable("x-powered-by");
   // ⛔ draft A188: a staging copy is never indexed beside the live service.
@@ -122,6 +123,13 @@ export function createApp({ anthropic = null, version = {}, log = defaultLog, en
 
   app.post("/v1/ats/score", client, freeCap("ats.score"), json, (req, res, next) => {
     try { res.json(scoreAts(req.body)); } catch (e) { next(e); }
+  });
+  // ATS contract 2.0.0 (draft D192): the v1 report unchanged, the contextual score beside it. v1 above keeps being served.
+  // The company lookup runs only when the request carries no company.techStack (RM_COMPANY_STACK_URL; "off" disables it).
+  const lookupCompany = companyLookup !== undefined ? companyLookup
+    : (env.RM_COMPANY_STACK_URL === "off" ? null : createCompanyLookup({ url: env.RM_COMPANY_STACK_URL || undefined, log }));
+  app.post("/v2/ats/score", client, freeCap("ats.score"), json, async (req, res, next) => {
+    try { res.json(await scoreAtsV2(req.body, { lookupCompany })); } catch (e) { next(e); }
   });
 
   // ── MCP (E1): the deterministic tools as LLM tools, in the same service ─────────────────────────

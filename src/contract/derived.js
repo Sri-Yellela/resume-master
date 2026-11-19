@@ -8,7 +8,7 @@
 // any scenario below would be declared non-null. So every scenario exists to hit a VARIANT, and is
 // named for it; the envelope harness then checks real responses against the result, which is what
 // catches a variant these missed.
-import { scoreAtsLocally, buildRuntimeAtsBasis } from "@draft/ats-scorer";
+import { scoreAtsLocally, buildRuntimeAtsBasis, scoreContextual } from "@draft/ats-scorer";
 import { callAnthropic, countsAttempts, noteAttempt } from "../model/anthropicCall.js";
 import { checkResumeClaims } from "../integrity/resumeClaimGuard.js";
 import { infer } from "./schema.js";
@@ -58,6 +58,23 @@ export const ATS_SCENARIOS = {
     runtimeBasis: buildRuntimeAtsBasis({ resumeText: "Designed and built Python services. Deployed on AWS. Strong collaboration.",
       signalProfile: { skills: ["Python"], titles: [], keywords: [], yearsExperience: 4, structuredFacts: {} },
       domainProfile: { seniority: "mid", selected_verbs: JSON.stringify(["Designed", "Built", "Deployed"]) } }) }),
+};
+
+// ATS contract 2.0.0 (draft D192): the contextual block's variants — every part scored; every part without data; a declined
+// skill match; and one whose lists are all non-empty (each item type observed).
+const CTX_POSTING = "Senior Backend Engineer\nWhat you'll do\n- Build payment infrastructure for merchants\n- Lead a team of 5 engineers\n- Own on-call for the ledger service";
+const CTX_RESUME = "Experience\n- Built payment infrastructure for merchants in fintech on Kafka\n- Ran on-call for the ledger service\nSkills: Airflow, Kafka";
+const CTX_COMPANY = { industry: "healthcare", techStack: [{ name: "Apache Kafka", category: "data", postingShare: 0.6 },
+  { name: "Prefect", category: "data", postingShare: 0.3 }, { name: "Terraform", category: "devops", postingShare: 0.4 }] };
+export const CONTEXTUAL_SCENARIOS = {
+  "every part scored, every list filled": () => scoreContextual({ skillMatch: 74, skillsBoth: ["kafka"],
+    posting: { category: "software-engineering", subcategory: "swe.backend", level: "senior", text: CTX_POSTING + " PCI fintech" },
+    resume: { category: "software-engineering", subcategory: "swe.backend", level: "senior", text: CTX_RESUME }, company: CTX_COMPANY }),
+  "another family, a level short": () => scoreContextual({ skillMatch: 50,
+    posting: { category: "software-engineering", subcategory: "swe.backend", level: "senior", text: CTX_POSTING },
+    resume: { category: "data", subcategory: "data.analyst", level: "mid", text: CTX_RESUME }, company: CTX_COMPANY }),
+  "no data for any part but the skill match": () => scoreContextual({ skillMatch: 61, posting: { text: "Join us." }, resume: { text: "Python" } }),
+  "the skill match declined": () => scoreContextual({ skillMatch: null, posting: { text: "Join us." }, resume: { text: "Python" } }),
 };
 
 /** Paths of arrays whose item type was never observed — a scenario gap, not a shape. */
@@ -114,6 +131,7 @@ export async function deriveSchemas() {
   const ats = Object.values(ATS_SCENARIOS).map(f => f());
   const usage = await usageSamples();
   const claims = claimResults();
+  const ctx = Object.values(CONTEXTUAL_SCENARIOS).map(f => f());
   const note = (source, n) => `DERIVED BY EXECUTING ${source} over ${n} scenarios. Do not hand-edit — ` +
     `regenerate with \`node scripts/generateContract.mjs\`.`;
   return {
@@ -125,5 +143,8 @@ export async function deriveSchemas() {
       " `claimed`/`allowed` are numbers for a years violation and strings for a seniority one." },
     ClaimInspection: { ...infer(claims.map(r => r.checked.inspected)), description: note("the claim guard", claims.length) +
       " What the guard READ. documentChars > 0 on every returned document: the guard refuses to pass one it did not read." },
+    ContextualBlock: { ...infer(ctx), description: note("@draft/ats-scorer scoreContextual", ctx.length) +
+      " ATS contract 2.0.0. score is null when the skill match declined. A part without data has score null, status no_data and weight 0;" +
+      " the other parts' weights are rescaled to sum to 1. A dissimilarity with penalty false (a different industry) never lowers the score." },
   };
 }

@@ -130,3 +130,35 @@ export function companyStackTerms(company: unknown): string[];
 export function resetSkillVocabularyCache(): void;
 export function yearsFromResumeText(text: unknown, opts?: { asOf?: number | Date }): YearsFromText | null;
 export function clearanceFromResumeText(text: unknown): ClearanceFromText | null;
+
+// ── D192 (4) · the contextual score — ATS contract 2.0.0 ─────────────────────────────────────────────────────────────
+export const CONTEXTUAL_CONTRACT: "2.0.0";
+export type ContextualPart = "skill_match" | "role_fit" | "responsibility_overlap" | "tech_stack";
+export type ContextualWeights = Record<ContextualPart, number>;
+export const DEFAULT_CONTEXTUAL_WEIGHTS: Readonly<ContextualWeights>;
+export interface Placement { category?: string | null; subcategory?: string | null; level?: string | null; also?: { subcategory?: string | null } | null }
+export interface TechStackItem { name: string; category?: string | null; postingShare: number }
+export interface CompanyContext { industry?: string | null; techStack?: TechStackItem[]; stack?: { tech: string; postings: number }[]; ofPostings?: number }
+export interface ContextualPartResult { score: number | null; status: "ok" | "no_data"; weight: number; reason?: string; [k: string]: unknown }
+export interface Dissimilarity { kind: "stack_gap" | "responsibility" | "role" | "level" | "domain"; penalty: boolean; action?: "learn" | "evidence"; [k: string]: unknown }
+export interface ContextualBlock {
+  contract: "2.0.0";
+  /** null when the skill match declined. */
+  score: number | null;
+  weights: ContextualWeights;
+  parts: Record<ContextualPart, ContextualPartResult>;
+  similarities: { skills: string[]; ecosystem: { yours: string; theirs: string; family: string }[]; stack: string[]; domains: string[]; role: string[]; responsibilities: string[] };
+  dissimilarities: Dissimilarity[];
+}
+export function scoreContextual(args?: {
+  skillMatch?: number | null; skillsBoth?: string[];
+  posting?: Placement & { text?: string | null };
+  resume?: Placement & { text?: string | null; tech?: string[] };
+  company?: CompanyContext | null; weights?: Partial<ContextualWeights> | null;
+}): ContextualBlock;
+export function resolveContextualWeights(input?: Partial<ContextualWeights> | null): ContextualWeights;
+export function roleFit(posting?: Placement, resume?: Placement): Omit<ContextualPartResult, "weight">;
+export function responsibilityOverlap(postingText: string, resumeText: string): Omit<ContextualPartResult, "weight">;
+export function techStackFit(company: CompanyContext | null, resumeTech?: string[]): Omit<ContextualPartResult, "weight">;
+export function ecosystemOf(tech: string): string | null;
+export function domainsIn(text: string): { domain: string; terms: string[] }[];

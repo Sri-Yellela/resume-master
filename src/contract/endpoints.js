@@ -36,7 +36,11 @@ const capped = (maxLength, description) => ({ type: "string", maxLength, descrip
 // 1.9.0 (draft's WORKLOG 44y): additive — Error.error gains "resume_unparsed" (422 on POST /v1/resumes/generate, retryable
 // false, permanent true): an editing tailoring's base is real text with no readable section heading, which until now was
 // answered 200 with the header alone. Headings ending in ":" now read as headings. No 1.8.0 shape changed.
-export const CONTRACT_VERSION = "1.9.0";
+// 1.10.0 (draft's WORKLOG D192 (3) + (4)): additive — POST /v2/ats/score, THE ATS CONTRACT 2.0.0: the v1 AtsReport unchanged and,
+// beside it, the contextual score (role fit, responsibility overlap, tech-stack compatibility; no model). The caller sends what it
+// knows (posting / resume placements, company.techStack, company.industry); with no company.techStack the service looks the
+// company up on draft's public company-stack endpoint (24 h in memory). POST /v1/ats/score is unchanged. No 1.9.0 shape changed.
+export const CONTRACT_VERSION = "1.10.0";
 
 const usage = arr(ref("UsageRecord"));
 
@@ -146,6 +150,24 @@ export const DECLARED_SCHEMAS = {
     { optional: ["signalProfile", "domainProfile", "claims", "termWeights", "synonyms"],
       description: "termWeights/synonyms are arrays of [key, value] pairs — JSON has no Map. Any other shape is a 400, never a silent unweighted score." }),
   AtsScoreResponse: obj({ report: ref("AtsReport") }),
+  Placement: obj({ category: str, subcategory: str, level: str, also: obj({ subcategory: str }) },
+    { optional: ["category", "subcategory", "level", "also"],
+      description: "1.10.0 · a taxonomy placement (draft's roles-v1 ids) and a level (entry · early · junior · mid · senior · executive)." }),
+  TechStackItem: obj({ name: str, category: nullable(str), postingShare: num }, { optional: ["category"],
+    description: "1.10.0 · one technology of the company's stack and the share (0–1) of its postings naming it." }),
+  AtsScoreV2Request: obj({ job: ref("Job"), resumeText: str, signalProfile: { type: "object" }, domainProfile: { type: "object" },
+    claims: nullable(ref("Claims")), termWeights: nullable(arr({ type: "array" })), synonyms: nullable(arr({ type: "array" })),
+    posting: ref("Placement"), resume: ref("Placement"),
+    company: obj({ name: str, industry: nullable(str), techStack: arr(ref("TechStackItem")) }, { optional: ["name", "industry", "techStack"],
+      description: "techStack ABSENT: the service looks the company up (company.name, else job.company, else read from the posting). " +
+        "techStack [] : the caller knows of none — no lookup, tech_stack is no_data." }),
+    weights: obj({ skill_match: num, role_fit: num, responsibility_overlap: num, tech_stack: num },
+      { optional: ["skill_match", "role_fit", "responsibility_overlap", "tech_stack"], description: "Defaults 0.5 / 0.2 / 0.15 / 0.15. Unknown parts or negatives are a 400." }) },
+    { optional: ["signalProfile", "domainProfile", "claims", "termWeights", "synonyms", "posting", "resume", "company", "weights"],
+      description: "1.10.0 · AtsScoreRequest plus the context. The report is computed exactly as on /v1/ats/score." }),
+  AtsScoreV2Response: obj({ contract: enumOf("2.0.0"), report: ref("AtsReport"), contextual: ref("ContextualBlock"),
+    company: obj({ source: enumOf("request", "lookup", "none") }) },
+    { description: "1.10.0 · report is the v1 report, field for field. contextual sits beside it and never changes it." }),
 
   // ── MCP (E1) ────────────────────────────────────────────────────────────────────────────────────
   // A tool result's structuredContent. It WRAPS the HTTP shape (`report` is the same AtsReport,
@@ -195,6 +217,8 @@ export const ENDPOINTS = [
     responses: { 200: ref("FormatResponse"), 400: E, 413: E, ...authErrors, ...limited } },
   { method: "post", path: "/v1/ats/score", auth: true, cost: "free", request: ref("AtsScoreRequest"),
     responses: { 200: ref("AtsScoreResponse"), 400: E, 413: E, ...authErrors, ...limited } },
+  { method: "post", path: "/v2/ats/score", auth: true, cost: "free", request: ref("AtsScoreV2Request"),
+    responses: { 200: ref("AtsScoreV2Response"), 400: E, 413: E, ...authErrors, ...limited } },
   { method: "post", path: "/v1/resumes/generate", auth: true, cost: "metered", request: ref("GenerateRequest"),
     responses: { 200: ref("GenerateResponse"), 422: E, ...modelErrors } },
   { method: "post", path: "/v1/resumes/enhance", auth: true, cost: "metered", request: ref("EnhanceRequest"),
