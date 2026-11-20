@@ -2,7 +2,7 @@
 //   · the HEADER and FOOTER — one definition, written between <!-- chrome:… --> markers into every
 //     page, so the pages cannot drift apart (the old site's look: the white boxed stamp, a glass bar);
 //   · the PDF product pages — /pdf/ and one page per tool, each findable on its own (the A69 row: "merge
-//     pdf" / "compress pdf" are search categories), each mounting the same in-browser toolkit;
+//     pdf" / "compress pdf" are search categories), each a landing page that opens the ONE workspace with its tool;
 //   · sitemap.xml and robots.txt; public/tokens.css + public/theme.js — the ONE token source and the Appearance choice
 //     (scripts/site/themes.mjs, rm-audit M20). The A68 night sky (public/sky.svg) is retired (M21).
 //
@@ -20,7 +20,7 @@ export const ORIGIN = "https://resumemaster.one";
 const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 // ── the tools, as pages ──────────────────────────────────────────────────────────────────────────
-// `tool` is the toolkit's id (src/pdf-toolkit/ui.js TOOLS). Titles are what people search for.
+// `tool` names the tool (the old toolkit's ids, kept — they are in hand-offs and links). Titles are what people search for.
 export const PDF_PAGES = [
   { slug: "merge-pdf", tool: "merge", name: "Merge PDF", h1: "Merge PDF files",
     desc: "Combine PDFs into one file, in the order you choose.", steps: ["Add two or more PDFs", "Put them in order", "Merge, and download one PDF"] },
@@ -64,33 +64,25 @@ export const STAMP = (size = "") =>
 export const NAV = `<header class="nav" id="nav">
   ${STAMP()}
   <nav class="nav__links" aria-label="Tools">
-    <a class="nav__link" href="/#ats" data-nav="ats">ATS check</a>
-    <a class="nav__link" href="/#format" data-nav="format">Format</a>
-    <a class="nav__link" href="/#generate" data-nav="generate">Tailor</a>
+    <a class="nav__link" href="/workspace/?panel=resume" data-nav="ats">ATS check</a>
+    <a class="nav__link" href="/editor/" data-nav="editor">Résumé editor</a>
+    <a class="nav__link" href="/editor/?panel=tailor" data-nav="tailor">Tailor</a>
     <a class="nav__link" href="/pdf/" data-nav="pdf">PDF tools</a>
   </nav>
   <details class="nav__menu">
     <summary>Menu</summary>
     <nav class="nav__menu-panel glass" aria-label="Tools">
-      <a href="/#ats">ATS check</a><a href="/#format">Format</a><a href="/#generate">Tailor a résumé</a>
+      <a href="/workspace/?panel=resume">ATS check</a><a href="/editor/">Résumé editor</a><a href="/editor/?panel=tailor">Tailor a résumé</a>
       <a href="/pdf/">PDF tools</a><a href="/privacy.html">Privacy</a>
     </nav>
   </details>
-  <div class="nav__account">
-    <span id="acct-signed-out"><button class="btn ghost" data-open="signin">Sign in</button> <button class="btn primary" data-open="signup">Get started</button></span>
-    <span id="acct-signed-in" class="account-bar" hidden>
-      <span id="acct-email"></span> · <span class="balance" id="acct-balance"></span>
-      <button class="btn ghost" data-open="account">Account</button>
-      <button class="btn ghost" id="signout">Sign out</button>
-    </span>
-  </div>
+  <div class="nav__account"><button class="btn ghost" type="button" data-open-settings="" id="nav-settings">Settings</button></div>
 </header>`;
 
 export const FOOTER = `<footer class="foot">
   ${STAMP()}
-  <p>Résumé tools that show their work, and PDF tools that never upload your file. Bands are calibrated on
-    human-graded postings and are coarse by design.</p>
-  <p class="foot__links"><a href="/#ats">ATS check</a> · <a href="/#format">Format</a> · <a href="/#generate">Tailor</a> ·
+  <p>Résumé tools that show their work, and PDF tools that never upload your file.</p>
+  <p class="foot__links"><a href="/workspace/?panel=resume">ATS check</a> · <a href="/editor/">Résumé editor</a> · <a href="/editor/?panel=tailor">Tailor</a> ·
     <a href="/pdf/">PDF tools</a> · <a href="/privacy.html">Privacy — what is kept, and for how long</a></p>
 </footer>`;
 
@@ -122,18 +114,15 @@ ${body}
 ${FOOTER}
   <!-- /chrome:footer -->
   <script src="/chrome.js" defer></script>
-  <script type="module" src="/pdf-tools.js"></script>
+  <script type="module" src="/site-settings.js"></script>
   <script type="module" src="/docs-home.js"></script>
   <script type="module" src="/assistant/tiny-boot.js"></script>
 </body>
 </html>
 `;
 
-const card = (p, i) => `      <a class="card" href="/pdf/${p.slug}/">
-        <span class="card__num">${String(i + 1).padStart(2, "0")}</span><span class="card__rule"></span>
-        <span class="card__title">${esc(p.name)}</span>
-        <span class="card__desc">${esc(p.desc)}</span>
-      </a>`;
+// rm-audit M12: the hub wears the Documents home's tool grid — no 01–16 numerals (they carried nothing, D182)
+const card = (p) => `      <a class="docs-tool" href="/pdf/${p.slug}/"><b>${esc(p.name)}</b><span>${esc(p.desc)}</span></a>`;
 
 export function renderHub() {
   return head({ title: "Free PDF tools that never upload your file — Resume Master",
@@ -142,7 +131,7 @@ export function renderHub() {
       <h1>PDF tools that never upload your file</h1>
       <p class="hero__tagline">Every tool here runs in your browser. Nothing is uploaded, stored or seen by anyone — free, no account.</p>
     </section>
-    <section class="cards" aria-label="PDF tools">
+    <section class="docs-tools" aria-label="PDF tools">
 ${PDF_PAGES.map(card).join("\n")}
     </section>
     <section class="panel glass notes">
@@ -158,16 +147,25 @@ ${PDF_PAGES.map(card).join("\n")}
 }
 
 /**
- * D189 (4) · the tools the workspace now carries: their page is a LANDING page that opens the workspace with that tool on
- * (a dropped PDF is handed over in this browser — public/docs-home.js), not a separate mini-app. The rest keep their quick
- * tool until the workspace has them.
+ * D189 (4) · every tool page is a LANDING page that opens the workspace with that tool on (a dropped file is handed over in
+ * this browser — public/docs-home.js), not a separate mini-app. ⭐ rm-audit M14 (owner 11-19): the last six — Split,
+ * Watermark, Unlock, JPG to PDF, PDF to Excel, HTML to PDF — moved into the workspace too, and the 16-tab toolkit is retired.
  */
-export const WORKSPACE_MODE = Object.freeze({ edit: "edit", sign: "sign", organise: "pages", merge: "pages",
-  compress: "convert", word: "convert", text: "convert", toimages: "convert", ocr: "convert", protect: "convert" });
+export const WORKSPACE_MODE = Object.freeze({ edit: "edit", sign: "sign", organise: "pages", merge: "pages", split: "pages",
+  compress: "convert", word: "convert", text: "convert", toimages: "convert", ocr: "convert", protect: "convert",
+  watermark: "annotate", unlock: "edit", images: "convert", excel: "convert", html: "convert" });
+/** What each landing page's drop target takes (a PDF unless the tool starts from something else). */
+const DROP = Object.freeze({
+  images: { accept: "image/jpeg,image/png,.jpg,.jpeg,.png", what: "pictures", label: "Choose pictures", t: "Drop your pictures here" },
+  html: { accept: ".html,.htm,text/html", what: "an HTML file", label: "Choose an HTML file", t: "Drop an HTML file here" },
+});
+/** The tools that start a document: their "open it empty" link opens the tool itself. */
+const STARTER = Object.freeze({ images: "fromimages", html: "fromhtml" });
 
 export function renderToolPage(p) {
   const others = PDF_PAGES.filter(o => o.slug !== p.slug);
   const mode = WORKSPACE_MODE[p.tool];
+  const drop = DROP[p.tool] || { accept: "application/pdf,.pdf", what: "a PDF", label: "Open a PDF", t: "Drop a PDF here" };
   return head({ title: `${p.h1} — free, in your browser | Resume Master`,
     description: `${p.desc} Free, no account — your file never leaves your browser.`,
     canonical: `/pdf/${p.slug}/` }) + "\n" + wrapChrome(`    <p class="crumbs"><a href="/pdf/">PDF tools</a> › ${esc(p.name)}</p>
@@ -175,15 +173,14 @@ export function renderToolPage(p) {
       <h1>${esc(p.h1)}</h1>
       <p class="hero__tagline">${esc(p.desc)}</p>
     </section>
-    <section class="panel glass${mode ? " tool-landing" : ""}">
+    <section class="panel glass tool-landing">
       <ol class="steps">${p.steps.map(s => `<li>${esc(s)}</li>`).join("")}</ol>
-${mode ? `      <label class="docs-drop" data-docs-drop="" data-mode="${mode}" data-tool="${p.tool}" data-workspace-mode="${mode}">
-        <input type="file" accept="application/pdf,.pdf" hidden>
-        <span class="docs-drop__t">Drop a PDF here</span>
-        <span class="docs-drop__s">or <span class="btn primary">Open a PDF</span> — it opens in the workspace with ${esc(p.name)} ready, and never leaves this device</span>
+      <label class="docs-drop" data-docs-drop="" data-mode="${mode}" data-tool="${p.tool}" data-workspace-mode="${mode}">
+        <input type="file" accept="${drop.accept}"${p.tool === "images" ? " multiple" : ""} hidden>
+        <span class="docs-drop__t">${esc(drop.t)}</span>
+        <span class="docs-drop__s">or <span class="btn primary">${esc(drop.label)}</span> — it opens in the workspace with ${esc(p.name)} ready, and never leaves this device</span>
       </label>
-      <p class="tool-landing__more">The workspace also edits text in place, fills and signs, redacts, organises pages and converts — <a href="/workspace/?mode=${mode}">open it empty</a>.</p>`
-    : `      <div id="pdf-tools" class="pdf-tools" data-initial="${p.tool}"><p class="note">Loading the tool…</p></div>`}
+      <p class="tool-landing__more">The workspace also edits text in place, fills and signs, redacts, organises pages and converts — <a href="/workspace/?mode=${mode}${STARTER[p.tool] ? `&amp;tool=${STARTER[p.tool]}` : ""}">open it empty</a>.</p>
     </section>
     <section class="more" aria-label="More PDF tools">
       <h2>More PDF tools</h2>
@@ -192,7 +189,8 @@ ${mode ? `      <label class="docs-drop" data-docs-drop="" data-mode="${mode}" d
 }
 
 export function renderSitemap() {
-  const urls = ["/", "/workspace/", "/pdf/", ...PDF_PAGES.map(p => `/pdf/${p.slug}/`), "/privacy.html"];
+  // rm-audit (11-19): /editor/ was missing from the sitemap
+  const urls = ["/", "/workspace/", "/editor/", "/pdf/", ...PDF_PAGES.map(p => `/pdf/${p.slug}/`), "/privacy.html"];
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n` +
     urls.map(u => `  <url><loc>${ORIGIN}${u}</loc></url>`).join("\n") + `\n</urlset>\n`;
 }

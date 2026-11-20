@@ -30,9 +30,7 @@ test("m20TokensOnly: no stylesheet writes a colour — every one is a token (the
   }
   // the toolkit's old Edit sandbox: its palette is the site's tokens now, not a fourth Dusk copy
   const st = read("src/pdf-toolkit/styles.css");
-  const sb = st.slice(st.indexOf(".pt-sb {"), st.indexOf("}", st.indexOf(".pt-sb {")));
-  assert.deepEqual(noComments(sb).match(LITERAL) || [], []);
-  assert.doesNotMatch(st, /"Inter Tight"/, "not a font this site ships");
+  assert.doesNotMatch(st, /\.pt-sb|"Inter Tight"/, "the fourth Dusk copy left with the retired Edit sandbox (M15)");
 });
 
 test("m20NoPills: no capsule rule left in any stylesheet, shadowed or not; 50% only on a perfect square; no near-capsule in the editor", () => {

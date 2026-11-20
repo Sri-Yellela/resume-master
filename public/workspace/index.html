@@ -6,8 +6,12 @@
   <title>Workspace — Resume Master</title>
   <meta name="description" content="Edit a PDF where its text is, fill and sign it — in your browser. Nothing is uploaded.">
   <link rel="canonical" href="https://resumemaster.one/workspace/">
+  <script src="/theme.js"></script>
+  <link rel="stylesheet" href="/tokens.css">
   <link rel="stylesheet" href="/lib/pdf-toolkit/styles.css">
   <link rel="stylesheet" href="/workspace/workspace.css">
+  <link rel="stylesheet" href="/ats-panel.css">
+  <link rel="stylesheet" href="/settings.css">
   <link rel="stylesheet" href="/assistant/tiny.css">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <script type="module" src="/workspace/workspace.js"></script>
@@ -26,9 +30,10 @@
       <button class="ws-b ws-ic" id="ws-history" title="Version history (kept in this browser)" aria-label="Version history" disabled>↺</button>
       <button class="ws-b ws-ic" id="ws-undo" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>↶</button>
       <button class="ws-b ws-ic" id="ws-redo" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled>↷</button>
-      <button class="ws-b" id="ws-download" disabled>Download PDF</button>
+      <span class="ws-dl"><button class="ws-b" id="ws-download" disabled aria-haspopup="menu" aria-expanded="false">Download ▾</button></span>
       <button class="ws-b ws-ic" id="ws-print" title="Print (Ctrl+P)" aria-label="Print" disabled>⎙</button>
       <button class="ws-b" id="ws-to-resume" disabled title="Turn this PDF's text into an editable résumé (sections, lists, margins)">Make this an editable résumé</button>
+      <button class="ws-b ws-ic" id="ws-settings" title="Settings — appearance, your account" aria-label="Settings" aria-haspopup="dialog">⚙</button>
       <button class="ws-b ws-ic" id="ws-keys" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" aria-haspopup="dialog">⌨</button>
       <button class="ws-b ws-p" id="ws-done" disabled>Done</button>
     </header>
@@ -45,7 +50,7 @@
       <main class="ws-canvas" id="ws-canvas" aria-label="The document">
         <div class="ws-empty" id="ws-empty">
           <p class="ws-empty__t">Drop a PDF here</p>
-          <p class="ws-empty__s">or <label class="ws-b ws-p"><input type="file" id="ws-open" accept="application/pdf,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>Open a PDF</label> — or a Word file (.docx), made into a PDF here. Nothing leaves this device.</p>
+          <p class="ws-empty__s">or <label class="ws-b ws-p"><input type="file" id="ws-open" accept="application/pdf,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>Open a PDF</label> — or a Word file (.docx), made into a PDF here. Or start from <button type="button" class="ws-link" data-start="fromimages">pictures</button> or <button type="button" class="ws-link" data-start="fromhtml">HTML</button>. Nothing leaves this device.</p>
           <p class="ws-empty__err" id="ws-err" role="alert"></p>
         </div>
         <div class="ws-zoom" id="ws-zoom"></div>
@@ -62,12 +67,17 @@
         </div>
       </main>
       <aside class="ws-props" id="ws-props" aria-label="Properties">
+        <!-- rm-audit M11 (b) / M14: a tool's options (Split ranges, Watermark text, Compress limit, Protect password) — not a prompt() -->
+        <section class="ws-panel ws-opts" id="ws-opts" hidden></section>
         <div class="ws-ptabs" role="tablist">
           <button role="tab" class="ws-ptab" data-ptab="text" aria-selected="true">Text</button>
           <button role="tab" class="ws-ptab" data-ptab="page" aria-selected="false">Page</button>
+          <button role="tab" class="ws-ptab" data-ptab="resume" aria-selected="false" id="ws-ptab-resume">Résumé</button>
         </div>
         <section class="ws-panel" data-panel="text" id="ws-text"></section>
         <section class="ws-panel" data-panel="page" id="ws-page" hidden></section>
+        <!-- ⭐ draft D192 (3d) · the ATS check, inside the workspace: this document against a job (public/ats-panel.js) -->
+        <section class="ws-panel" data-panel="resume" id="ws-resume" hidden></section>
         <section class="ws-changes" id="ws-changes" aria-live="polite"></section>
       </aside>
     </div>

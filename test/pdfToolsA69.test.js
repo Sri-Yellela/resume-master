@@ -17,7 +17,7 @@ test("the libraries and the component are served from here, as JavaScript", asyn
   const s = await serve();
   try {
     for (const p of ["/lib/pdf-lib/pdf-lib.esm.min.js", "/lib/pdfjs/pdf.min.mjs", "/lib/pdfjs/pdf.worker.min.mjs",
-                     "/lib/pdf-toolkit/ui.js", "/lib/pdf-toolkit/core.js", "/lib/pdf-toolkit/pdfText.js"]) {
+                     "/lib/pdf-toolkit/session.js", "/lib/pdf-toolkit/html.js", "/lib/pdf-toolkit/core.js", "/lib/pdf-toolkit/pdfText.js"]) {
       const r = await fetch(s.base + p);
       assert.equal(r.status, 200, p);
       assert.match(r.headers.get("content-type"), /^text\/javascript/, `${p}: a module script refuses any other type`);
@@ -45,12 +45,12 @@ test("the libraries and the component are served from here, as JavaScript", asyn
   } finally { await s.close(); }
 });
 
-test("the page mounts the toolkit and loads only same-origin code — the file is never uploaded", () => {
+test("the workspace loads only same-origin code — the file is never uploaded (the home page's toolkit tab is retired, rm-audit M8)", () => {
   const page = fs.readFileSync("public/index.html", "utf8");
-  assert.match(page, /<div id="pdf-tools"/);
-  assert.match(page, /<script type="module" src="\/pdf-tools\.js"><\/script>/);
-  const loader = fs.readFileSync("public/pdf-tools.js", "utf8");
-  for (const m of loader.matchAll(/import\("([^"]+)"\)/g)) assert.match(m[1], /^\/lib\//, `${m[1]} must be served from here`);
+  assert.doesNotMatch(page, /<div id="pdf-tools"|\/pdf-tools\.js/, "moved on purpose (46y): no second PDF UI on the home page");
+  assert.ok(!fs.existsSync("public/pdf-tools.js"));
+  const loader = fs.readFileSync("public/workspace/workspace.js", "utf8");
+  for (const m of loader.matchAll(/import\("([^"]+)"\)/g)) assert.match(m[1], /^\/(?!\/)/, `${m[1]} must be served from here`);
   assert.doesNotMatch(loader, /https?:\/\//);
-  assert.doesNotMatch(loader, /fetch\(|XMLHttpRequest/);
+  assert.doesNotMatch(loader.replace(/await import\("\/ats-panel\.js"\)/, ""), /fetch\(|XMLHttpRequest/, "the document is never sent anywhere (the ATS panel's one call sends its text when asked, by its own module)");
 });

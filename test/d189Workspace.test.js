@@ -21,13 +21,12 @@ test("d188FontSubstitutionDisclosed: the standard face drawn in place of the PDF
   assert.deepEqual(faceOf("ABCDEF+Garamond-BoldItalic"), { family: "serif", bold: true, italic: true });
 });
 
-test("d189OneWorkspaceComponent: the workspace and the toolkit's Edit tab run ONE session — the engine is not copied", () => {
-  const editTab = read("src/pdf-toolkit/textEditor.js");
+test("d189OneWorkspaceComponent: the workspace runs THE session — the engine is not copied (the toolkit's Edit tab is retired, rm-audit M15)", () => {
+  // moved on purpose (46y): the 16-tab toolkit and its Edit tab (textEditor.js) are gone — the workspace is the one editor
+  assert.ok(!fs.existsSync("src/pdf-toolkit/textEditor.js") && !fs.existsSync("src/pdf-toolkit/ui.js"), "the second UI is retired");
   const ws = read("public/workspace/workspace.js");
-  assert.match(editTab, /import \{ createPdfSession, FACES, hex, rgbOf \} from "\.\/session\.js";/);
   assert.match(ws, /import\("\/lib\/pdf-toolkit\/session\.js"\)/);
   for (const engine of [/function makeField\(/, /async function ocrPages\(/, /function guessFace\(/, /applyTextEdits\(/]) {
-    assert.doesNotMatch(editTab, engine, `the Edit tab keeps no ${engine} of its own`);
     assert.doesNotMatch(ws, engine, `the workspace keeps no ${engine} of its own`);
   }
   const session = read("src/pdf-toolkit/session.js");

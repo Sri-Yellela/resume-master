@@ -19,26 +19,19 @@
 <header class="nav" id="nav">
   <a class="stamp" href="/" aria-label="Resume Master — home"><span class="stamp__box"><span>R</span><span class="stamp__fold">esume</span><span>M</span><span class="stamp__fold">aster</span></span></a>
   <nav class="nav__links" aria-label="Tools">
-    <a class="nav__link" href="/#ats" data-nav="ats">ATS check</a>
-    <a class="nav__link" href="/#format" data-nav="format">Format</a>
-    <a class="nav__link" href="/#generate" data-nav="generate">Tailor</a>
+    <a class="nav__link" href="/workspace/?panel=resume" data-nav="ats">ATS check</a>
+    <a class="nav__link" href="/editor/" data-nav="editor">Résumé editor</a>
+    <a class="nav__link" href="/editor/?panel=tailor" data-nav="tailor">Tailor</a>
     <a class="nav__link" href="/pdf/" data-nav="pdf">PDF tools</a>
   </nav>
   <details class="nav__menu">
     <summary>Menu</summary>
     <nav class="nav__menu-panel glass" aria-label="Tools">
-      <a href="/#ats">ATS check</a><a href="/#format">Format</a><a href="/#generate">Tailor a résumé</a>
+      <a href="/workspace/?panel=resume">ATS check</a><a href="/editor/">Résumé editor</a><a href="/editor/?panel=tailor">Tailor a résumé</a>
       <a href="/pdf/">PDF tools</a><a href="/privacy.html">Privacy</a>
     </nav>
   </details>
-  <div class="nav__account">
-    <span id="acct-signed-out"><button class="btn ghost" data-open="signin">Sign in</button> <button class="btn primary" data-open="signup">Get started</button></span>
-    <span id="acct-signed-in" class="account-bar" hidden>
-      <span id="acct-email"></span> · <span class="balance" id="acct-balance"></span>
-      <button class="btn ghost" data-open="account">Account</button>
-      <button class="btn ghost" id="signout">Sign out</button>
-    </span>
-  </div>
+  <div class="nav__account"><button class="btn ghost" type="button" data-open-settings="" id="nav-settings">Settings</button></div>
 </header>
   <!-- /chrome:nav -->
   <main class="wrap">
@@ -47,9 +40,14 @@
       <h1>Split a PDF</h1>
       <p class="hero__tagline">Split a PDF into single pages, or into the page ranges you choose.</p>
     </section>
-    <section class="panel glass">
+    <section class="panel glass tool-landing">
       <ol class="steps"><li>Choose a PDF</li><li>Leave ranges blank for every page, or type 1-2, 3, 4-</li><li>Download each part</li></ol>
-      <div id="pdf-tools" class="pdf-tools" data-initial="split"><p class="note">Loading the tool…</p></div>
+      <label class="docs-drop" data-docs-drop="" data-mode="pages" data-tool="split" data-workspace-mode="pages">
+        <input type="file" accept="application/pdf,.pdf" hidden>
+        <span class="docs-drop__t">Drop a PDF here</span>
+        <span class="docs-drop__s">or <span class="btn primary">Open a PDF</span> — it opens in the workspace with Split PDF ready, and never leaves this device</span>
+      </label>
+      <p class="tool-landing__more">The workspace also edits text in place, fills and signs, redacts, organises pages and converts — <a href="/workspace/?mode=pages">open it empty</a>.</p>
     </section>
     <section class="more" aria-label="More PDF tools">
       <h2>More PDF tools</h2>
@@ -59,14 +57,13 @@
   <!-- chrome:footer -->
 <footer class="foot">
   <a class="stamp" href="/" aria-label="Resume Master — home"><span class="stamp__box"><span>R</span><span class="stamp__fold">esume</span><span>M</span><span class="stamp__fold">aster</span></span></a>
-  <p>Résumé tools that show their work, and PDF tools that never upload your file. Bands are calibrated on
-    human-graded postings and are coarse by design.</p>
-  <p class="foot__links"><a href="/#ats">ATS check</a> · <a href="/#format">Format</a> · <a href="/#generate">Tailor</a> ·
+  <p>Résumé tools that show their work, and PDF tools that never upload your file.</p>
+  <p class="foot__links"><a href="/workspace/?panel=resume">ATS check</a> · <a href="/editor/">Résumé editor</a> · <a href="/editor/?panel=tailor">Tailor</a> ·
     <a href="/pdf/">PDF tools</a> · <a href="/privacy.html">Privacy — what is kept, and for how long</a></p>
 </footer>
   <!-- /chrome:footer -->
   <script src="/chrome.js" defer></script>
-  <script type="module" src="/pdf-tools.js"></script>
+  <script type="module" src="/site-settings.js"></script>
   <script type="module" src="/docs-home.js"></script>
   <script type="module" src="/assistant/tiny-boot.js"></script>
 </body>

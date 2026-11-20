@@ -6,13 +6,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { TOOLS, htmlForPrint } from "../../src/pdf-toolkit/ui.js";
+// moved on purpose (rm-audit M14 / M15, 46y): the HTML tool is in the workspace; its policy lives in src/pdf-toolkit/html.js
+import { htmlForPrint } from "../../src/pdf-toolkit/html.js";
+import { WORKSPACE_MODE } from "../../scripts/site/buildSite.mjs";
 import { PDF_PAGES } from "../../scripts/site/buildSite.mjs";
 
 const POLICY = "default-src 'none'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:";
 
 test("the HTML tool exists, with its own page", () => {
-  assert.ok(TOOLS.some(t => t.id === "html" && /HTML/.test(t.label)));
+  assert.equal(WORKSPACE_MODE.html, "convert", "the HTML-to-PDF page opens the workspace");
+  assert.match(fs.readFileSync("public/workspace/workspace.js", "utf8"), /\["fromhtml", "<\/>", "From HTML"\]/);
   const page = PDF_PAGES.find(p => p.tool === "html");
   assert.equal(page?.slug, "html-to-pdf");
   assert.ok(fs.existsSync("public/pdf/html-to-pdf/index.html"), "the page is generated (scripts/site/buildSite.mjs)");
@@ -35,9 +38,11 @@ test("a fragment with no <head> is wrapped with the policy; a <header> is not mi
 });
 
 test("⛔ the preview frame never runs script: same-origin for print(), no allow-scripts", () => {
-  const ui = fs.readFileSync("src/pdf-toolkit/ui.js", "utf8");
-  const sandbox = ui.match(/const HTML_SANDBOX = "([^"]*)"/)?.[1].split(/\s+/) || [];
+  const ui = fs.readFileSync("src/pdf-toolkit/html.js", "utf8");
+  const sandbox = ui.match(/export const HTML_SANDBOX = "([^"]*)"/)?.[1].split(/\s+/) || [];
   assert.ok(sandbox.includes("allow-same-origin") && sandbox.includes("allow-modals"));
   assert.ok(!sandbox.includes("allow-scripts"), "allow-scripts with allow-same-origin would let the document lift its own sandbox");
-  assert.match(ui, /html\(\) \{[\s\S]*contentWindow\.print\(\)/);
+  const ws = fs.readFileSync("public/workspace/workspace.js", "utf8");
+  assert.match(ws, /el\("iframe", \{ class: "ws-html-frame", sandbox: HTML_SANDBOX/);
+  assert.match(ws, /async function openHtml[\s\S]*frame\.contentWindow\?\.print\(\)/);
 });

@@ -4,10 +4,14 @@ const store = await import("/lib/pdf-toolkit/docstore.js");
 const drop = document.querySelector("[data-docs-drop]");
 const input = drop?.querySelector("input[type=file]");
 const mode = drop?.dataset.mode || "edit";
+// ⭐ rm-audit M14: the JPG-to-PDF and HTML-to-PDF pages take pictures / an HTML file — the workspace starts a PDF from them
+const takes = (file) => drop.dataset.tool === "images" ? /^image\/(jpeg|png)$/i.test(file.type) || /\.(jpe?g|png)$/i.test(file.name)
+  : drop.dataset.tool === "html" ? /html/i.test(file.type) || /\.html?$/i.test(file.name)
+  : /pdf$/i.test(file.type) || /\.pdf$/i.test(file.name) || /\.docx$/i.test(file.name) || /wordprocessingml/i.test(file.type);
 async function hand(file) {
   if (!file) return;
   // ⭐ D188 LATER: a Word file (.docx) is welcome too — the workspace makes it a PDF in this browser
-  if (!/pdf$/i.test(file.type) && !/\.pdf$/i.test(file.name) && !/\.docx$/i.test(file.name) && !/wordprocessingml/i.test(file.type)) { drop.dataset.err = "That isn't a PDF."; drop.querySelector(".docs-drop__s").textContent = "That isn't a PDF or a Word file — choose a .pdf or .docx."; return; }
+  if (!takes(file)) { drop.dataset.err = "wrong type"; drop.querySelector(".docs-drop__s").textContent = drop.dataset.tool === "images" ? "That isn't a JPEG or PNG picture." : drop.dataset.tool === "html" ? "That isn't an HTML file (.html)." : "That isn't a PDF or a Word file — choose a .pdf or .docx."; return; }
   await store.setHandoff(new Uint8Array(await file.arrayBuffer()), file.name, mode, drop.dataset.tool || null);
   location.href = `/workspace/?open=1&mode=${encodeURIComponent(mode)}`;
 }

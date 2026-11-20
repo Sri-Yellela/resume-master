@@ -35,6 +35,7 @@ const session = S.createPdfSession({ el, lib, pdfjs, core, loadOcr, svgNode: edi
 const ws = $("[data-ws]"), zoomBox = $("#ws-zoom");
 zoomBox.append(session.pagesEl);
 let mode = "edit", zoom = 1, fileSize = 0, dirty = false, docId = null, autosaving = false;
+let atsRefresh = null;   // the ATS panel's "where the résumé comes from" line, redrawn as the document changes (D192 (3d))
 const sigs = { signature: null, initials: null };
 
 // ── status, save state ──
@@ -43,6 +44,7 @@ session.on("status", (m) => say(m));
 const setSaved = (t) => { $("#ws-saved").textContent = t; };
 function sync() {
   $("#ws-undo").disabled = !session.canUndo; $("#ws-redo").disabled = !session.canRedo;
+  atsRefresh?.();
   const n = session.changeCount();
   dirty = n > 0;
   setSaved(!session.bytes ? "" : dirty ? `${n} change${n === 1 ? "" : "s"} — not downloaded yet` : "No changes yet");
@@ -70,13 +72,18 @@ const TOOLS = {
   sign: [["select", "⌖", "Select"], ["signature", "✎", "Signature"], ["initials", "ab", "Initials"], ["name", "Aa", "Name"], ["date", "▦", "Date"],
     ["text", "⊞", "Text"], ["check", "✓", "Check"], ["cross", "✗", "Cross"]],
   // ⭐ D188 LATER · Annotate: mark a page for review — a highlight over words, a freehand pen, a box, a note
-  annotate: [["select", "⌖", "Select"], ["highlight", "▬", "Highlight"], ["ink", "✎", "Draw"], ["box", "▢", "Box"], ["text", "⊞", "Note"]],
+  annotate: [["select", "⌖", "Select"], ["highlight", "▬", "Highlight"], ["ink", "✎", "Draw"], ["box", "▢", "Box"], ["text", "⊞", "Note"], ["|"], ["watermark", "◪", "Watermark"]],
   // ⭐ D189 P3: the page strip's operations, on the current page (the strip / navigator chooses it)
   pages: [["rotl", "⟲", "Rotate left"], ["rotr", "⟳", "Rotate right"], ["dup", "⧉", "Duplicate"], ["del", "✕", "Delete"],
-    ["up", "↑", "Move earlier"], ["down", "↓", "Move later"], ["|"], ["blank", "▢", "Blank page"], ["addfiles", "+", "Add files"]],
+    ["up", "↑", "Move earlier"], ["down", "↓", "Move later"], ["|"], ["blank", "▢", "Blank page"], ["addfiles", "+", "Add files"], ["split", "✂", "Split"]],
   // ⭐ D189 P3: the document as something else — each from the CURRENT document (changes included)
-  convert: [["compress", "⇲", "Compress"], ["word", "W", "Word"], ["txt", "≡", "Text"], ["jpg", "▣", "Images"], ["searchable", "⌕", "Searchable (OCR)"], ["protect", "⚿", "Protect"], ["|"], ["fromword", "W→", "From Word"]],
+  convert: [["compress", "⇲", "Compress"], ["word", "W", "Word"], ["txt", "≡", "Text"], ["excel", "▦", "Excel"], ["jpg", "▣", "Images"], ["searchable", "⌕", "Searchable (OCR)"], ["protect", "⚿", "Protect"], ["|"],
+    ["fromword", "W→", "From Word"], ["fromimages", "▣→", "From pictures"], ["fromhtml", "</>", "From HTML"]],
 };
+// ⭐ rm-audit M14: the tools that START a document — usable with nothing open (the old toolkit's Images → PDF and HTML → PDF)
+const STARTERS = new Set(["fromword", "fromimages", "fromhtml"]);
+// a tool page's tool → the workspace tool it opens with, once its file is open (/pdf/<tool>/ hands both over)
+const TOOL_OPENS = new Map([["split", "split"], ["watermark", "watermark"], ["compress", "compress"], ["protect", "protect"], ["excel", "excel"]]);
 const addFiles = el("input", { type: "file", accept: "application/pdf,image/jpeg,image/png", multiple: true, hidden: true });
 document.body.append(addFiles);
 addFiles.addEventListener("change", async () => {
@@ -105,15 +112,21 @@ async function convert(id, opts = {}) {
   try {
     const b = await currentBytes();
     if (id === "compress") {
-      const limit = Number(opts.limit) || Number(prompt("The form's upload limit, in MB (most accept 2–5 MB):", "2")) || 2;
+      // rm-audit M11 (b): the limit is asked in the properties panel, not a native prompt()
+      if (!opts.limit) return showOpts("Compress", "The form's upload limit, in MB — most accept 2 to 5.", [["limit", "number", "Upload limit (MB)", "2"]], "Compress", (v) => convert("compress", { limit: Number(v.limit) || 2 }));
+      const limit = Number(opts.limit) || 2;
       say("Compressing…");
-      const r = await core.compress(lib, b, { reencodeJpeg: render.reencodeJpegInBrowser, maxDimension: 1600, quality: 0.72 });
+      const r = opts.flatten ? await render.flattenToImages(lib, pdfjs, b, { scale: 1.5, quality: 0.6 }).then(bytes => ({ bytes, before: b.length, after: bytes.length, note: "Every page is a picture now — its text can no longer be selected." }))
+        : await core.compress(lib, b, { reencodeJpeg: render.reencodeJpegInBrowser, maxDimension: 1600, quality: 0.72 });
       const under = r.after <= limit * 1048576;
-      say(`${kb(r.before)} → ${kb(r.after)} — ${under ? `under your ${limit} MB limit` : `still over your ${limit} MB limit (try Compress on the PDF tools page at Maximum)`}. ${r.note}`, under ? "good" : "bad");
+      // rm-audit M11 (c): still over → the smallest file is offered right here (it sent people to the old toolkit's Maximum)
+      say(`${kb(r.before)} → ${kb(r.after)} — ${under ? `under your ${limit} MB limit` : `still over your ${limit} MB limit`}. ${r.note}`, under ? "good" : "bad");
+      if (!under && !opts.flatten) showOpts("Still too big", "Make every page a picture: the smallest file, but its text can no longer be selected or read by an ATS.", [], "Make it smallest", () => convert("compress", { limit, flatten: true }));
+      else hideOpts();
       return downloadAs(r.bytes, `${nameBase()}-compressed.pdf`, "application/pdf");
     }
     const pages = [];
-    if (id === "word" || id === "txt") {
+    if (id === "word" || id === "txt" || id === "excel") {
       const d = await pdfjs.getDocument({ data: b.slice(), isEvalSupported: false }).promise;
       for (let n = 1; n <= d.numPages; n++) { const pg = await d.getPage(n); pages.push({ lines: pdfText.linesOf((await pg.getTextContent()).items) }); pg.cleanup(); }
       await d.destroy();
@@ -123,6 +136,13 @@ async function convert(id, opts = {}) {
       const { zipSync } = await import("/lib/fflate/browser.js");
       downloadAs(office.toDocx(zipSync, office.paragraphsOf(pages), { title: nameBase() }), `${nameBase()}.docx`, "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
       return say("Downloaded as Word — the text in reading order; fonts and pictures are not carried over.", "good");
+    }
+    if (id === "excel") {   // rm-audit M14: PDF → Excel, in the workspace (office.js tableOf / toXlsx, as the old tool)
+      const { zipSync } = await import("/lib/fflate/browser.js");
+      const sheets = pages.map((p, i) => ({ name: `Page ${i + 1}`, rows: office.tableOf(p.lines) }));
+      downloadAs(office.toXlsx(zipSync, sheets), `${nameBase()}.xlsx`, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      const rows = sheets.reduce((n, sh) => n + sh.rows.length, 0);
+      return say(`Downloaded as Excel: ${rows} rows across ${sheets.length} sheet${sheets.length === 1 ? "" : "s"}. Columns come from how the text is aligned — check them.`, "good");
     }
     if (id === "txt") { downloadAs(new TextEncoder().encode(pages.map(p => p.lines.map(l => l.text).join("\n")).join("\n\n")), `${nameBase()}.txt`, "text/plain"); return say("Downloaded as text.", "good"); }
     if (id === "jpg") {
@@ -138,8 +158,9 @@ async function convert(id, opts = {}) {
       return say(`A searchable copy: ${r.words} words read (confidence ${r.confidence}%).`, "good");
     }
     if (id === "protect") {
-      const pw = prompt("A password for the PDF (it cannot be recovered — keep it safe):");
-      if (!pw) return;
+      if (!opts.password) return showOpts("Protect", "A password for the PDF — it cannot be recovered, keep it safe.", [["password", "password", "Password", ""], ["again", "password", "The same again", ""]], "Protect and download",
+        (v) => { if (!v.password) throw new Error("Type a password."); if (v.password !== v.again) throw new Error("The two passwords differ."); return convert("protect", { password: v.password }); });
+      const pw = opts.password; hideOpts();
       downloadAs(await core.protect(lib, b, pw), `${nameBase()}-protected.pdf`, "application/pdf");
       return say("Protected with AES-256.", "good");
     }
@@ -152,9 +173,12 @@ function drawTools() {
   bar.replaceChildren(...TOOLS[mode].map(([id, ic, label]) => id === "|" ? el("span", { class: "ws-sep" })
     : el("button", { type: "button", class: "ws-tool", "data-tool": id, "aria-pressed": String((session.armed?.kind || "select") === id), title: label,
       onclick: () => pickTool(id) }, el("i", { "aria-hidden": "true" }, ic), label)));
-  for (const b of bar.querySelectorAll("button")) b.disabled = !session.bytes;
+  for (const b of bar.querySelectorAll("button")) b.disabled = !session.bytes && !STARTERS.has(b.dataset.tool);
 }
 async function pickTool(id) {
+  if (id === "fromimages") { picturePick.click(); return; }
+  if (id === "fromhtml") return openHtml();
+  if (id === "fromword") { wordPick.click(); return; }
   if (!session.bytes) return;
   if (id === "select") { session.arm(null); return drawTools(); }
   if (id === "ocr") {
@@ -175,8 +199,22 @@ async function pickTool(id) {
     if (id === "down") { if (i >= n - 1) return; current++; return pageOp("move", { page: i, to: i + 1 }, `Page moved to ${current}`); }
     if (id === "blank") return pageOp("blank", { at: current }, `A blank page after page ${current}`);
     if (id === "addfiles") { addFiles.click(); return; }
+    // rm-audit M14: Split — the ranges in the properties panel; one part downloads as a PDF, more as one .zip
+    if (id === "split") return showOpts("Split", "Leave it blank for a file per page, or type ranges: 1-2, 3, 4-", [["ranges", "text", "Ranges", ""]], "Split and download", async (v) => {
+      const parts = await core.split(lib, await currentBytes(), v.ranges.trim() || "each");
+      const partName = (pt) => `${nameBase()}-p${pt.pages[0]}${pt.pages.length > 1 ? `-${pt.pages[pt.pages.length - 1]}` : ""}.pdf`;
+      if (parts.length === 1) downloadAs(parts[0].bytes, partName(parts[0]), "application/pdf");
+      else { const { zipSync } = await import("/lib/fflate/browser.js"); downloadAs(zipSync(Object.fromEntries(parts.map(pt => [partName(pt), pt.bytes]))), `${nameBase()}-split.zip`, "application/zip"); }
+      hideOpts(); say(`${parts.length} part${parts.length === 1 ? "" : "s"} downloaded${parts.length > 1 ? " in one .zip" : ""}.`, "good");
+    });
   }
   if (mode === "convert") return convert(id);
+  // rm-audit M14: Watermark — the text in the properties panel; the result opens here as a new version
+  if (id === "watermark") return showOpts("Watermark", "Stamped diagonally across every page.", [["text", "text", "Watermark text", "DRAFT"]], "Add the watermark", async (v) => {
+    const b = await core.watermark(lib, await currentBytes(), v.text);
+    await openBytes(b, `${nameBase()}.pdf`, { id: docId, note: "Watermarked", keep: true, openMode: mode });
+    hideOpts(); say(`Watermarked “${v.text.trim()}” on every page — a version is kept in the history.`, "good");
+  });
   session.arm(session.armed?.kind === id ? null : id);
   drawTools();
 }
@@ -324,7 +362,7 @@ const wordPick = el("input", { type: "file", accept: ".docx,application/vnd.open
 document.body.append(wordPick);
 wordPick.addEventListener("change", () => { const f = wordPick.files?.[0]; wordPick.value = ""; if (f) openFile(f); });
 /** Open bytes in the workspace; remembered in Recent (this browser) with a first version unless it is one already. */
-async function openBytes(bytes, fileName, { id = null, note = "Opened", openMode = null } = {}) {
+async function openBytes(bytes, fileName, { id = null, note = "Opened", openMode = null, keep = false } = {}) {
   $("#ws-err").textContent = "";
   try {
     ws.dataset.state = "loading";
@@ -335,7 +373,7 @@ async function openBytes(bytes, fileName, { id = null, note = "Opened", openMode
     const fresh = !id;
     docId = id || store.newId();
     await store.putDoc({ id: docId, name: baseName(fileName), kind: "PDF", pages: r.pages, size: fileSize, thumb: await session.thumbnail(1, 160) });
-    if (fresh || note === "Restored") await store.addVersion(docId, bytes, note);
+    if (fresh || keep || note === "Restored") await store.addVersion(docId, bytes, note);
     $("#ws-history").disabled = false;
     if (openMode) setMode(openMode);
     $("#ws-meta").textContent = `${r.pages} page${r.pages === 1 ? "" : "s"} · ${kb(fileSize)}`;
@@ -344,14 +382,105 @@ async function openBytes(bytes, fileName, { id = null, note = "Opened", openMode
     $("#ws-nav").hidden = false;
     await drawStrip(); fitWidth(); drawTools(); drawText(null); sync();
     say(`${r.lines} lines of text${r.read ? ` (${r.read} read from pictures — check them)` : ""}. Click any text to edit it where it is.`, "good");
-  } catch (e) { ws.dataset.state = "empty"; $("#ws-err").textContent = e?.message || String(e); }
+  } catch (e) {
+    ws.dataset.state = session.bytes ? "open" : "empty";
+    if (/password-protected/i.test(e?.message || "")) return askPassword(bytes, fileName, { id, openMode });   // rm-audit M14: Unlock
+    $("#ws-err").textContent = e?.message || String(e);
+  }
 }
 $("#ws-open").addEventListener("change", (e) => { const f = e.target.files?.[0]; if (f) openFile(f); });
+for (const b of document.querySelectorAll("[data-start]")) b.addEventListener("click", () => pickTool(b.dataset.start));
 canvasEl.addEventListener("dragover", (e) => { e.preventDefault(); ws.dataset.drag = "true"; });
 canvasEl.addEventListener("dragleave", () => { delete ws.dataset.drag; });
 canvasEl.addEventListener("drop", (e) => { e.preventDefault(); delete ws.dataset.drag; const f = e.dataTransfer?.files?.[0]; if (f) openFile(f); });
 $("#ws-name").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); e.target.blur(); } });
 
+// ── rm-audit M11 (b) / M14 · a tool's options, in the properties panel (no native prompt()) ──
+const optsBox = () => $("#ws-opts");
+function hideOpts() { const b = optsBox(); if (b) { b.hidden = true; b.replaceChildren(); } }
+/** fields: [[name, type, label, value]] — `run(values)` may throw; its message shows under the button. */
+function showOpts(title, lede, fields, action, run) {
+  const box = optsBox();
+  const inputs = fields.map(([name, type, label, value]) => [name, el("input", { type, name, class: "ws-in", value: value ?? "", "aria-label": label, autocomplete: type === "password" ? "new-password" : "off" }), label]);
+  const err = el("p", { class: "ws-warn ws-small", role: "alert", hidden: true });
+  const go = el("button", { type: "submit", class: "ws-b ws-p" }, action);
+  const form = el("form", { class: "ws-optsform", "data-opts": title, onsubmit: async (e) => {
+    e.preventDefault(); err.hidden = true; go.disabled = true;
+    try { await run(Object.fromEntries(inputs.map(([n, i]) => [n, i.value]))); }
+    catch (x) { err.textContent = x?.message || String(x); err.hidden = false; }
+    finally { go.disabled = false; }
+  } },
+    el("p", { class: "ws-lbl" }, title), lede ? el("p", { class: "ws-faint ws-small" }, lede) : null,
+    ...inputs.map(([, i, label]) => el("label", { class: "ws-field" }, label, i)),
+    el("div", { class: "ws-row" }, go, el("button", { type: "button", class: "ws-b", onclick: hideOpts }, "Cancel")), err);
+  box.replaceChildren(form); box.hidden = false;
+  if (phone()) sheet("props", true);
+  (inputs[0]?.[1] || go).focus();
+}
+/** rm-audit M14 · Unlock as a step: a locked PDF asks for its password where it was dropped; it never guesses one. */
+function askPassword(bytes, fileName, rest) {
+  const pw = el("input", { type: "password", class: "ws-in", autocomplete: "current-password", "aria-label": "The PDF's password" });
+  const err = el("p", { class: "ws-empty__err", role: "alert" });
+  const go = el("button", { type: "submit", class: "ws-b ws-p" }, "Unlock and open");
+  const form = el("form", { class: "ws-unlock", "data-unlock": "", onsubmit: async (e) => {
+    e.preventDefault(); go.disabled = true;
+    try {
+      const open = await core.unlock(lib, bytes, pw.value);
+      form.remove(); $("#ws-empty").hidden = false;
+      await openBytes(open, fileName, rest);
+      say("Unlocked — the copy you download has no password.", "good");
+    } catch (x) { err.textContent = x?.message || String(x); go.disabled = false; pw.select(); }
+  } }, el("p", { class: "ws-empty__t" }, "This PDF is locked"),
+    el("p", { class: "ws-empty__s" }, `Type the password for ${fileName} — it is checked here, in this browser.`),
+    el("div", { class: "ws-row ws-center" }, pw, go), err);
+  $("#ws-empty").hidden = true;
+  canvasEl.append(form); pw.focus();
+}
+// ── rm-audit M14 · Images → PDF: pictures become a new document here (core.imagesToPdf, as the old tool) ──
+const picturePick = el("input", { type: "file", accept: "image/jpeg,image/png", multiple: true, hidden: true });
+document.body.append(picturePick);
+picturePick.addEventListener("change", async () => {
+  const files = [...(picturePick.files || [])]; picturePick.value = ""; if (!files.length) return;
+  await openPictures(await Promise.all(files.map(async f => ({ name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) }))));
+});
+async function openPictures(images) {
+  try {
+    say("Making a PDF from the pictures…");
+    const bytes = await core.imagesToPdf(lib, images);
+    await openBytes(bytes, `${baseName(String(images[0]?.name || "pictures").replace(/\.(jpe?g|png)$/i, ""))}.pdf`, {});
+    say(`A PDF of ${images.length} picture${images.length === 1 ? "" : "s"}, a page each, in the order chosen.`, "good");
+  } catch (e) { say(e?.message || String(e), "bad"); $("#ws-err").textContent = e?.message || String(e); }
+}
+// ── rm-audit M14 · HTML → PDF: previewed (scripts never run, nothing is fetched), printed by the browser ──
+async function openHtml(text = "", fileName = "") {
+  const { htmlForPrint, HTML_SANDBOX } = await import("/lib/pdf-toolkit/html.js");
+  lastFocus = document.activeElement;
+  const file = el("input", { type: "file", accept: ".html,.htm,text/html", class: "pt-file", "aria-label": "An HTML file" });
+  const paste = el("textarea", { class: "ws-in ws-html-paste", rows: "6", placeholder: "…or paste HTML here", "aria-label": "HTML" });
+  const frame = el("iframe", { class: "ws-html-frame", sandbox: HTML_SANDBOX, title: "Preview", hidden: true });
+  const msg = el("p", { class: "ws-faint ws-small", role: "status" }, "Scripts in it never run, and nothing it links to is fetched.");
+  let name = fileName ? baseName(String(fileName).replace(/\.html?$/i, "")) : "document";
+  const show = async () => {
+    const f = file.files?.[0];
+    const src = paste.value.trim() ? paste.value : f ? await f.text() : text;
+    if (!String(src).trim()) { frame.hidden = true; msg.textContent = "Choose an HTML file or paste HTML first."; return false; }
+    if (f && !paste.value.trim()) name = baseName(f.name.replace(/\.html?$/i, ""));
+    frame.srcdoc = htmlForPrint(src); frame.hidden = false;
+    await new Promise(r => frame.addEventListener("load", r, { once: true }));
+    try { frame.contentDocument.title = name; } catch { /* the title names the saved file — a nicety */ }
+    msg.textContent = "Preview ready — Print, then choose “Save as PDF”."; return true;
+  };
+  file.addEventListener("change", () => { paste.value = ""; show(); });
+  paste.addEventListener("input", () => { text = ""; });
+  const print = el("button", { type: "button", class: "ws-b ws-p", onclick: async () => { if (await show()) frame.contentWindow?.print(); } }, "Print / save as PDF");
+  const box = el("div", { class: "ws-hist ws-html", role: "document", "data-html": "" },
+    el("p", { class: "ws-hist__t", id: "ws-html-title" }, "HTML to PDF"), file, paste, el("div", { class: "ws-row" }, print, el("button", { type: "button", class: "ws-b", onclick: () => show() }, "Preview"),
+      el("button", { type: "button", class: "ws-b", onclick: () => closeDialog() }, "Close")), msg, frame);
+  maker.node.hidden = true;
+  dlg.setAttribute("aria-labelledby", "ws-html-title");
+  dlg.append(box); dlg.hidden = false;
+  if (text) await show(); else file.focus();
+}
 // ── download, print, done, the résumé road ──
 async function saved() {
   const r = await session.save();
@@ -372,7 +501,14 @@ async function download() {
     return r;
   } catch (e) { say(e?.message || String(e), "bad"); return null; }
 }
-$("#ws-download").addEventListener("click", download);
+// ⭐ rm-audit M11 (a) · Download ▾ — PDF · Word · text in one menu (Word and text were only in Convert)
+const dlMenu = el("div", { class: "ws-menu", id: "ws-dl-menu", role: "menu", hidden: true },
+  ...[["pdf", "PDF"], ["word", "Word (.docx)"], ["txt", "Text (.txt)"]].map(([k, l]) => el("button", { type: "button", role: "menuitem", class: "ws-menu__i", "data-dl": k,
+    onclick: () => { dlMenu.hidden = true; $("#ws-download").setAttribute("aria-expanded", "false"); return k === "pdf" ? download() : convert(k); } }, l)));
+$("#ws-download").after(dlMenu);
+$("#ws-download").addEventListener("click", () => { dlMenu.hidden = !dlMenu.hidden; $("#ws-download").setAttribute("aria-expanded", String(!dlMenu.hidden)); if (!dlMenu.hidden) dlMenu.querySelector("button").focus(); });
+document.addEventListener("click", (e) => { if (!dlMenu.hidden && !e.target.closest("#ws-dl-menu, #ws-download")) { dlMenu.hidden = true; $("#ws-download").setAttribute("aria-expanded", "false"); } });
+dlMenu.addEventListener("keydown", (e) => { if (e.key === "Escape") { dlMenu.hidden = true; $("#ws-download").focus(); } });
 $("#ws-done").addEventListener("click", download);
 $("#ws-print").addEventListener("click", async () => {
   try {
@@ -467,6 +603,18 @@ function closeDialog() {
   lastFocus?.focus?.();
 }
 $("#ws-keys").addEventListener("click", openKeys);
+// ⭐ rm-audit M20 / M17 · SETTINGS (the top bar's ⚙): Appearance — draft's four themes — and the account (public/settings-panel.js)
+async function openSettings() {
+  lastFocus = document.activeElement;
+  const [{ appearanceNode }, { accountNode }] = await Promise.all([import("/settings-panel.js"), import("/account-panel.js")]);
+  const close = el("button", { type: "button", class: "ws-b", onclick: () => closeDialog() }, "Close");
+  const box = el("div", { class: "ws-hist", role: "document", "data-settings": "" },
+    el("p", { class: "ws-hist__t", id: "ws-settings-title" }, "Settings"), appearanceNode(el), accountNode(el), close);
+  maker.node.hidden = true;
+  dlg.setAttribute("aria-labelledby", "ws-settings-title");
+  dlg.append(box); dlg.hidden = false; close.focus();
+}
+$("#ws-settings").addEventListener("click", openSettings);
 document.addEventListener("keydown", (e) => {
   const typing = e.target.closest?.("[contenteditable], textarea, input, select");
   if (e.key === "Escape" && !dlg.hidden) { e.preventDefault(); closeDialog(); return; }
@@ -517,7 +665,12 @@ $("#ws-history").addEventListener("click", async () => {
   const q = new URLSearchParams(location.search);
   if (q.has("open")) {
     const h = await store.takeHandoff();
-    if (h?.bytes) await openAny(h.bytes, h.name || "document.pdf", { openMode: q.get("mode") || h.mode || null });
+    if (h?.bytes) {
+      if (core.sniffImage(h.bytes)) await openPictures([{ name: h.name, bytes: h.bytes }]);
+      else if (/[.]html?$/i.test(h.name || "")) await openHtml(new TextDecoder().decode(h.bytes), h.name);
+      else await openAny(h.bytes, h.name || "document.pdf", { openMode: q.get("mode") || h.mode || null });
+      if (h.tool && TOOL_OPENS.has(h.tool) && session.bytes) pickTool(TOOL_OPENS.get(h.tool));
+    }
     history.replaceState(null, "", location.pathname + (q.get("mode") ? `?mode=${q.get("mode")}` : ""));
   } else if (q.get("doc")) {
     const d = await store.getDoc(q.get("doc"));
@@ -525,6 +678,34 @@ $("#ws-history").addEventListener("click", async () => {
     if (v) await openBytes(v.bytes, d.name, { id: d.id, note: "Reopened", openMode: q.get("mode") });
     else $("#ws-err").textContent = "That document isn't kept in this browser any more.";
   } else if (q.get("mode")) setMode(q.get("mode"));
+  if (q.get("tool") && STARTERS.has(q.get("tool")) && !session.bytes) pickTool(q.get("tool"));
+}
+/** The page's text as visual lines (runs sharing a baseline band), top to bottom, each line's runs left to right. */
+function linesOn(pageIdx) {
+  const fs = session.fields.filter(f => f.page === pageIdx).slice().sort((a, b) => a.box.top - b.box.top || a.box.x - b.box.x);
+  const groups = [];
+  for (const f of fs) {
+    const g = groups[groups.length - 1];
+    if (g && Math.abs(g.top - f.box.top) <= Math.max(1.5, Math.min(g.h, f.box.h) * 0.5)) g.fields.push(f);
+    else groups.push({ top: f.box.top, h: f.box.h, fields: [f] });
+  }
+  for (const g of groups) { g.fields.sort((a, b) => a.box.x - b.box.x); g.text = g.fields.map(f => f.text).join(" "); }
+  return groups;
+}
+/** The open document's text, as it reads now (the edits included), a line per visual line, pages in order. */
+const documentText = () => (session.bytes ? session.pages.map(st => linesOn(st.n - 1).map(g => g.text).join("\n")).join("\n\n").trim() : "");
+
+// ── ⭐ draft D192 (3d) · THE ATS PANEL — the properties panel's Résumé tab: this document against a job, the ATS card and the
+// plausibility flags (public/ats-panel.js; the site's check moved inside the document, rm-audit M5). No model (D190).
+{
+  const { mountAtsPanel } = await import("/ats-panel.js");
+  const atsPanel = mountAtsPanel($("#ws-resume"), {
+    resumeText: documentText,
+    resumeLabel: () => { const n = session.fields.length; return `Scored from this document's text — ${n} line${n === 1 ? "" : "s"}, your edits included.`; },
+  });
+  atsRefresh = atsPanel.refresh;
+  if (new URLSearchParams(location.search).get("panel") === "resume") $("#ws-ptab-resume").click();
+  window.__rmAtsPanel = atsPanel;   // for the walks
 }
 // ── ⭐ D190 · TINY — the chat that acts on this document (public/assistant/tiny.js; the engine is draft's, mirrored) ──
 // Every handler calls what the tool bar / navigator / properties call. Nothing here makes a request: the owner's rule
@@ -532,18 +713,6 @@ $("#ws-history").addEventListener("click", async () => {
 {
   const need = () => { if (!session.bytes) throw new Error("Open a PDF first — drop it on the page, or press Open a PDF."); };
   const statusText = (fallback) => $("#ws-status").textContent || fallback;
-  /** The page's text as visual lines (runs sharing a baseline band), top to bottom, each line's runs left to right. */
-  function linesOn(pageIdx) {
-    const fs = session.fields.filter(f => f.page === pageIdx).slice().sort((a, b) => a.box.top - b.box.top || a.box.x - b.box.x);
-    const groups = [];
-    for (const f of fs) {
-      const g = groups[groups.length - 1];
-      if (g && Math.abs(g.top - f.box.top) <= Math.max(1.5, Math.min(g.h, f.box.h) * 0.5)) g.fields.push(f);
-      else groups.push({ top: f.box.top, h: f.box.h, fields: [f] });
-    }
-    for (const g of groups) { g.fields.sort((a, b) => a.box.x - b.box.x); g.text = g.fields.map(f => f.text).join(" "); }
-    return groups;
-  }
   const lineNoOf = (f) => linesOn(f.page).findIndex(g => g.fields.includes(f)) + 1;
   const where = (f) => `page ${f.page + 1}, line ${lineNoOf(f)}`;
   const q = (s) => `“${s}”`;

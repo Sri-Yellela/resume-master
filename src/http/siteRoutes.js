@@ -18,7 +18,8 @@
 //                              ⛔ test/pdfTextA70.test.js fails if this route is put back behind paid().
 //                              The TOKEN API's /v1/resumes/parse-pdf is unchanged (model-backed) — draft's
 //                              résumé upload uses it; moving it is the owner's call (O16e).
-//   generate, enhance          signed in, one credit each, DEBITED ON SUCCESS (src/accounts/credits.js).
+//   generate                   signed in, one credit, DEBITED ON SUCCESS (src/accounts/credits.js). (The site enhance route
+//                              is retired — rm-audit M21; the token API keeps /v1/resumes/enhance.)
 //
 // ⛔ Cross-site writes are refused: every state-changing request must carry X-RM-Client: web, which a
 // form on another site cannot send without a CORS preflight this service never grants.
@@ -38,7 +39,6 @@ import { saveArtifact, listArtifacts, getArtifact, deleteArtifact, setPinned, re
 import { listBackups, runBackupAsync } from "../store/backups.js";
 import { sendResetEmail, emailConfigured } from "../accounts/email.js";
 import { generateResume } from "../generation/generate.js";
-import { enhanceResume } from "../generation/enhance.js";
 import { extractPdfText } from "../parsing/extractPdfText.js";
 import { scoreAtsV2, formatResume, atsOutcome } from "../tools/deterministic.js";
 import { createAddressHasher } from "./metering.js";
@@ -285,8 +285,8 @@ export function siteRoutes({ store, anthropic = null, env = process.env, meterin
   }];
   r.post("/tools/generate", ...paid("resumes.generate", req => generateResume(anthropic, req.body || {}, { env }),
     "generated_resume", out => out.html, req => req.body?.job?.title));
-  r.post("/tools/enhance", ...paid("resumes.enhance", req => enhanceResume(anthropic, req.body || {}),
-    "generated_resume", out => out.text, () => "Enhanced résumé"));
+  // rm-audit M21 (owner 11-19): the site's /tools/enhance had no caller on any page — retired. The token API's
+  // /v1/resumes/enhance (draft's) is unchanged.
   // A70: free and anonymous — see the header. ⛔ Not paid(): nothing here calls a model.
   const pdfDaily = (req, res, next) => (pdfDailyLimiter(req.ip) ? next()
     : fail(res, 429, "daily_limit", "This address has read its PDFs for today — the reader is free, with a daily ceiling. Try again tomorrow.",
@@ -297,7 +297,7 @@ export function siteRoutes({ store, anthropic = null, env = process.env, meterin
       metering?.record(req.user ? "site-user" : "site-anon", "resumes.pdf-text", [], { via: "site" });
       if (out.needsOcr) {
         return res.json({ ...out, message: "This PDF has no text to read — it looks like a scan or a picture of a résumé. "
-          + "Reading scans (OCR) is not offered. Export the résumé from Word, Google Docs or your editor as a PDF and try that." });
+          + "Open it in the workspace (resumemaster.one/workspace/) and use Convert → Searchable (OCR) — it reads the text in this browser." });
       }
       res.json({ ...out, saved: keep(req, "pdf_text", req.body?.title || "Text from a PDF", out.text) });
     } catch (e) { next(e); }

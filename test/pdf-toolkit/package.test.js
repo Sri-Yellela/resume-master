@@ -47,7 +47,8 @@ test("⛔ nothing in the package can send a file anywhere — the promise on the
     assert.doesNotMatch(src, /\bfetch\s*\(|XMLHttpRequest|sendBeacon|new WebSocket|EventSource\(|\bimport\s*\(\s*["'`]https?:/,
       `${f} must make no network request`);
   }
-  assert.match(fs.readFileSync(path.join(SRC, "ui.js"), "utf8"), /Your files never leave this browser/);
+  // moved on purpose (rm-audit M15, 46y): the 16-tab UI that printed the promise is retired; the workspace says it
+  assert.match(fs.readFileSync("public/workspace/index.html", "utf8"), /Nothing leaves this device/);
 });
 
 test("⛔ the operations import nothing — the host passes the libraries in", () => {

@@ -12,7 +12,7 @@
   color: var(--pt-text);
   font: inherit;
 }
-.pt-promise { margin: 0 0 12px; font-size: 0.92em; color: var(--pt-muted); }
+
 .pt-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
 .pt-tab {
   font: inherit; font-size: 0.9em; padding: 6px 12px; border-radius: 9px; cursor: pointer;
@@ -20,8 +20,7 @@
 }
 .pt-tab[aria-selected="true"] { background: var(--pt-accent); color: var(--pt-on-accent); border-color: var(--pt-accent); }
 .pt-tab:focus-visible, .pt-btn:focus-visible, .pt-mini:focus-visible { outline: 2px solid var(--pt-accent); outline-offset: 2px; }
-.pt-panel { display: grid; gap: 10px; }
-.pt-blurb { margin: 0; color: var(--pt-muted); }
+
 .pt-field { display: grid; gap: 4px; font-size: 0.9em; }
 .pt-file, .pt-text {
   font: inherit; color: var(--pt-text); background: var(--pt-surface); max-width: 100%;
@@ -38,27 +37,12 @@
   border: 1px solid var(--pt-border); background: var(--pt-surface); color: var(--pt-text);
 }
 .pt-mini:disabled { opacity: 0.4; cursor: default; }
-.pt-list { margin: 0; padding-left: 1.4em; display: grid; gap: 4px; }
-.pt-name { overflow-wrap: anywhere; }
-.pt-status { min-height: 1.2em; font-size: 0.92em; }
-.pt-status.pt-good { color: var(--pt-good); }
-.pt-status.pt-bad { color: var(--pt-bad); }
-.pt-results { display: grid; gap: 8px; }
-.pt-result { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+
 .pt-muted { color: var(--pt-muted); font-size: 0.9em; }
-.pt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(156px, 1fr)); gap: 10px; }
-.pt-page { margin: 0; padding: 6px; border: 1px solid var(--pt-border); border-radius: var(--pt-radius); background: var(--pt-surface); text-align: center; }
-.pt-page img { width: 100%; height: auto; transition: transform 160ms ease; }
-.pt-page figcaption { font-size: 0.8em; color: var(--pt-muted); margin: 4px 0; }
+
 .pt-row { display: flex; justify-content: center; gap: 4px; flex-wrap: wrap; }
-.pt-textout { width: 100%; box-sizing: border-box; font: 0.85em/1.45 ui-monospace, monospace; color: var(--pt-text);
-  background: var(--pt-surface); border: 1px solid var(--pt-border); border-radius: calc(var(--pt-radius) * 0.6); padding: 8px; }
+
 /* the HTML tool's preview — white, like the paper it prints to */
-.pt-preview { display: block; width: 100%; height: 520px; margin-top: 10px; border: 1px solid var(--pt-border);
-  border-radius: calc(var(--pt-radius) * 0.6); background: #fff; }
-.pt-preview[hidden] { display: none; }
-@media (max-width: 520px) { .pt-preview { height: 400px; } }
-@media (prefers-reduced-motion: reduce) { .pt-page img { transition: none; } }
 
 /* ── A203 · Edit PDF and Sign PDF: the palette, the pages with their layer of placed items, the signature maker ── */
 .pt-ed-palette { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -114,47 +98,8 @@
 .pt-panel > *, .pt-ed-maker > *, .pt-ed-body > *, .pt-ed-pages > * { min-width: 0; }
 .pt-ed-pad, .pt-ed-canvas { max-width: 100%; }
 
-/* ── A203 (2) · Edit PDF in draft's sandbox look (owner 11-13: "use the entire sandbox styling and formatting and buttons
-   from draft") — draft's Dusk tokens (themes/dusk-dark.js) and its depth box (components/DepthButton.css), redrawn here. */
-.pt-sb {
-  /* rm-audit M20: the site's tokens (public/tokens.css) — this was the fourth hand-copied Dusk palette */
-  --sb-canvas: var(--bg); --sb-card: var(--card); --sb-well: var(--raise); --sb-line: var(--line); --sb-ink: var(--ink); --sb-muted: var(--body);
-  --sb-accent: var(--accent); --sb-accent-edge: var(--accent2); --sb-on-accent: var(--on-accent);
-  --sb-rest: var(--rest); --sb-hover: var(--hover); --sb-press: var(--press); --sb-glow: var(--glow);
-  display: grid; gap: 12px; min-width: 0; padding: 16px; border-radius: 22px; background: var(--sb-canvas); color: var(--sb-ink);
-  font-family: var(--font, system-ui, sans-serif);
-}
-.pt-sb .pt-field { color: var(--sb-muted); }
-.pt-sb .pt-file { background: var(--sb-card); color: var(--sb-ink); border-color: var(--sb-line); }
-.pt-sb .pt-muted, .pt-sb-note { color: var(--sb-muted); margin: 0; font-size: 0.9em; }
-.pt-sb .pt-status { color: var(--sb-muted); }
-.pt-sb .pt-status.pt-good { color: var(--good); } .pt-sb .pt-status.pt-bad { color: var(--bad); }
-.pt-sb-bar {
-  position: sticky; top: 8px; z-index: 3; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 10px;
-  border-radius: 16px; background: var(--sb-card); border: 1px solid var(--sb-line);
-}
-.pt-sb-sep { width: 1px; align-self: stretch; background: var(--sb-line); margin: 0 2px; }
-.pt-sb-grow { flex: 1 1 auto; }
-.pt-sb-count { color: var(--sb-accent); font-size: 0.85em; font-weight: 600; }
-.pt-sbx-v { min-width: 2.4em; text-align: center; font-variant-numeric: tabular-nums; color: var(--sb-ink); font-size: 0.9em; }
-.pt-sbx {
-  display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 30px; height: 30px; padding: 0 10px;
-  border: 1px solid var(--sb-line); background: var(--sb-well); color: var(--sb-ink); border-radius: 9px; box-shadow: var(--sb-rest);
-  font: 700 12.5px/1 inherit; cursor: pointer; text-decoration: none; transition: transform .16s, box-shadow .16s, border-color .16s, color .16s;
-}
-.pt-sbx:hover:not(:disabled), .pt-sbx:focus-visible { transform: translateY(-2px); box-shadow: var(--sb-hover); border-color: var(--sb-accent); color: var(--sb-accent); }
-.pt-sbx:focus-visible { outline: 2px solid var(--sb-accent); outline-offset: 2px; }
-.pt-sbx:active:not(:disabled) { transform: translateY(0); box-shadow: var(--sb-press); }
-.pt-sbx:disabled { opacity: .45; cursor: default; }
-.pt-sbx[aria-pressed="true"] { border-color: var(--sb-accent); color: var(--sb-accent); }
-.pt-sbx--p { height: 42px; padding: 0 18px; background: var(--sb-accent); border-color: var(--sb-accent-edge); color: var(--sb-on-accent); box-shadow: var(--sb-glow); }
-.pt-sbx--p:hover:not(:disabled), .pt-sbx--p:focus-visible { color: var(--sb-on-accent); border-color: var(--sb-accent-edge); }
-.pt-sbx--sel { padding: 0 6px; font-weight: 600; appearance: auto; }
-.pt-sbx-color { width: 18px; height: 18px; padding: 0; border: 0; background: none; cursor: pointer; }
-.pt-sb-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
-.pt-sb .pt-result a.pt-btn { background: var(--sb-accent); color: var(--sb-on-accent); border-color: var(--sb-accent-edge); border-radius: 11px; }
-.pt-sb .pt-ed-page { box-shadow: var(--shadow-lg); }
-.pt-sb .pt-ed-page figcaption { color: var(--sb-muted); }
+ 
+
 /* the page's own text runs, each editable where it is */
 .pt-tx-layer { cursor: default; }
 .pt-tx {
@@ -164,14 +109,14 @@
 .pt-tx:hover { box-shadow: 0 0 0 1px rgba(30, 90, 200, 0.45); }
 .pt-tx:focus { box-shadow: 0 0 0 1.5px rgba(30, 90, 200, 0.9); }
 .pt-tx--changed { box-shadow: 0 0 0 1px rgba(251, 140, 100, 0.55); }
-.pt-sb .pt-sbx--sel { width: auto; max-width: 170px; flex: 0 0 auto; }
+
 /* A203 (4) (owner 11-13: "it recognises the text and makes fields around the text blocks indicating editable" — PDFfiller):
    every editable line shows its box at all times; a line read from a picture (OCR) has a dashed one. */
 .pt-tx { box-shadow: 0 0 0 1px rgba(30, 90, 200, 0.30); }
 .pt-tx--ocr { box-shadow: none; outline: 1px dashed rgba(30, 90, 200, 0.55); outline-offset: 0; }
 .pt-tx:hover { box-shadow: 0 0 0 1.5px rgba(30, 90, 200, 0.65); }
 .pt-tx--ocr:focus, .pt-tx--ocr:hover { outline-color: rgba(30, 90, 200, 0.9); }
-.pt-sb-bar { top: 64px; }   /* A203 (4): below the site's fixed 56 px bar */
+   /* A203 (4): below the site's fixed 56 px bar */
 /* D189 P3 · Fill out: the PDF's own form fields as inputs where they are — a pale field tint, like a form in any viewer */
 .pt-fm { position: absolute; box-sizing: border-box; margin: 0; padding: 0 3px; border: 1px solid rgba(30, 90, 200, .45); border-radius: 2px;
   background: rgba(214, 228, 255, .55); color: #111; font-family: Helvetica, Arial, sans-serif; outline: none; }

@@ -57,9 +57,10 @@ test("the workspace: an Annotate mode (Highlight · Draw · Box · Note), Word f
   assert.match(html, /data-mode="annotate"[^>]*>Annotate</);
   assert.match(html, /id="ws-open" accept="application\/pdf,\.pdf,\.docx,/);
   const ws = read("public/workspace/workspace.js");
-  assert.match(ws, /annotate: \[\["select", "⌖", "Select"\], \["highlight", "▬", "Highlight"\], \["ink", "✎", "Draw"\], \["box", "▢", "Box"\], \["text", "⊞", "Note"\]\],/);
+  // moved on purpose (rm-audit M14, 46y): Annotate also carries Watermark (after a separator); the hand-off also takes pictures / HTML
+  assert.match(ws, /annotate: \[\["select", "⌖", "Select"\], \["highlight", "▬", "Highlight"\], \["ink", "✎", "Draw"\], \["box", "▢", "Box"\], \["text", "⊞", "Note"\], \["\|"\], \["watermark", "◪", "Watermark"\]\],/);
   assert.match(ws, /\["fromword", "W→", "From Word"\]/);
-  assert.match(ws, /if \(h\?\.bytes\) await openAny\(h\.bytes,/, "Documents home's hand-off goes through the Word check too");
+  assert.match(ws, /else await openAny\(h\.bytes, h\.name \|\| "document\.pdf"/, "Documents home's hand-off goes through the Word check too");
   assert.match(ws, /are not carried/, "the status says what Word → PDF leaves out");
   assert.match(read("public/index.html"), /id="docs-open" accept="application\/pdf,\.pdf,\.docx,/);
   const s = read("src/pdf-toolkit/session.js");

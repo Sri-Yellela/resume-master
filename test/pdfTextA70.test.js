@@ -105,7 +105,8 @@ test("the site route is free and anonymous: no account, no credits, no model cli
     assert.equal(body.credits, undefined, "nothing is charged, so nothing is reported");
     const scan = await (await s.post({ pdfBase64: await pdf((p) => p.drawRectangle({ x: 1, y: 1, width: 9, height: 9 })) })).json();
     assert.equal(scan.needsOcr, true);
-    assert.match(scan.message, /OCR\) is not offered/);
+    // moved on purpose (rm-audit M21, 46y): the old sentence said OCR was not offered — false since the workspace reads scans
+    assert.match(scan.message, /Convert → Searchable \(OCR\)/);
   } finally { await s.close(); }
 });
 
