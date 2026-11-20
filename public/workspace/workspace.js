@@ -231,9 +231,11 @@ function setMode(m) {
   const b = document.querySelector(`.ws-mode[data-mode="${m}"]`);
   if (b) b.click();
 }
-for (const b of document.querySelectorAll(".ws-mode")) b.addEventListener("click", () => {
+// D192 P4 · the structured editor: with a PDF open its text goes over as sections (as "Make this an editable résumé"); empty → the editor
+$("#ws-structured").addEventListener("click", () => (session.bytes ? $("#ws-to-resume").click() : (location.href = "/editor/")));
+for (const b of document.querySelectorAll(".ws-mode[data-mode]")) b.addEventListener("click", () => {
   mode = b.dataset.mode;
-  for (const x of document.querySelectorAll(".ws-mode")) x.setAttribute("aria-selected", String(x === b));
+  for (const x of document.querySelectorAll(".ws-mode[data-mode]")) x.setAttribute("aria-selected", String(x === b));
   session.arm(null); drawTools();
   if (mode === "sign" && session.formFields.length) say(`This PDF has ${new Set(session.formFields.map(f => f.name)).size} form fields — type straight into them on the page.`);
   if (mode === "pages") say("Choose a page in the strip, then rotate, duplicate, delete, move or add.");

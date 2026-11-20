@@ -44,7 +44,8 @@ button, select, input { font: inherit; color: inherit; }
 .ws-saved { color: var(--muted); font-size: 12px; white-space: nowrap; }
 .ws-saved:not(:empty)::before { content: "● "; color: var(--good); }
 /* modes + tools */
-.ws-modes { display: flex; gap: 4px; padding: 8px 14px 0; }
+.ws-modes { display: flex; gap: 4px; padding: 8px 14px 0; overflow-x: auto; scrollbar-width: none; }   /* six tabs scroll on a phone, never the page */
+.ws-mode { flex-shrink: 0; }
 .ws-mode { border: 0; background: transparent; padding: 8px 14px; border-radius: 10px 10px 0 0; color: var(--body); font-weight: 700; font-size: 13px; cursor: pointer; }
 .ws-mode[aria-selected="true"] { background: var(--card); color: var(--ink); }
 .ws-tools { display: flex; align-items: center; gap: 4px; padding: 7px 14px; background: var(--card); border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: thin; min-height: 58px; }
@@ -165,3 +166,5 @@ button, select, input { font: inherit; color: inherit; }
 .ws-html { width: min(860px, 100%); }
 .ws-html-paste { resize: vertical; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12px; }
 .ws-html-frame { width: 100%; height: 46vh; border: 1px solid var(--line); border-radius: 9px; background: var(--paper); }
+/* D192 P4 · the structured editor's mode tab leaves for the editor (↗) */
+.ws-mode--go { margin-left: auto; color: var(--accent); }
