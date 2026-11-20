@@ -20,6 +20,7 @@ const framed = window.parent !== window;
 const host = params.get("host") || "";
 const embedded = framed && params.get("embed") === "1" && isAllowedHost(host);
 const STORE_KEY = "rm-editor:doc";
+const KIND_KEY = "rm-editor:kind";   // D192 P4: a cover letter stays a cover letter across a reload (standalone only)
 
 let doc = null;           // { contract, style, sections }
 let meta = {};            // { company, title, changes[], filename, readOnly, readOnlyNote }
@@ -64,6 +65,7 @@ function load(html, m) {
       // READ ONLY: a résumé that was already sent is shown as it was — it can be read, highlighted and downloaded, not changed.
       readOnly: m.readOnly === true, readOnlyNote: String(m.readOnlyNote || "") };
     document.documentElement.dataset.readonly = String(meta.readOnly);
+    if (!embedded) { document.documentElement.dataset.kind = meta.kind; try { localStorage.setItem(KIND_KEY, meta.kind); } catch { /* storage blocked */ } }
     if (!doc.sections.length) throw new Error("No sections were found in this résumé.");
     focusId = (doc.sections.find(s => !s.locked) || doc.sections[0]).id;
     showUi();
@@ -437,7 +439,7 @@ if (framed && !embedded) {
   try { saved = localStorage.getItem(STORE_KEY); } catch { /* storage blocked */ }
   if (handoff?.html) load(handoff.html, { filename: handoff.filename || "document.html" });
   else if (params.get("sample")) load(SAMPLE, {});   // D189 P4: Documents home's "A sample résumé"
-  else if (saved) load(saved, {});
+  else if (saved) { let kind = null; try { kind = localStorage.getItem(KIND_KEY); } catch { /* blocked */ } load(saved, { kind }); }
   else $("#start").hidden = false;
   // Open a PDF: its text read in this browser (pdf.js) and laid out as a document (src/pdf-toolkit/pdfToDoc.js)
   $("#open-pdf").addEventListener("change", async (e) => {
@@ -462,6 +464,7 @@ if (framed && !embedded) {
   // ⭐ rm-audit M6 / M7 / M5 (46y): by itself, the editor carries Format (paste a résumé), the ATS panel and Tailor
   // (public/editor/editor-side.js) — never when embedded, so rm-editor/1 is unchanged.
   window.__rmEditorHtml = currentHtml;
+  window.__rmEditorKind = () => meta.kind;
   import("/editor/editor-side.js").then(m => { window.__rmEditorSide = m.mountSide({ load, getText: () => (root.querySelector(".rm-doc")?.innerText || "").trim(), params }); })
     .catch(err => { $("#start-error").textContent = String(err?.message || err); });
   $("#open-file").addEventListener("change", async (e) => {

@@ -150,3 +150,24 @@ button, select, input { font: inherit; color: inherit; }
 .paste .btnlike { justify-self: start; }
 @media (max-width: 1240px) { .wrap.wrap--side { grid-template-columns: 220px minmax(0, 1fr); } .wrap.wrap--side .side { grid-column: 1 / -1; position: static; max-height: none; } }
 @media (max-width: 860px) { .wrap.wrap--side { grid-template-columns: 1fr; } }
+/* ⭐ D192 P4 · the workspace's shell around the structured editor (by itself only — html[data-shell]): top bar, mode tabs
+   (Structured selected), the editor's bar as the full-width tool bar. The same shapes as public/workspace/workspace.css. */
+.ed-top { display: flex; align-items: center; gap: 8px; padding: 9px 14px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.ed-top .ws-stamp { text-decoration: none; }
+.ed-top .ws-stamp span { display: inline-block; background: var(--stamp-paper); color: var(--stamp-ink); border: 2px solid var(--stamp-ink); transform: rotate(-2deg); padding: 2px 7px; font: italic 800 13px/1 "Barlow Condensed", system-ui; letter-spacing: .06em; }
+.ed-top .ws-name { font-weight: 700; }
+.ed-top .ws-grow { flex: 1 1 auto; }
+.ed-top .ws-b { display: inline-flex; align-items: center; justify-content: center; height: 32px; padding: 0 12px; border: 1px solid var(--line); background: var(--raise); color: var(--ink);
+  border-radius: 9px; box-shadow: var(--rest); font: 700 12.5px/1 var(--font); cursor: pointer; }
+.ed-top .ws-ic { width: 32px; padding: 0; }
+.ed-top .ws-b:hover, .ed-top .ws-b:focus-visible { border-color: var(--accent); color: var(--accent); }
+.ed-top .ws-dl { position: relative; display: inline-flex; }
+.ed-top .ws-menu { position: absolute; z-index: 30; top: calc(100% + 6px); right: 0; min-width: 140px; display: grid; padding: 6px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--hover); }
+.ed-top .ws-menu__i { font: inherit; font-size: 13px; text-align: left; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); cursor: pointer; }
+.ed-top .ws-menu__i:hover { background: var(--raise); color: var(--accent); }
+.ed-modes { display: flex; gap: 4px; padding: 8px 14px 0; overflow-x: auto; scrollbar-width: none; }
+.ed-modes .ws-mode { flex-shrink: 0; padding: 8px 14px; border-radius: 10px 10px 0 0; color: var(--body); font-weight: 700; font-size: 13px; text-decoration: none; }
+.ed-modes .ws-mode[aria-selected="true"] { background: var(--card); color: var(--ink); }
+.ed-modes .ws-mode:hover { color: var(--ink); }
+html[data-shell] .bar { position: sticky; top: 0; width: 100%; max-width: none; margin: 0; border-radius: 0; box-shadow: none; border-bottom: 1px solid var(--line); justify-content: flex-start; }
+html[data-shell] .menu, html[data-shell] .side { top: 70px; }

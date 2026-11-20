@@ -48,10 +48,40 @@ export const COVER_LETTER = `<html><body>
 <section data-rm-section="close" data-rm-kind="other" data-rm-title="Closing"><p>Sincerely,</p><p>Your Name</p></section>
 </body></html>`;
 
+// ⭐ D192 P4 · THE WORKSPACE'S SHELL around the structured editor (D189): the top bar (the stamp, the file's name, its saved
+// state, Download ▾, Settings), the mode tabs — the workspace's five PDF modes (they open the workspace) with Structured
+// selected — and the editor's own bar as the tool bar under them. By itself only; the embedded editor never draws it.
+export function mountShell() {
+  const name = el("span", { class: "ws-name", id: "ed-name" }, "Untitled");
+  const dl = el("div", { class: "ws-menu", id: "ed-dl-menu", role: "menu", hidden: true },
+    el("button", { type: "button", role: "menuitem", class: "ws-menu__i", "data-dl": "pdf", onclick: () => { dl.hidden = true; $("#download-pdf")?.click(); } }, "PDF"),
+    el("button", { type: "button", role: "menuitem", class: "ws-menu__i", "data-dl": "html", onclick: () => { dl.hidden = true; $("#download-html")?.click(); } }, "HTML"));
+  const dlBtn = el("button", { type: "button", class: "ws-b", id: "ed-download", "aria-haspopup": "menu", "aria-expanded": "false",
+    onclick: () => { dl.hidden = !dl.hidden; dlBtn.setAttribute("aria-expanded", String(!dl.hidden)); } }, "Download ▾");
+  document.addEventListener("click", (e) => { if (!dl.hidden && !e.target.closest("#ed-dl-menu, #ed-download")) dl.hidden = true; });
+  const top = el("header", { class: "ed-top", "data-shell": "", role: "banner" },
+    el("a", { class: "ws-stamp", href: "/", "aria-label": "Resume Master — home" }, el("span", {}, "RM")),
+    name, el("span", { class: "ws-grow" }),
+    el("span", { class: "ws-dl" }, dlBtn, dl),
+    el("button", { type: "button", class: "ws-b ws-ic", "aria-label": "Settings", title: "Settings — appearance, your account", onclick: openSettings }, "⚙"));
+  const modes = el("nav", { class: "ws-modes ed-modes", role: "tablist", "aria-label": "Modes" },
+    ...[["edit", "Edit"], ["annotate", "Annotate"], ["sign", "Fill & sign"], ["pages", "Pages"], ["convert", "Convert"]].map(([m, l]) =>
+      el("a", { role: "tab", class: "ws-mode", href: `/workspace/?mode=${m}`, "aria-selected": "false", title: "A PDF mode — opens the workspace" }, l)),
+    el("span", { role: "tab", class: "ws-mode", "aria-selected": "true", "data-mode": "structured" }, "Structured"));
+  document.body.prepend(top, modes);
+  document.documentElement.dataset.shell = "true";
+  // the file's name follows the document (a cover letter is named as one)
+  const sync = () => { const k = window.__rmEditorKind?.(); name.textContent = k === "cover-letter" ? "Cover letter" : $("#menu-title")?.textContent && !$(".wrap")?.hidden ? "Résumé" : "Untitled"; };
+  new MutationObserver(sync).observe($("#menu-title"), { childList: true, characterData: true, subtree: true });
+  sync();
+  return { sync };
+}
+
 export function mountSide({ load: loadDoc, getText, params }) {
   // every load (paste, tailor, cover letter, back) redraws the ATS panel's source line — it was drawn for an empty page
   let ats = null;
   const load = (html, m) => { loadDoc(html, m); ats?.refresh(); };
+  mountShell();
   // ── the cover letter: a start option, and /editor/?doc=cover-letter ──
   const startCover = () => load(COVER_LETTER, { filename: "cover-letter.html", kind: "cover-letter" });
   $(".start__row", $("#start"))?.append(el("button", { type: "button", class: "btnlike", id: "open-cover", onclick: startCover }, "Start a cover letter"));
@@ -92,6 +122,9 @@ export function mountSide({ load: loadDoc, getText, params }) {
   const f = el("form", { class: "ats-form", "data-tailor": "", onsubmit: async (e) => {
     e.preventDefault();
     const j = job(), go = f.querySelector("button[type=submit]");
+    // D192 P4: Tailor rewrites résumés. A cover letter would need a NEW model prompt — not added (the lane's instruction, D190):
+    // it says so instead of sending a letter through the résumé prompt.
+    if (window.__rmEditorKind?.() === "cover-letter") { put(out, el("p", { class: "note", "data-tailor-letter": "" }, "Tailor rewrites résumés. Tailoring a cover letter would need a new writing prompt, which isn't offered — edit the letter in place, and check your résumé against the job in the Résumé tab.")); return; }
     if (!j.title || !j.description) { put(out, el("p", { class: "ats-bad" }, "Put the job in the Résumé tab first (its title and description).")); pick("resume"); return; }
     go.disabled = true; put(out, el("p", { class: "note" }, "Tailoring — this takes up to a minute…"));
     try {
