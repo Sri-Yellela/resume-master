@@ -183,7 +183,7 @@ test("46n · every page of the site loads Tiny exactly once (tiny-boot.js) — a
   walk("public");
   assert.deepEqual(all.filter(p => !pages.includes(p)).sort(), ["public/workspace/index.html"]);
   // the boot script skips the workspace (data-ws) and a second mount
-  assert.match(read("public/assistant/tiny-boot.js"), /if \(!document\.querySelector\("\[data-ws\]"\) && !document\.querySelector\("\[data-tiny-root\]"\)\)/);
+  assert.match(read("public/assistant/tiny-boot.js"), /if \(!embedded && !document\.querySelector\("\[data-ws\]"\) && !document\.querySelector\("\[data-tiny-root\]"\)\)/);
   assert.match(read("public/workspace/index.html"), /data-ws/);
 });
 
@@ -209,4 +209,26 @@ test("46n · Tiny's fox is draft's: public/assistant/tinyMascot.js is byte-ident
   assert.doesNotMatch(own, /from "\/assistant\/tinyMascot\.js"/, "this site draws its own short logo, not draft's");
   assert.match(own, /const TINY_NAME = "Resume Master";/);
   assert.match(own, />RM<\/text>/, "the RM card of favicon.svg");
+});
+
+test("46z · Tiny never draws inside draft's embedded editor (rm-editor/1): the boot skips a framed ?embed=1 page or data-embedded", async () => {
+  const src = read("public/assistant/tiny-boot.js");
+  const boots = async ({ framed, search, embeddedAttr }) => {
+    let mounted = false;
+    const g = {
+      window: {}, location: { search },
+      document: {
+        documentElement: { dataset: embeddedAttr ? { embedded: "true" } : {} },
+        querySelector: () => null, head: { append() {} }, createElement: () => ({}),
+      },
+    };
+    g.window.self = g.window; g.window.top = framed ? {} : g.window;
+    const body = src.replace(/const \{ mountTiny \} = await import\("\/assistant\/tiny\.js"\);/, "const mountTiny = async () => { mark(); };");
+    const fn = new Function("window", "location", "document", "URLSearchParams", "mark", `return (async () => { ${body} })();`);
+    await fn(g.window, g.location, g.document, URLSearchParams, () => { mounted = true; });
+    return mounted;
+  };
+  assert.equal(await boots({ framed: false, search: "" }), true, "a plain page mounts Tiny");
+  assert.equal(await boots({ framed: true, search: "?embed=1&host=x" }), false, "draft's embed does not");
+  assert.equal(await boots({ framed: false, search: "", embeddedAttr: true }), false, "data-embedded does not");
 });
