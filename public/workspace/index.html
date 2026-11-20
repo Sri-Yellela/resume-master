@@ -50,6 +50,13 @@
     <div class="ws-body">
       <aside class="ws-strip" id="ws-strip" aria-label="Pages"></aside>
       <main class="ws-canvas" id="ws-canvas" aria-label="The document">
+        <!-- ⭐ 46z (owner 11-20: "clicking ats … is opening pdf editor blank") · the ATS check AS the page when it is opened with
+             no document (?panel=resume): the check sits here, not in the narrow properties column; opening a PDF moves it back -->
+        <section class="ws-atsfirst" id="ws-atsfirst" aria-labelledby="ws-atsfirst-t">
+          <h1 class="ws-atsfirst__t" id="ws-atsfirst-t">ATS check</h1>
+          <p class="ws-atsfirst__s">Your résumé against one job: the number, what it found, and what would raise it. Paste both below — or <button type="button" class="ws-link" id="ws-atsfirst-open">open your résumé as a PDF</button> and the check reads it as you edit. Nothing is stored.</p>
+          <div class="ws-atsfirst__slot" id="ws-atsfirst-slot"></div>
+        </section>
         <div class="ws-empty" id="ws-empty">
           <p class="ws-empty__t">Drop a PDF here</p>
           <p class="ws-empty__s">or <label class="ws-b ws-p"><input type="file" id="ws-open" accept="application/pdf,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>Open a PDF</label> — or a Word file (.docx), made into a PDF here. Or start from <button type="button" class="ws-link" data-start="fromimages">pictures</button> or <button type="button" class="ws-link" data-start="fromhtml">HTML</button>. Nothing leaves this device.</p>

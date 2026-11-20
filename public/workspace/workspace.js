@@ -706,7 +706,22 @@ const documentText = () => (session.bytes ? session.pages.map(st => linesOn(st.n
     resumeLabel: () => { const n = session.fields.length; return `Scored from this document's text — ${n} line${n === 1 ? "" : "s"}, your edits included.`; },
   });
   atsRefresh = atsPanel.refresh;
-  if (new URLSearchParams(location.search).get("panel") === "resume") $("#ws-ptab-resume").click();
+  if (new URLSearchParams(location.search).get("panel") === "resume") {
+    $("#ws-ptab-resume").click();
+    // ⭐ 46z (owner 11-20: "clicking ats on resume master is opening pdf editor blank") · with no document open, the check IS
+    // the page: the panel moves into the canvas (one column, no empty PDF editor; on a phone the properties were a closed
+    // sheet, so nothing showed at all). The moment a document opens, it goes back to the properties' Résumé tab.
+    const home = $("#ws-resume"), propsSlot = $("#ws-changes"), first = $("#ws-atsfirst-slot");
+    const place = () => {
+      const open = ws.dataset.state === "open";
+      if (open) { delete ws.dataset.ats; if (home.parentElement !== propsSlot.parentElement) propsSlot.before(home); }
+      else if (!session.bytes) { ws.dataset.ats = "first"; if (home.parentElement !== first) first.append(home); }
+      atsPanel.refresh();
+    };
+    $("#ws-atsfirst-open").addEventListener("click", () => $("#ws-open").click());
+    new MutationObserver(place).observe(ws, { attributes: true, attributeFilter: ["data-state"] });
+    place();
+  }
   window.__rmAtsPanel = atsPanel;   // for the walks
 }
 // ── ⭐ D190 · TINY — the chat that acts on this document (public/assistant/tiny.js; the engine is draft's, mirrored) ──
