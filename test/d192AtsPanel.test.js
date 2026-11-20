@@ -84,3 +84,23 @@ test("d192AtsPanelServed: the module and its stylesheet are served, and the site
     assert.ok("plausibility" in j && "contextual" in j, "the v2 blocks the panel draws");
   } finally { await new Promise(r => { server.close(r); server.closeAllConnections?.(); }); }
 });
+
+test("draft 46z (owner 11-20: 'just state more to add context'): the card states each part's figures and one row for the whole card", async () => {
+  const { partFacts, atsCardHtml } = await import("../public/ats-panel.js");
+  const rep = { score: 62, tier1_matched: ["typescript", "react", "aws"], tier1_missing: ["node.js", "looker"], action_verbs_matched: ["Built"], action_verbs_missing: ["Designed"] };
+  const c = { score: 58, parts: {
+    skill_match: { score: 62, status: "ok", weight: 0.5 },
+    role_fit: { score: 65, status: "ok", relation: "same_family", level_gap: 1, domain_lift: 10, weight: 0.2, posting: { subcategory: "swe.backend", level: "senior" }, resume: { level: "mid" } },
+    responsibility_overlap: { score: 40, status: "ok", phrases: 5, matched: ["a", "b"], missing: ["c", "d", "e"], weight: 0.15 },
+    tech_stack: { score: 73, status: "ok", exact: [{ tech: "TypeScript", share: 0.9 }], ecosystem: [{ yours: "Spring", theirs: "Node.js", share: 0.7 }], gaps: [{ tech: "Looker", share: 0.4 }], weight: 0.15 } },
+    similarities: { domains: ["healthcare"] }, dissimilarities: [] };
+  const f = partFacts(rep, c);
+  assert.deepEqual(f.Skills, ["3 of 5 skills", "1 of 2 action verbs", "weighs 50%"]);
+  assert.deepEqual(f.Role, ["1 level apart", "+10 for a shared field", "weighs 20%"]);
+  assert.deepEqual(f["The work"], ["3 duties to show", "weighs 15%"]);
+  assert.deepEqual(f["Their stack"], ["TypeScript 90%, Node.js 70%, Looker 40% of their jobs", "1 of 3 of their tools exact · 1 close", "weighs 15%"]);
+  assert.deepEqual(f.card, ["skill match 62 · in context 58", "healthcare in common"]);
+  const h = atsCardHtml(rep, c);
+  assert.match(h, /data-ats-facts="card">skill match 62 · in context 58 · healthcare in common</);
+  assert.match(h, /data-ats-facts="Their stack">TypeScript 90%, Node\.js 70%, Looker 40% of their jobs/);
+});

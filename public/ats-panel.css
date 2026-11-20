@@ -34,3 +34,6 @@
 /* in a narrow column (the properties panel, ~260 px) the rows tighten */
 .ats-panel .atsc-row { grid-template-columns: 64px minmax(0, 1fr) 26px; gap: 8px; }
 .ats-panel .atsc-num .ats-num { font-size: 38px; }
+/* draft 46z: the card's figures — stated, quieter than the line */
+.atsc-facts { font-size: 11.5px; opacity: .85; overflow-wrap: anywhere; }
+p.atsc-facts { margin: -6px 0 4px; font-size: 12.5px; opacity: 1; }

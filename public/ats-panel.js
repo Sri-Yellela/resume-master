@@ -30,6 +30,55 @@ const shareOfGap = (g) => (typeof g?.share === "number" ? g.share : g?.of ? g.po
 const subName = (id) => { const t = String(id || "").split(".").pop().replace(/-/g, " "); return t ? t[0].toUpperCase() + t.slice(1) : ""; };
 const LEVELS = { entry: "entry level", early: "early career", junior: "junior", mid: "mid level", senior: "senior", executive: "executive" };
 
+// ⭐ draft 46z (owner 11-20: "can definitely put more stats out … just state more to add context") · each part's figures —
+// the same as draft's shared/contextualView.js: counts, years, its weight, their stack's shares, a shared field. Stated only.
+const pctOf = (x) => `${Math.round(x * 100)}%`;
+const cnt = (xs) => (Array.isArray(xs) ? xs.length : 0);
+const weighs = (part) => (typeof part?.weight === "number" && part.weight > 0 && part.weight < 1 ? `weighs ${pctOf(part.weight)}` : "");   // the whole score: nothing to say
+export function partFacts(rep, c) {
+  const out = {};
+  const have = cnt(rep.tier1_matched), miss = cnt(rep.tier1_missing), sk = [];
+  if (have + miss) sk.push(`${have} of ${have + miss} skills`);
+  const ex = rep.experience || {};
+  if (typeof ex.requiredYears === "number") sk.push(`${ex.requiredYears}+ yrs asked${typeof ex.candidateYears === "number" ? ` · you show ${ex.candidateYears}` : ""}`);
+  else if (typeof ex.candidateYears === "number") sk.push(`you show ${ex.candidateYears} yrs`);
+  const hard = cnt(rep.hard_constraint_misses); if (hard) sk.push(`${hard} must-have${hard === 1 ? "" : "s"} missing`);
+  const v = cnt(rep.action_verbs_matched), vm = cnt(rep.action_verbs_missing); if (v + vm) sk.push(`${v} of ${v + vm} action verbs`);
+  if (rep.seniority_cap?.applied) sk.push("capped for seniority");
+  if (weighs(c?.parts?.skill_match)) sk.push(weighs(c.parts.skill_match));
+  out.Skills = sk;
+  const role = c?.parts?.role_fit;
+  if (role?.status === "ok") {
+    const r = [], g = Math.abs(role.level_gap || 0);
+    if (g) r.push(`${g} level${g === 1 ? "" : "s"} apart`); else if (role.posting?.level && role.posting.level === role.resume?.level) r.push("same level");
+    if (role.domain_lift) r.push(`+${role.domain_lift} for a shared field`);
+    if (weighs(role)) r.push(weighs(role));
+    out.Role = r;
+  }
+  const work = c?.parts?.responsibility_overlap;
+  if (work?.status === "ok") { const left = cnt(work.missing), w = []; if (left) w.push(`${left} dut${left === 1 ? "y" : "ies"} to show`); if (weighs(work)) w.push(weighs(work)); out["The work"] = w; }
+  const st = c?.parts?.tech_stack;
+  if (st?.status === "ok") {
+    const t = [];
+    const shares = [...(st.exact || []), ...(st.ecosystem || []).map(e => ({ tech: e.theirs, share: e.share })), ...(st.gaps || [])]
+      .filter(x => x.tech && shareOfGap(x) > 0).sort((a, b) => shareOfGap(b) - shareOfGap(a)).slice(0, 3);
+    if (shares.length) t.push(`${shares.map(x => `${bareTech(x.tech)} ${pctOf(shareOfGap(x))}`).join(", ")} of their jobs`);
+    const n = cnt(st.exact) + cnt(st.ecosystem) + cnt(st.gaps);
+    if (n) t.push(`${cnt(st.exact)} of ${n} of their tools exact${cnt(st.ecosystem) ? ` · ${cnt(st.ecosystem)} close` : ""}`);
+    if (weighs(st)) t.push(weighs(st));
+    out["Their stack"] = t;
+  }
+  const card = [];
+  const skill = rep.score ?? c?.parts?.skill_match?.score;
+  if (typeof c?.score === "number" && c.score !== skill) card.push(`skill match ${skill} · in context ${c.score}`);
+  const domains = (c?.similarities?.domains || []).map(String).filter(Boolean);
+  if (domains.length) card.push(`${andJoin(domains)} in common`);
+  const theirs = (c?.dissimilarities || []).filter(d => d.kind === "domain").map(d => String(d.theirs)).filter(Boolean);
+  if (theirs.length) card.push(`their field: ${andJoin(theirs.slice(0, 2))}`);
+  out.card = card;
+  return out;
+}
+
 export function cardLines(rep, c) {
   const parts = [];
   const have = (rep.tier1_matched || []).slice(0, 5).map(showTerm), miss = (rep.tier1_missing || []).slice(0, 3).map(showTerm);
@@ -66,10 +115,12 @@ export function cardLines(rep, c) {
 export function atsCardHtml(rep, c) {
   const score = typeof c?.score === "number" ? c.score : rep.score;
   const { parts, gain } = cardLines(rep, c);
+  const facts = partFacts(rep, c);
   return `<section class="atsc" aria-label="Your résumé against this job">
     <p class="atsc-num">${pctHtml(score)}</p>
+    ${facts.card.length ? `<p class="note atsc-facts" data-ats-facts="card">${esc(facts.card.join(" · "))}</p>` : ""}
     ${parts.map(([name, s, line]) => `<div class="atsc-row"><span>${esc(name)}</span>
-      <span class="atsc-mid"><span class="ctx-bar" aria-hidden="true"><i class="${bandClass(s)}" style="width:${Math.max(0, Math.min(100, s))}%"></i></span>${line ? `<span class="note">${esc(line)}</span>` : ""}</span>
+      <span class="atsc-mid"><span class="ctx-bar" aria-hidden="true"><i class="${bandClass(s)}" style="width:${Math.max(0, Math.min(100, s))}%"></i></span>${line ? `<span class="note">${esc(line)}</span>` : ""}${(facts[name] || []).length ? `<span class="note atsc-facts" data-ats-facts="${esc(name)}">${esc(facts[name].join(" · "))}</span>` : ""}</span>
       <span class="ats-num sm ${bandClass(s)}">${Math.round(s)}</span></div>`).join("")}
     ${gain ? `<p class="atsc-gain">Biggest gain: ${esc(gain)}</p>` : ""}
   </section>`;
