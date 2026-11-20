@@ -61,7 +61,7 @@ test("d189TokensOnly + d189PageAlwaysPaperColours: the workspace's colours are i
   // outside the tokens, only the paper's white, the stamp's black-on-white and translucent scrims / shadows
   const literals = (rest.match(/#[0-9a-fA-F]{3,8}\b/g) || []).filter(h => !/^#(fff|ffffff|0f0f0f|111)$/i.test(h));
   assert.deepEqual(literals, [], "every colour comes from :root");
-  assert.match(css, /\.ws-thumb img \{[^}]*background: #fff;/, "a page is drawn on white whatever the theme");
+  assert.match(css, /\.ws-thumb img \{[^}]*background: var\(--paper\);/, "a page is drawn on white whatever the theme (M20: the paper token, #ffffff in every theme)");
 });
 
 test("d189 P3: Fill out, Redact, Pages and Convert live in the ONE session / shell — not a second copy", () => {

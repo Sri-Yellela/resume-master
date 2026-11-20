@@ -25,7 +25,7 @@ test("/ is the site: HTML, with the tools and the account surfaces", async () =>
                       'data-dialog="signin"', 'data-dialog="signup"', 'data-dialog="account"', 'href="/privacy.html"']) {
       assert.ok(html.includes(id), `the page has ${id}`);
     }
-    for (const f of ["/site.css", "/site.js", "/chrome.js", "/privacy.html", "/sky.svg", "/fonts/dm-sans-latin-400-normal.woff2"]) {
+    for (const f of ["/site.css", "/site.js", "/chrome.js", "/privacy.html", "/tokens.css", "/theme.js", "/ats-panel.js", "/fonts/dm-sans-latin-400-normal.woff2"]) {
       assert.equal((await fetch(s.base + f)).status, 200, f);
     }
     assert.equal((await fetch(s.base + "/nope.html")).status, 404);
@@ -62,9 +62,9 @@ test("⛔ the site makes no third-party request, and every write sends X-RM-Clie
 });
 
 test("bands on the site are draft's cutpoints, and 'not enough signal' is never shown as a low score", () => {
-  const js = fs.readFileSync("public/site.js", "utf8");
-  // Moved on purpose (draft D192, owner 11-19: "the font color on the ats number should do it no need for the words"):
-  // the band is the number's colour class, the same cutpoints; "not enough signal" is still said in words, never a number.
+  // Moved on purpose (draft D192 (3d), 46y): the ATS card is one module, public/ats-panel.js, which the site's check and the
+  // workspace's Résumé tab both draw from; the band is the number's colour class, the same cutpoints.
+  const js = fs.readFileSync("public/ats-panel.js", "utf8");
   assert.match(js, /s >= 44 \? "strong" : s >= 26 \? "moderate" : "weak"/);
   assert.match(js, /<strong>Not enough signal<\/strong>/);
   assert.match(js, /This is not a low score/);

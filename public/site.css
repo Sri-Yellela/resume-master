@@ -1,21 +1,17 @@
 /* Resume Master — the site.
  *
- * ⭐ A68 (owner, 10-03): the OLD Resume Master site's look — the last build before the rebrand
- * (draft 75ce355, 09-21; the look since 05-30): the white boxed STAMP logo, the night sky, the glass
- * bar and cards, DM Sans body, Barlow Condensed display, Instrument Serif numerals. Two changes the
- * owner asked for: the sky is STATIC (the old one was a looping video hotlinked from a third-party
- * host — public/sky.svg is generated here, scripts/site/sky.mjs), and the accent is ONE variable
- * the owner picks (the old site drew one at random per visit).
+ * ⭐⭐ A203 (3) (owner 11-13): the site wears draft's design system — Dusk (draft client/src/themes/dusk-dark.js), solid
+ * cards, the warm accent, draft's depth boxes for every control (DepthButton.css: rest / hover / press, radius 11) and NO
+ * PILLS (draft D60: only perfect circles round). Instrument Serif for display; the white boxed stamp is the brand.
  *
- * ⭐⭐ A203 (3) (owner 11-13, SUPERSEDES A68's look): "bring it into resume master and apply the theme, styling and range of
- * utility options to the entire resume master site and draft would just host the sandbox." — the site now wears draft's
- * Dusk theme (draft client/src/themes/dusk-dark.js): the canvas #1B1B1B, solid cards (#262626 / #2E2E2E), the warm accent,
- * draft's depth boxes for every control (DepthButton.css — rest / hover / press shadows, radius 11) and NO PILLS (draft
- * D60), Instrument Serif for display. Kept from A68: the stamp (the brand) and the self-hosted fonts. The night sky is
- * retired with the look (public/sky.svg stays generated, unused by the page).
+ * ⭐⭐⭐ rm-audit M20 (draft D192, owner 11-19 "approving all open items"): EVERY colour comes from public/tokens.css — the
+ * site's one token source, generated from draft's four themes (Dusk / Plain × dark / light, D149 + D181) by
+ * scripts/site/buildSite.mjs. This file keeps no palette of its own (it was one of four hand-copied Dusk palettes) and no
+ * shadowed rule (the capsule rules the A203 block used to override are gone, not overridden). The A68 night sky
+ * (body::before, public/sky.svg) is retired (M21). The names below are the token names (rm-editor/1's set).
  *
- * ⛔ Fonts are self-hosted (public/fonts, OFL — licences beside them). A font CDN would send every
- * visitor's address to a third party the privacy page does not name.
+ * ⛔ Fonts are self-hosted (public/fonts, OFL — licences beside them). A font CDN would send every visitor's address to a
+ * third party the privacy page does not name.
  */
 @font-face { font-family: "DM Sans"; font-weight: 400; font-display: swap; src: url("/fonts/dm-sans-latin-400-normal.woff2") format("woff2"); }
 @font-face { font-family: "DM Sans"; font-weight: 400; font-style: italic; font-display: swap; src: url("/fonts/dm-sans-latin-400-italic.woff2") format("woff2"); }
@@ -30,37 +26,10 @@
   src: url("/fonts/instrument-serif-latin-400-italic.woff2") format("woff2"); }
 
 :root {
-  /* THE ACCENT — the owner's pick (A68, 10-03): Sky Blue. The old site's four, as it offered them:
-       Sky Blue #A8D8EA · Lemon Yellow #F0EF8A · Celtic Green #88C87A · Sunset Orange #FFB07A
-     Every one is a light fill with dark text on it, and ≥ 9:1 as text on the night.
-     Chosen: Sky Blue. Changing it is this one line. */
-  /* A203 (3): draft's Dusk accent (ACCENT #FBD3C4, ON_ACCENT #1B1B1B). The A68 four stay listed above for reference. */
-  --accent: #FBD3C4;
-  --on-accent: #1B1B1B;
-  --accent-edge: #F2C2B2;
-
-  /* draft's Dusk ground (CANVAS / SURFACE_SOLID / FH_WELL / BORDER / INK / INK_MUTED) */
-  --night: #1B1B1B;
-  --night-deep: #1B1B1B;
-  --ink: #FFFFFF;
-  --ink-muted: #A3A3A3;
-  --ink-faint: #959595;
-  --glass: #262626;            /* a card: solid, as draft's — no glass, no blur */
-  --glass-strong: #2E2E2E;     /* the well a control sits in */
-  --glass-edge: #343434;
-  --bar: rgba(27, 27, 27, 0.92);
-  --good: #9FD8A8;
-  --warn: #F2CC8F;
-  --bad: #F2A090;
   --radius: 22px;              /* draft's card radius */
-  --depth-rest: 0 3px 8px rgba(0,0,0,0.40), inset 0 1px 0 rgba(255,255,255,0.08);
-  --depth-hover: 0 7px 17px rgba(0,0,0,0.50), inset 0 1px 0 rgba(255,255,255,0.10);
-  --depth-press: 0 2px 5px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.06);
-  --depth-accent: 0 10px 26px rgba(251,211,196,0.16), inset 0 1px 0 rgba(255,255,255,0.30);
-  --font-body: "DM Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-body: var(--font);
   --font-display: "Instrument Serif", Georgia, serif;   /* draft's --font-display */
   --font-stamp: "Barlow Condensed", "DM Sans", system-ui, sans-serif;   /* the brand stamp keeps its face */
-  --font-serif: "Instrument Serif", Georgia, serif;
   /* type scale (1.25) */
   --t-xs: 0.8rem; --t-sm: 0.875rem; --t-md: 1rem; --t-lg: 1.25rem; --t-xl: 1.563rem; --t-2xl: 2rem; --t-3xl: 3rem;
 }
@@ -68,32 +37,21 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; }
 html { scroll-padding-top: 72px; }
-body {
-  font-family: var(--font-body); font-size: var(--t-md); line-height: 1.55; color: var(--ink);
-  background: var(--night-deep); min-height: 100vh;
-}
-/* The night sky — static: a ground, the star field (public/sky.svg), and a low warm glow where the old
-   film's lamp-lit field sat. One local image; no video; nothing from another origin. */
-body::before {
-  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
-  background:
-    url("/sky.svg") center top / cover no-repeat,
-    radial-gradient(120% 60% at 50% 115%, rgba(255, 196, 120, 0.10) 0%, transparent 60%),
-    radial-gradient(ellipse at 50% -10%, #00466e 0%, var(--night) 45%, var(--night-deep) 100%);
-}
+body { font-family: var(--font-body); font-size: var(--t-md); line-height: 1.55; color: var(--ink); background: var(--bg); min-height: 100vh; }
 a { color: var(--accent); }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-/* ⭐ draft 46q (A227, owner 11-16: full width on this site too) — the page fills the screen with a side gutter; the grids
-   below grow by columns (auto-fill); running text keeps its measure (.hero__tagline 60ch). Was a centred 1040. */
-.wrap { box-sizing: border-box; width: 100%; max-width: none; margin: 0; padding: 76px clamp(16px, 3vw, 48px) 0; }
+[hidden] { display: none !important; }
+/* ⭐ draft 46q (A227, owner 11-16: full width on this site too) — the page fills the screen with a side gutter; running
+   text keeps its measure. */
+.wrap { width: 100%; max-width: none; margin: 0; padding: 76px clamp(16px, 3vw, 48px) 0; }
 
-/* ── the stamp: the old site's logo — a white box, a black border, tilted 2°, Barlow Condensed 800
-   italic capitals; "esume" and "aster" fold away to leave RM ── */
+/* ── the stamp: the old site's logo — a white box, a black border, tilted 2°, Barlow Condensed 800 italic capitals;
+   "esume" and "aster" fold away to leave RM. Its colours are the brand's own (the stamp tokens), the same in every theme. */
 .stamp { display: inline-flex; align-items: center; text-decoration: none; flex-shrink: 0; }
 .stamp__box {
   display: inline-flex; align-items: center; overflow: hidden;
-  background: #ffffff; border: 2.5px solid #0f0f0f; border-radius: 2px; transform: rotate(-2deg);
-  padding: 3px 10px; color: #0f0f0f;
+  background: var(--stamp-paper); border: 2.5px solid var(--stamp-ink); border-radius: 2px; transform: rotate(-2deg);
+  padding: 3px 10px; color: var(--stamp-ink);
   font: italic 800 15px/1 var(--font-stamp); letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap;
 }
 .stamp__fold {
@@ -107,162 +65,146 @@ a { color: var(--accent); }
 .nav {
   position: fixed; top: 0; left: 0; right: 0; z-index: 50; height: 56px;
   display: flex; align-items: center; gap: 1.5rem; padding: 0 1.5rem;
-  background: var(--bar); border-bottom: 1px solid var(--glass-edge);
-  backdrop-filter: blur(20px) saturate(160%); -webkit-backdrop-filter: blur(20px) saturate(160%);
+  background: var(--bg); border-bottom: 1px solid var(--line);
 }
 .nav__links { display: flex; gap: 0.25rem; flex: 1; }
-.nav__link {
-  padding: 0.5rem 0.75rem; border-radius: 0.5rem; font-size: var(--t-sm); font-weight: 500;
-  color: var(--ink-muted); text-decoration: none; white-space: nowrap;
-}
-.nav__link:hover, .nav__link--active { color: var(--ink); background: rgba(255, 255, 255, 0.06); }
+.nav__link { padding: 0.5rem 0.75rem; border-radius: 9px; font-size: var(--t-sm); font-weight: 500; color: var(--body); text-decoration: none; white-space: nowrap; }
+.nav__link:hover, .nav__link--active { color: var(--ink); background: var(--raise); }
 .nav__account { display: flex; align-items: center; gap: 0.5rem; font-size: var(--t-sm); }
 .nav__menu { display: none; position: relative; }
-.nav__menu summary { list-style: none; cursor: pointer; font-size: var(--t-sm); font-weight: 700; color: var(--ink);
-  padding: 6px 12px; border: 1px solid var(--glass-edge); border-radius: 999px; }
 .nav__menu summary::-webkit-details-marker { display: none; }
-.nav__menu-panel { position: absolute; top: calc(100% + 8px); left: 0; min-width: 190px; padding: 6px;
-  display: flex; flex-direction: column; background: rgba(0, 30, 50, 0.92); }
+.nav__menu summary { list-style: none; }
+.nav__menu-panel { position: absolute; top: calc(100% + 8px); left: 0; min-width: 190px; padding: 6px; display: flex; flex-direction: column;
+  background: var(--card); border-radius: 16px; box-shadow: var(--hover); }
 .nav__menu-panel a { color: var(--ink); text-decoration: none; padding: 9px 12px; border-radius: 8px; font-size: var(--t-sm); }
-.nav__menu-panel a:hover { background: rgba(255, 255, 255, 0.08); }
+.nav__menu-panel a:hover { background: var(--raise); }
 .account-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .balance { font-weight: 700; color: var(--accent); }
 
-/* ── the hero: the stamp, large, over the sky ── */
+/* ── the hero ── */
 .hero { min-height: 46vh; display: flex; flex-direction: column; align-items: center; justify-content: center;
   text-align: center; gap: 1rem; padding: 48px 0 32px; animation: fade-rise .8s ease-out both; }
-.hero__title { font-family: var(--font-display); font-weight: 800; font-size: clamp(2rem, 6vw, var(--t-3xl));
-  letter-spacing: -0.02em; line-height: 1.05; margin: 0.5rem 0 0; }
+.hero__title, .hero--small h1 { font-family: var(--font-display); font-weight: 400; font-size: clamp(2rem, 6vw, var(--t-3xl));
+  letter-spacing: -0.01em; line-height: 1.05; margin: 0.5rem 0 0; }
 .hero--small { min-height: 0; padding: 32px 0 20px; }
-.hero--small h1 { font-family: var(--font-display); font-weight: 800; font-size: clamp(2rem, 6vw, var(--t-3xl));
-  letter-spacing: -0.02em; line-height: 1.05; margin: 0; }
-.hero__tagline { color: var(--ink-muted); max-width: 60ch; margin: 0; }
-.hero__cta {
-  margin-top: 0.5rem; padding: 10px 24px; border-radius: 999px; font-weight: 700; font-size: var(--t-sm);
-  color: var(--ink); text-decoration: none; border: 1px solid var(--glass-edge); background: rgba(255, 255, 255, 0.06);
-  backdrop-filter: blur(20px) saturate(160%); -webkit-backdrop-filter: blur(20px) saturate(160%);
-}
-.hero__cta:hover { background: rgba(255, 255, 255, 0.1); }
-.crumbs { font-size: var(--t-sm); color: var(--ink-faint); margin: 16px 0 0; }
-.crumbs a { color: var(--ink-muted); }
+.hero--small h1 { margin: 0; }
+.hero__tagline { color: var(--body); max-width: 60ch; margin: 0; }
+.crumbs { font-size: var(--t-sm); color: var(--muted); margin: 16px 0 0; }
+.crumbs a { color: var(--body); }
 
-/* ── glass ── */
-.glass {
-  background: var(--glass); border: 1px solid var(--glass-edge); border-radius: var(--radius);
-  backdrop-filter: blur(20px) saturate(160%); -webkit-backdrop-filter: blur(20px) saturate(160%);
-}
-.tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 12px; }
-.tab { border: 1px solid var(--glass-edge); background: rgba(255, 255, 255, 0.04); color: var(--ink-muted); border-radius: 999px;
-  padding: 7px 14px; font: inherit; font-size: var(--t-sm); font-weight: 700; cursor: pointer; }
-.tab[aria-selected="true"] { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
-.tab .tag { font-size: var(--t-xs); font-weight: 500; opacity: 0.75; margin-left: 6px; }
-
+/* ── cards and panels: solid, as draft's ── */
+.glass { background: var(--card); border-radius: var(--radius); }
 .panel { padding: 22px; margin-bottom: 18px; animation: fade-rise .6s ease-out both; }
 /* draft 46q (A227): full width — running text in a panel keeps the reading measure. */
 .panel p, .panel li { max-width: 72ch; }
-.panel h2, .display { font-family: var(--font-display); font-weight: 800; font-size: var(--t-2xl); letter-spacing: -0.02em; line-height: 1.1; margin: 0 0 6px; }
-.panel h3 { font-family: var(--font-display); font-weight: 700; font-size: var(--t-lg); margin: 18px 0 6px; }
-.panel .lede { color: var(--ink-muted); margin: 0 0 16px; }
+.panel h2, .display { font-family: var(--font-display); font-weight: 400; font-size: var(--t-2xl); letter-spacing: -0.01em; line-height: 1.1; margin: 0 0 6px; }
+.panel h3 { font-family: var(--font-body); font-weight: 700; font-size: var(--t-lg); margin: 18px 0 6px; }
+.panel .lede { color: var(--body); margin: 0 0 16px; }
 .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
-label.f { display: flex; flex-direction: column; gap: 5px; font-size: var(--t-sm); color: var(--ink-muted); }
+label.f { display: flex; flex-direction: column; gap: 5px; font-size: var(--t-sm); color: var(--body); }
 input[type=text], input[type=email], input[type=password], input[type=number], textarea, select {
-  font: inherit; font-size: var(--t-sm); color: var(--ink); background: rgba(0, 10, 18, .45); color-scheme: dark;
-  border: 1px solid var(--glass-edge); border-radius: 10px; padding: 9px 11px; width: 100%;
+  font: inherit; font-size: var(--t-sm); color: var(--ink); background: var(--card);
+  border: 1px solid var(--line); border-radius: 11px; padding: 9px 11px; width: 100%;
 }
 textarea { min-height: 160px; resize: vertical; }
 .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
-.btn { font: inherit; font-size: var(--t-sm); font-weight: 700; border-radius: 999px; padding: 8px 18px; cursor: pointer;
-  border: 1px solid var(--glass-edge); background: var(--glass-strong); color: var(--ink); text-decoration: none; display: inline-block; }
-.btn.ghost { background: transparent; }
-.btn.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+
+/* every control a depth box (draft DepthButton.css): no capsule anywhere (draft D60) */
+.btn, .tab, .nav__menu summary {
+  font: inherit; font-size: var(--t-sm); font-weight: 700; padding: 8px 18px; cursor: pointer; text-decoration: none; display: inline-block;
+  border-radius: 11px; border: 1px solid var(--line); background: var(--raise); color: var(--ink); box-shadow: var(--rest);
+  transition: transform .16s, box-shadow .16s, border-color .16s, color .16s;
+}
+.btn:hover:not(:disabled), .btn:focus-visible, .tab:hover, .tab:focus-visible {
+  transform: translateY(-2px); box-shadow: var(--hover); border-color: var(--accent); color: var(--accent);
+}
+.btn:active:not(:disabled), .tab:active { transform: translateY(0); box-shadow: var(--press); }
+.btn.ghost { background: transparent; box-shadow: none; }
+.btn.primary, .tab[aria-selected="true"] { background: var(--accent); color: var(--on-accent); border-color: var(--accent2); box-shadow: var(--glow); }
+.btn.primary:hover:not(:disabled), .tab[aria-selected="true"]:hover { color: var(--on-accent); border-color: var(--accent2); }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
-.note { font-size: var(--t-xs); color: var(--ink-faint); }
+.nav__menu summary { padding: 6px 12px; }
+.note { font-size: var(--t-xs); color: var(--muted); }
 .msg { font-size: var(--t-sm); margin-top: 10px; }
 .msg.bad { color: var(--bad); }
 .msg.good { color: var(--good); }
-
-.band { display: inline-block; font-weight: 700; border-radius: 999px; padding: 4px 12px; font-size: var(--t-sm); }
-.band.strong { background: rgba(125, 219, 163, .16); color: var(--good); }
-.band.moderate { background: rgba(245, 195, 91, .16); color: var(--warn); }
-.band.weak { background: rgba(255, 154, 139, .14); color: var(--bad); }
-.band.nosignal { border: 1px dashed var(--glass-edge); color: var(--ink-muted); }
-/* draft D192 (owner 11-19): the ATS number's colour is its band — no band word, no badge */
-.ats-num { font-weight: 700; font-size: 40px; line-height: 1.1; }
-.ats-num.sm { font-size: var(--t-sm); }
-.ats-num.strong { color: var(--good); } .ats-num.moderate { color: var(--warn); } .ats-num.weak { color: var(--bad); } .ats-num.nosignal { color: var(--ink-muted); }
-.ats-head { margin: 4px 0 10px; }
-.ctx { display: flex; flex-direction: column; gap: 10px; margin: 6px 0 14px; }
-.ctx-nums { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.ctx-parts { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; }
-.ctx-card { background: var(--glass-strong); border-radius: 10px; padding: 10px 12px; margin: 0; }
-.ctx-row { display: flex; justify-content: space-between; }
-.ctx-bar { height: 6px; border-radius: 2px; background: var(--glass-edge); overflow: hidden; margin: 6px 0; }
-.ctx-bar i { display: block; height: 6px; background: var(--ink-muted); }
-.ctx-bar i.strong { background: var(--good); } .ctx-bar i.moderate { background: var(--warn); } .ctx-bar i.weak { background: var(--bad); }
-.ctx-line { margin: 2px 0; }
-/* the ATS card (draft D192, option C): the number, four rows of name · bar + line · number, the biggest gain */
-.atsc { display: flex; flex-direction: column; gap: 14px; margin: 4px 0 14px; }
-.atsc-num { margin: 0; } .atsc-num .ats-num { font-size: 44px; }
-.atsc-row { display: grid; grid-template-columns: minmax(84px, 110px) minmax(0, 1fr) 36px; align-items: center; gap: 12px; }
-.atsc-mid { display: flex; flex-direction: column; gap: 5px; min-width: 0; } .atsc-mid .ctx-bar { margin: 0; }
-.atsc-row .ats-num.sm { text-align: right; }
-.atsc-gain { margin: 0; border-top: 1px solid var(--glass-edge); padding-top: 12px; }
-/* draft D192 (4d): does the résumé add up — a quiet ⚠ per bullet, its reason */
-.plaus { display: flex; flex-direction: column; gap: 8px; margin: 0 0 14px; border-top: 1px solid var(--glass-edge); padding-top: 12px; }
-.plaus-head { margin: 0; }
-.plaus-row { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; font-size: var(--t-sm); }
-.plaus-row > span:last-child { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
-.plaus-mark { color: var(--warn); }
-.chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 10px; }
-.chip { font-size: var(--t-xs); padding: 2px 8px; border-radius: 999px; background: var(--glass-strong); }
-.chip.miss { color: var(--bad); }
+/* the ATS card, the number painted by its band and the plausibility flags: public/ats-panel.css (one module, draft D192 (3d)) */
 .result { margin-top: 16px; padding: 16px; }
-iframe.preview { width: 100%; height: 560px; border: 0; border-radius: 10px; background: #fff; }
+iframe.preview { width: 100%; height: 560px; border: 0; border-radius: 10px; background: var(--paper); }
 table.ledger { width: 100%; border-collapse: collapse; font-size: var(--t-xs); }
-table.ledger td, table.ledger th { padding: 6px 8px; border-top: 1px solid var(--glass-edge); text-align: left; }
-.docs li { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 8px 0; border-top: 1px solid var(--glass-edge); }
+table.ledger td, table.ledger th { padding: 6px 8px; border-top: 1px solid var(--line); text-align: left; }
+.docs li { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 8px 0; border-top: 1px solid var(--line); }
 .docs { list-style: none; padding: 0; margin: 0; }
-.doc h2, .doc h3, .doc h4 { font-family: var(--font-display); font-weight: 800; }
+.doc h2, .doc h3, .doc h4 { font-family: var(--font-display); font-weight: 400; }
 
-/* ── the old site's numbered cards: a serif numeral, a short accent rule, a title, a line ── */
-.everything { padding: 48px 0 24px; text-align: center; }
-.everything__sub { color: var(--ink-muted); font-size: var(--t-sm); margin: 0 0 24px; }
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 12px; }
+.tab { padding: 7px 14px; }
+.tab .tag { font-size: var(--t-xs); font-weight: 500; opacity: 0.75; margin-left: 6px; }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; text-align: left; margin-bottom: 24px; }
 .cards--four { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
-.card {
-  display: flex; flex-direction: column; padding: 24px 22px; border-radius: var(--radius); text-decoration: none; color: var(--ink);
-  background: var(--glass); border: 1px solid var(--glass-edge);
-  backdrop-filter: blur(20px) saturate(160%); -webkit-backdrop-filter: blur(20px) saturate(160%);
-  transition: background 180ms ease, transform 180ms ease;
-}
-.card:hover { background: var(--glass-strong); transform: translateY(-2px); }
-.card__num { font-family: var(--font-serif); font-size: 28px; line-height: 1; letter-spacing: -0.02em; color: var(--accent); margin-bottom: 4px; }
+.everything { padding: 48px 0 24px; text-align: center; }
+.everything__sub { color: var(--body); font-size: var(--t-sm); margin: 0 0 24px; }
+.card { display: flex; flex-direction: column; padding: 24px 22px; border-radius: var(--radius); text-decoration: none; color: var(--ink);
+  background: var(--card); box-shadow: var(--rest); transition: box-shadow 180ms ease, transform 180ms ease; }
+.card:hover { box-shadow: var(--hover); transform: translateY(-2px); }
+.card__num { font-family: var(--font-display); font-size: 28px; line-height: 1; letter-spacing: -0.02em; color: var(--accent); margin-bottom: 4px; }
 .card__rule { width: 24px; height: 1.5px; background: var(--accent); opacity: 0.5; margin-bottom: 14px; }
 .card__title { font-weight: 700; font-size: var(--t-sm); margin-bottom: 6px; }
-.card__desc { font-size: var(--t-xs); color: var(--ink-muted); line-height: 1.6; }
+.card__desc { font-size: var(--t-xs); color: var(--body); line-height: 1.6; }
 
-.steps { margin: 0 0 16px; padding-left: 1.3em; color: var(--ink-muted); font-size: var(--t-sm); display: grid; gap: 2px; }
-.notes p { color: var(--ink-muted); }
+.steps { margin: 0 0 16px; padding-left: 1.3em; color: var(--body); font-size: var(--t-sm); display: grid; gap: 2px; }
+.notes p { color: var(--body); }
 .more { padding: 8px 0 24px; }
-.more h2 { font-family: var(--font-display); font-weight: 800; font-size: var(--t-xl); margin: 0 0 6px; }
-.more__links { color: var(--ink-faint); font-size: var(--t-sm); line-height: 2; }
+.more h2 { font-family: var(--font-display); font-weight: 400; font-size: var(--t-xl); margin: 0 0 6px; }
+.more__links { color: var(--muted); font-size: var(--t-sm); line-height: 2; }
 
-.foot { border-top: 1px solid var(--glass-edge); margin-top: 32px; padding: 28px 16px 40px; text-align: center;
-  color: var(--ink-faint); font-size: var(--t-xs); background: rgba(0, 19, 31, 0.5); }
+.foot { border-top: 1px solid var(--line); margin-top: 32px; padding: 28px 16px 40px; text-align: center; color: var(--muted); font-size: var(--t-xs); }
 .foot p { max-width: 640px; margin: 12px auto 0; }
-.foot__links a { color: var(--ink-muted); }
-[hidden] { display: none !important; }
+.foot__links a { color: var(--body); }
 
-/* the PDF toolkit on the night (src/pdf-toolkit/styles.css carries its structure) */
+/* the PDF toolkit's quick tools (src/pdf-toolkit/styles.css carries their structure; they read these) */
 .pdf-tools {
-  --pt-host-surface: var(--glass-strong); --pt-host-text: var(--ink); --pt-host-muted: var(--ink-muted);
-  --pt-host-border: var(--glass-edge); --pt-host-accent: var(--accent); --pt-host-on-accent: var(--on-accent);
-  --pt-host-good: var(--good); --pt-host-bad: var(--bad); --pt-host-radius: var(--radius);
+  --pt-host-surface: var(--card); --pt-host-text: var(--ink); --pt-host-muted: var(--body);
+  --pt-host-border: var(--line); --pt-host-accent: var(--accent); --pt-host-on-accent: var(--on-accent);
+  --pt-host-good: var(--good); --pt-host-bad: var(--bad); --pt-host-radius: 11px;
 }
-.pdf-tools .pt-text, .pdf-tools .pt-file, .pdf-tools select { color-scheme: dark; }
+.pdf-tools .pt-tab, .pdf-tools .pt-btn, .pdf-tools .pt-mini {
+  border-radius: 11px; box-shadow: var(--rest); background: var(--raise); border-color: var(--line);
+  transition: transform .16s, box-shadow .16s, border-color .16s, color .16s;
+}
+.pdf-tools .pt-tab:hover, .pdf-tools .pt-btn:hover:not(:disabled), .pdf-tools .pt-tab:focus-visible, .pdf-tools .pt-btn:focus-visible {
+  transform: translateY(-2px); box-shadow: var(--hover); border-color: var(--accent); color: var(--accent);
+}
+.pdf-tools .pt-tab[aria-selected="true"], .pdf-tools .pt-btn.pt-primary, .pdf-tools .pt-ed-add[aria-pressed="true"] {
+  background: var(--accent); color: var(--on-accent); border-color: var(--accent2); box-shadow: var(--glow);
+}
+.pdf-tools .pt-mini { border-radius: 7px; }
+.pdf-tools .pt-sb { padding: 0; background: transparent; }
+
+/* ── D189 P4 · Documents home + the tool landing pages ── */
+.docs-home { display: grid; gap: 22px; margin: 0 0 36px; }
+.docs-drop { display: grid; gap: 8px; place-items: center; text-align: center; padding: 34px 18px; border: 2px dashed var(--line); border-radius: var(--radius); cursor: pointer; background: transparent; }
+.docs-drop[data-drag="true"] { border-color: var(--accent); background: var(--card); }
+.docs-drop__t { font: 400 clamp(1.6rem, 4vw, 2.1rem)/1.15 var(--font-display); color: var(--ink); }
+.docs-drop__s { color: var(--body); font-size: var(--t-sm); }
+.docs-h { font-family: var(--font-body); font-size: var(--t-sm); font-weight: 700; color: var(--muted); letter-spacing: .02em; margin: 0 0 10px; }
+.docs-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; }
+.docs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.docs-doc { display: grid; gap: 4px; padding: 10px; border-radius: 14px; background: var(--card); box-shadow: var(--rest); color: var(--ink); text-decoration: none; transition: transform .16s, box-shadow .16s; }
+.docs-doc:hover { transform: translateY(-2px); box-shadow: var(--hover); }
+.docs-doc img { width: 100%; aspect-ratio: 8.5 / 11; object-fit: cover; object-position: top; border-radius: 3px; background: var(--paper); }
+.docs-doc b { font-size: var(--t-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.docs-doc small { color: var(--muted); font-size: var(--t-xs); }
+.docs-tools { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+.docs-tool { display: grid; gap: 3px; padding: 14px; border-radius: 14px; background: var(--card); box-shadow: var(--rest); color: var(--ink); text-decoration: none; transition: transform .16s, box-shadow .16s; }
+.docs-tool:hover { transform: translateY(-2px); box-shadow: var(--hover); }
+.docs-tool b { font-size: var(--t-sm); }
+.docs-tool span { color: var(--muted); font-size: var(--t-xs); }
+.tool-landing { display: grid; gap: 14px; }
+.tool-landing__more { color: var(--muted); font-size: var(--t-sm); }
 
 @keyframes fade-rise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
-@media (prefers-reduced-motion: reduce) { .hero, .panel { animation: none; } .stamp__fold, .card { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .hero, .panel { animation: none; } .stamp__fold, .card, .btn, .tab { transition: none; } }
 @media (max-width: 720px) {
   .nav { gap: 0.75rem; padding: 0 0.75rem; }
   .nav__links { display: none; }
@@ -272,69 +214,3 @@ table.ledger td, table.ledger th { padding: 6px 8px; border-top: 1px solid var(-
   #acct-signed-in #acct-email { display: none; }
 }
 @media (max-width: 520px) { .panel { padding: 14px; } iframe.preview { height: 420px; } .btn { padding: 7px 14px; } }
-
-/* ── A203 (3) · draft's look, over the components above ───────────────────────────────────────────────────────────── */
-body::before { background: var(--night-deep); }   /* the flat Dusk canvas — the sky is retired */
-.glass, .card { backdrop-filter: none; -webkit-backdrop-filter: none; background: var(--glass); border-color: transparent; }
-.card { box-shadow: var(--depth-rest); }
-.card:hover { background: var(--glass); box-shadow: var(--depth-hover); }
-.nav { backdrop-filter: none; -webkit-backdrop-filter: none; }
-.nav__menu-panel { background: var(--glass); border-radius: 16px; box-shadow: var(--depth-hover); }
-.hero__title, .hero--small h1, .panel h2, .display, .more h2, .doc h2, .doc h3, .doc h4 { font-weight: 400; letter-spacing: -0.01em; }
-.panel h3 { font-family: var(--font-body); font-weight: 700; }
-/* every control a depth box (draft DepthButton.css): no capsule anywhere (draft D60) */
-.btn, .hero__cta, .tab, .nav__menu summary {
-  border-radius: 11px; border: 1px solid var(--glass-edge); background: var(--glass-strong); color: var(--ink); box-shadow: var(--depth-rest);
-  backdrop-filter: none; -webkit-backdrop-filter: none; transition: transform .16s, box-shadow .16s, border-color .16s, color .16s;
-}
-.btn:hover:not(:disabled), .btn:focus-visible, .hero__cta:hover, .hero__cta:focus-visible, .tab:hover, .tab:focus-visible {
-  transform: translateY(-2px); box-shadow: var(--depth-hover); border-color: var(--accent); color: var(--accent);
-}
-.btn:active:not(:disabled), .tab:active { transform: translateY(0); box-shadow: var(--depth-press); }
-.btn.ghost { background: transparent; box-shadow: none; }
-.btn.primary, .tab[aria-selected="true"] { background: var(--accent); color: var(--on-accent); border-color: var(--accent-edge); box-shadow: var(--depth-accent); }
-.btn.primary:hover:not(:disabled), .tab[aria-selected="true"]:hover { color: var(--on-accent); border-color: var(--accent-edge); }
-input[type=text], input[type=email], input[type=password], input[type=number], textarea, select { background: var(--glass); border-color: var(--glass-edge); border-radius: 11px; }
-/* status words, not capsules: a band is the word with a 6 px dot before it (draft D152's mark) */
-.band { border-radius: 0; padding: 0; background: none !important; border: 0 !important; }
-.band::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin-right: 7px; vertical-align: 2px; }
-.chip { border-radius: 6px; }
-.nav__link { border-radius: 9px; }
-.nav__link:hover, .nav__link--active { background: var(--glass-strong); }
-.foot { background: transparent; }
-/* the PDF tools wear the same boxes */
-.pdf-tools { --pt-host-surface: var(--glass); --pt-host-radius: 11px; }
-.pdf-tools .pt-tab, .pdf-tools .pt-btn, .pdf-tools .pt-mini {
-  border-radius: 11px; box-shadow: var(--depth-rest); background: var(--glass-strong); border-color: var(--glass-edge);
-  transition: transform .16s, box-shadow .16s, border-color .16s, color .16s;
-}
-.pdf-tools .pt-tab:hover, .pdf-tools .pt-btn:hover:not(:disabled), .pdf-tools .pt-tab:focus-visible, .pdf-tools .pt-btn:focus-visible {
-  transform: translateY(-2px); box-shadow: var(--depth-hover); border-color: var(--accent); color: var(--accent);
-}
-.pdf-tools .pt-tab[aria-selected="true"], .pdf-tools .pt-btn.pt-primary, .pdf-tools .pt-ed-add[aria-pressed="true"] {
-  background: var(--accent); color: var(--on-accent); border-color: var(--accent-edge); box-shadow: var(--depth-accent);
-}
-.pdf-tools .pt-mini { border-radius: 7px; }
-.pdf-tools .pt-sb { padding: 0; background: transparent; }   /* Edit PDF's sandbox sits on the same canvas now */
-
-/* ── D189 P4 · Documents home + the tool landing pages (draft's Dusk, depth boxes, no capsules) ── */
-.docs-home { display: grid; gap: 22px; margin: 0 0 36px; }
-.docs-drop { display: grid; gap: 8px; place-items: center; text-align: center; padding: 34px 18px; border: 2px dashed var(--glass-edge); border-radius: var(--radius); cursor: pointer; background: transparent; }
-.docs-drop[data-drag="true"] { border-color: var(--accent); background: var(--glass); }
-.docs-drop__t { font: 400 clamp(1.6rem, 4vw, 2.1rem)/1.15 var(--font-display); color: var(--ink); }
-.docs-drop__s { color: var(--ink-muted); font-size: var(--t-sm); }
-.docs-h { font-family: var(--font-body) !important; font-size: var(--t-sm) !important; font-weight: 700 !important; color: var(--ink-faint); letter-spacing: .02em; margin: 0 0 10px !important; }
-.docs-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; }
-.docs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
-.docs-doc { display: grid; gap: 4px; padding: 10px; border-radius: 14px; background: var(--glass); box-shadow: var(--depth-rest); color: var(--ink); text-decoration: none; transition: transform .16s, box-shadow .16s; }
-.docs-doc:hover { transform: translateY(-2px); box-shadow: var(--depth-hover); }
-.docs-doc img { width: 100%; aspect-ratio: 8.5 / 11; object-fit: cover; object-position: top; border-radius: 3px; background: #fff; }
-.docs-doc b { font-size: var(--t-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.docs-doc small { color: var(--ink-faint); font-size: var(--t-xs); }
-.docs-tools { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
-.docs-tool { display: grid; gap: 3px; padding: 14px; border-radius: 14px; background: var(--glass); box-shadow: var(--depth-rest); color: var(--ink); text-decoration: none; transition: transform .16s, box-shadow .16s; }
-.docs-tool:hover { transform: translateY(-2px); box-shadow: var(--depth-hover); }
-.docs-tool b { font-size: var(--t-sm); }
-.docs-tool span { color: var(--ink-faint); font-size: var(--t-xs); }
-.tool-landing { display: grid; gap: 14px; }
-.tool-landing__more { color: var(--ink-faint); font-size: var(--t-sm); }

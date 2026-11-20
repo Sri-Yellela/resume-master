@@ -1,15 +1,14 @@
 /* D190 · Tiny — the floating bot (owner 11-15: "a floating bot on the site rather than a panel button"): a fox bubble fixed at
    the bottom-right of every page, opening a floating chat card above it; a bottom sheet on phones.
-   Colours come from the page's own tokens — the workspace's (--card / --line / --muted) or the rest of the site's
-   (--glass-strong / --glass-edge / --ink-muted) — never a literal (d189 tokens-only). No capsules (D60): the bubble is a perfect
-   circle, everything else is a rectangle with a radius. */
+   Colours come from the site's one token source (public/tokens.css, rm-audit M20 — the same names on every page) — never a
+   literal (d189 tokens-only). No capsules (D60): the bubble is a perfect circle, everything else is a rectangle with a radius. */
 .tiny-root {
-  --t-card: var(--card, var(--glass-strong));
-  --t-well: var(--well, var(--glass));
-  --t-line: var(--line, var(--glass-edge));
+  --t-card: var(--card);
+  --t-well: var(--raise);
+  --t-line: var(--line);
   --t-ink: var(--ink);
-  --t-muted: var(--muted, var(--ink-muted));
-  --t-faint: var(--faint, var(--ink-faint));
+  --t-muted: var(--body);
+  --t-faint: var(--muted);
   --t-accent: var(--accent);
   --t-on-accent: var(--on-accent);
   --t-warn: var(--warn);
@@ -19,16 +18,16 @@
 .tiny-launch {
   width: 60px; height: 60px; border-radius: 50%; padding: 0; display: grid; place-items: center; cursor: pointer;
   background: var(--t-card); border: 1px solid var(--t-line);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, .35);
+  box-shadow: var(--hover);
   transition: transform .18s, box-shadow .18s;
 }
-.tiny-launch:hover, .tiny-launch:focus-visible { transform: translateY(-3px) rotate(-4deg); box-shadow: 0 14px 32px rgba(0, 0, 0, .42), 0 0 0 3px var(--t-accent); }
+.tiny-launch:hover, .tiny-launch:focus-visible { transform: translateY(-3px) rotate(-4deg); box-shadow: var(--shadow-lg), 0 0 0 3px var(--t-accent); }
 .tiny-launch svg { display: block; }
 .tiny-root[data-open="true"] .tiny-launch { transform: scale(.9); }
 .tiny-card {
   width: min(380px, calc(100vw - 40px)); height: min(560px, calc(100vh - 120px)); display: grid; grid-template-rows: auto 1fr auto;
   background: var(--t-card); border: 1px solid var(--t-line); border-radius: 16px; overflow: hidden;
-  box-shadow: 0 22px 60px rgba(0, 0, 0, .45);
+  box-shadow: var(--shadow-lg);
   transform-origin: bottom right; animation: tiny-in .18s ease-out;
 }
 .tiny-card[hidden] { display: none; }

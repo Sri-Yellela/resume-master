@@ -3,14 +3,15 @@
 //     page, so the pages cannot drift apart (the old site's look: the white boxed stamp, a glass bar);
 //   · the PDF product pages — /pdf/ and one page per tool, each findable on its own (the A69 row: "merge
 //     pdf" / "compress pdf" are search categories), each mounting the same in-browser toolkit;
-//   · sitemap.xml and robots.txt; and public/sky.svg (scripts/site/sky.mjs).
+//   · sitemap.xml and robots.txt; public/tokens.css + public/theme.js — the ONE token source and the Appearance choice
+//     (scripts/site/themes.mjs, rm-audit M20). The A68 night sky (public/sky.svg) is retired (M21).
 //
 //   node scripts/site/buildSite.mjs            write
 //   node scripts/site/buildSite.mjs --check    exit 1 if any generated file is stale (the test runs this)
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { renderSky } from "./sky.mjs";
+import { renderTokens, renderThemeScript } from "./themes.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const PUB = path.join(ROOT, "public");
@@ -104,6 +105,8 @@ const head = ({ title, description, canonical }) => `<!doctype html>
   <meta property="og:title" content="${esc(title)}">
   <meta property="og:description" content="${esc(description)}">
   <meta property="og:url" content="${ORIGIN}${canonical}">
+  <script src="/theme.js"></script>
+  <link rel="stylesheet" href="/tokens.css">
   <link rel="stylesheet" href="/site.css">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 </head>`;
@@ -213,7 +216,8 @@ export function injectChrome(html) {
 
 export function plan() {
   const files = new Map();
-  files.set("sky.svg", renderSky());
+  files.set("tokens.css", renderTokens());
+  files.set("theme.js", renderThemeScript());
   files.set("favicon.svg", FAVICON);
   files.set("sitemap.xml", renderSitemap());
   files.set("robots.txt", ROBOTS);

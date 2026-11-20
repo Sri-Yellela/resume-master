@@ -15,7 +15,7 @@
 .pt-promise { margin: 0 0 12px; font-size: 0.92em; color: var(--pt-muted); }
 .pt-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
 .pt-tab {
-  font: inherit; font-size: 0.9em; padding: 6px 12px; border-radius: 999px; cursor: pointer;
+  font: inherit; font-size: 0.9em; padding: 6px 12px; border-radius: 9px; cursor: pointer;
   border: 1px solid var(--pt-border); background: transparent; color: var(--pt-text);
 }
 .pt-tab[aria-selected="true"] { background: var(--pt-accent); color: var(--pt-on-accent); border-color: var(--pt-accent); }
@@ -28,7 +28,7 @@
   border: 1px solid var(--pt-border); border-radius: calc(var(--pt-radius) * 0.6); padding: 7px 9px;
 }
 .pt-btn {
-  font: inherit; justify-self: start; padding: 8px 16px; border-radius: 999px; cursor: pointer; text-decoration: none;
+  font: inherit; justify-self: start; padding: 8px 16px; border-radius: 9px; cursor: pointer; text-decoration: none;
   border: 1px solid var(--pt-border); background: transparent; color: var(--pt-text); display: inline-block;
 }
 .pt-btn.pt-primary { background: var(--pt-accent); color: var(--pt-on-accent); border-color: var(--pt-accent); }
@@ -117,20 +117,18 @@
 /* ── A203 (2) · Edit PDF in draft's sandbox look (owner 11-13: "use the entire sandbox styling and formatting and buttons
    from draft") — draft's Dusk tokens (themes/dusk-dark.js) and its depth box (components/DepthButton.css), redrawn here. */
 .pt-sb {
-  --sb-canvas: #1B1B1B; --sb-card: #262626; --sb-well: #2E2E2E; --sb-line: #343434; --sb-ink: #FFFFFF; --sb-muted: #A3A3A3;
-  --sb-accent: #FBD3C4; --sb-accent-edge: #F2C2B2; --sb-on-accent: #1B1B1B;
-  --sb-rest: 0 3px 8px rgba(0,0,0,0.40), inset 0 1px 0 rgba(255,255,255,0.08);
-  --sb-hover: 0 7px 17px rgba(0,0,0,0.50), inset 0 1px 0 rgba(255,255,255,0.10);
-  --sb-press: 0 2px 5px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.06);
-  --sb-glow: 0 10px 26px rgba(251,211,196,0.16), inset 0 1px 0 rgba(255,255,255,0.30);
+  /* rm-audit M20: the site's tokens (public/tokens.css) — this was the fourth hand-copied Dusk palette */
+  --sb-canvas: var(--bg); --sb-card: var(--card); --sb-well: var(--raise); --sb-line: var(--line); --sb-ink: var(--ink); --sb-muted: var(--body);
+  --sb-accent: var(--accent); --sb-accent-edge: var(--accent2); --sb-on-accent: var(--on-accent);
+  --sb-rest: var(--rest); --sb-hover: var(--hover); --sb-press: var(--press); --sb-glow: var(--glow);
   display: grid; gap: 12px; min-width: 0; padding: 16px; border-radius: 22px; background: var(--sb-canvas); color: var(--sb-ink);
-  font-family: "Inter Tight", Inter, system-ui, sans-serif;
+  font-family: var(--font, system-ui, sans-serif);
 }
 .pt-sb .pt-field { color: var(--sb-muted); }
 .pt-sb .pt-file { background: var(--sb-card); color: var(--sb-ink); border-color: var(--sb-line); }
 .pt-sb .pt-muted, .pt-sb-note { color: var(--sb-muted); margin: 0; font-size: 0.9em; }
 .pt-sb .pt-status { color: var(--sb-muted); }
-.pt-sb .pt-status.pt-good { color: #9fd8a8; } .pt-sb .pt-status.pt-bad { color: #f2a090; }
+.pt-sb .pt-status.pt-good { color: var(--good); } .pt-sb .pt-status.pt-bad { color: var(--bad); }
 .pt-sb-bar {
   position: sticky; top: 8px; z-index: 3; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 10px;
   border-radius: 16px; background: var(--sb-card); border: 1px solid var(--sb-line);
@@ -155,7 +153,7 @@
 .pt-sbx-color { width: 18px; height: 18px; padding: 0; border: 0; background: none; cursor: pointer; }
 .pt-sb-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .pt-sb .pt-result a.pt-btn { background: var(--sb-accent); color: var(--sb-on-accent); border-color: var(--sb-accent-edge); border-radius: 11px; }
-.pt-sb .pt-ed-page { box-shadow: 0 8px 26px rgba(0,0,0,0.45); }
+.pt-sb .pt-ed-page { box-shadow: var(--shadow-lg); }
 .pt-sb .pt-ed-page figcaption { color: var(--sb-muted); }
 /* the page's own text runs, each editable where it is */
 .pt-tx-layer { cursor: default; }

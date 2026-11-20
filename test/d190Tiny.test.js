@@ -77,8 +77,10 @@ test("46n · Tiny FLOATS: a fox bubble fixed at the bottom-right opening a card 
   }
   // colours from the page's tokens (the workspace's or the site's) — only shadows are literal, and no hex at all
   assert.doesNotMatch(css, /#[0-9a-f]{3,8}\b/i, "colours from the tokens");
-  assert.match(css, /--t-card: var\(--card, var\(--glass-strong\)\);/);
-  assert.match(css, /--t-line: var\(--line, var\(--glass-edge\)\);/);
+  // moved on purpose (rm-audit M20, 46y): one token source with the same names on every page — no per-page fallbacks
+  assert.match(css, /--t-card: var\(--card\);/);
+  assert.match(css, /--t-line: var\(--line\);/);
+  assert.doesNotMatch(css, /rgba?\(/, "the shadows are tokens too");
   const html = read("public/workspace/index.html");
   assert.doesNotMatch(html, /ws-tiny-toggle/, "no top-bar Tiny button on the workspace");
   assert.match(html, /href="\/assistant\/tiny\.css"/);
