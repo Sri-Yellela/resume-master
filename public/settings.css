@@ -1,0 +1,35 @@
+/* rm-audit M20 / M16 / M17 · the Settings dialog — Appearance and the account (public/settings-panel.js, account-panel.js).
+   The same on every page: the workspace's top bar, the editor and the site header open it. Tokens only; no capsule (D60). */
+.set-dialog { border: 0; padding: 0; background: transparent; color: var(--ink); max-width: min(620px, calc(100vw - 24px)); width: 100%; }
+.set-dialog::backdrop { background: var(--scrim); }
+.set-box { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 18px; display: grid; gap: 16px; max-height: 86vh; overflow: auto; box-shadow: var(--shadow-lg); font: 14px/1.45 var(--font); }
+.set-title { margin: 0; font: 400 24px/1.2 "Instrument Serif", Georgia, serif; }
+.set-sec { display: grid; gap: 10px; }
+.set-sec + .set-sec { border-top: 1px solid var(--line); padding-top: 14px; }
+.set-h { margin: 0; font-size: 13px; color: var(--body); }
+.set-h4 { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
+.set-group { border: 0; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
+.set-group legend { font-size: 12px; color: var(--muted); padding: 0; margin-bottom: 4px; width: 100%; }
+.set-opt { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; cursor: pointer; }
+.set-opt input { accent-color: var(--accent); }
+.set-note { margin: 0; font-size: 12px; color: var(--muted); }
+.set-sec p { margin: 0; }
+.set-form { display: grid; gap: 8px; }
+.set-field { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+.set-in { font: inherit; font-size: 13px; color: var(--ink); background: var(--raise); border: 1px solid var(--line); border-radius: 9px; padding: 7px 9px; width: 100%; }
+.set-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.set-b { display: inline-flex; align-items: center; justify-content: center; height: 32px; padding: 0 12px; border: 1px solid var(--line); background: var(--raise); color: var(--ink);
+  border-radius: 9px; box-shadow: var(--rest); font: 700 12.5px/1 var(--font); cursor: pointer; text-decoration: none; transition: transform .16s, box-shadow .16s, border-color .16s, color .16s; }
+.set-b:hover:not(:disabled), .set-b:focus-visible { transform: translateY(-2px); box-shadow: var(--hover); border-color: var(--accent); color: var(--accent); }
+.set-b:disabled { opacity: .45; cursor: default; }
+.set-b--p, .set-b--on { background: var(--accent); color: var(--on-accent); border-color: var(--accent2); box-shadow: var(--glow); }
+.set-b--p:hover:not(:disabled), .set-b--on:hover { color: var(--on-accent); }
+.set-msg { margin: 0; font-size: 12.5px; color: var(--body); min-height: 1em; }
+.set-msg--good { color: var(--good); } .set-msg--bad { color: var(--bad); }
+.set-docs { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.set-docs li { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; padding: 8px 10px; border-radius: 10px; background: var(--raise); font-size: 13px; }
+.set-ledger { width: 100%; border-collapse: collapse; font-size: 12px; }
+.set-ledger td, .set-ledger th { padding: 5px 6px; border-top: 1px solid var(--line); text-align: left; }
+.set-more summary { cursor: pointer; font-size: 12.5px; color: var(--body); }
+.set-danger .set-b--p { background: var(--bad); border-color: var(--bad); color: var(--on-accent); }
+@media (prefers-reduced-motion: reduce) { .set-b { transition: none; } }

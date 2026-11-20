@@ -109,8 +109,8 @@ test("the site's ATS check is the ATS card (owner 11-19, option C): no band word
   for (const words of ['"Skills"', '"Role"', '"The work"', '"Their stack"', "Biggest gain: "]) assert.ok(view.includes(words), words);
   assert.doesNotMatch(view, /contextualHtml|What fits|Skills the posting asks for that your résumé shows|Competencies shown/, "no lists of terms");
   assert.match(view, /job: \{ title, description, \.\.\.\(company \? \{ company \} : \{\}\) \}/, "the optional company field feeds the lookup");
-  const site = fs.readFileSync(path.join(import.meta.dirname, "..", "public", "site.js"), "utf8");
-  assert.doesNotMatch(site, /function atsCardHtml|function cardLines|const bandClass/, "the site keeps no second copy of the card");
+  // the home page's check is retired (rm-audit M4, 46y) — the panel is the only place the card is drawn
+  assert.ok(!fs.existsSync(path.join(import.meta.dirname, "..", "public", "site.js")), "no second copy of the card");
   const css = fs.readFileSync(path.join(import.meta.dirname, "..", "public", "ats-panel.css"), "utf8");
   assert.match(css, /\.ats-num\.strong \{ color: var\(--band-strong\); \}/, "the colour is a token (draft's BAND_STRONG, per theme)");
   assert.match(css, /\.ctx-bar \{ display: block; height: 6px; border-radius: 2px;/, "D60: no capsule");

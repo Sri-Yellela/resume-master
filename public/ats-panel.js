@@ -168,6 +168,7 @@ export function mountAtsPanel(box, { resumeText = () => "", resumeLabel = () => 
     try { last = await scoreAts({ resumeText: resume, ...j }); draw(); }
     catch (err) { last = null; out.innerHTML = `<p class="ats-bad">${esc(err.message)}</p>`; }
   });
+  form.addEventListener("focusin", refresh);   // the document may have changed since the panel was drawn
   refresh();
   return { refresh, get result() { return last; } };
 }

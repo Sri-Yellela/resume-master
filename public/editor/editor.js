@@ -59,7 +59,7 @@ function applyTheme(tokens) {
 function load(html, m) {
   try {
     doc = sectionsFromHtml(html);
-    meta = { company: String(m.company || ""), title: String(m.title || ""), filename: String(m.filename || ""),
+    meta = { company: String(m.company || ""), title: String(m.title || ""), filename: String(m.filename || ""), kind: m.kind === "cover-letter" ? "cover-letter" : "resume",
       changes: Array.isArray(m.changes) ? m.changes.map(String).filter(s => s.trim().length >= 8).slice(0, 200) : [],
       // READ ONLY: a résumé that was already sent is shown as it was — it can be read, highlighted and downloaded, not changed.
       readOnly: m.readOnly === true, readOnlyNote: String(m.readOnlyNote || "") };
@@ -224,8 +224,10 @@ function highlightChanges(on) {
 
 // ── the section menu ────────────────────────────────────────────────────────────────────────────────────────────
 function renderMenu() {
-  $("#eyebrow").textContent = meta.company ? "Tailored for" : "Your résumé";
-  $("#menu-title").textContent = meta.company || "Résumé editor";
+  // D192 P4: the cover letter is a document type here (standalone only — a host never sends `kind`, so rm-editor/1 reads as before)
+  const letter = meta.kind === "cover-letter";
+  $("#eyebrow").textContent = meta.company ? "Tailored for" : letter ? "Your cover letter" : "Your résumé";
+  $("#menu-title").textContent = meta.company || (letter ? "Cover letter" : "Résumé editor");
   $("#menu-sub").textContent = meta.title || (meta.company ? "" : "Edit each section in place.");
   const list = $("#section-list");
   list.innerHTML = "";
@@ -457,6 +459,11 @@ if (framed && !embedded) {
     } catch (err) { $("#start-error").textContent = String(err?.message || err); }
   });
   $("#open-sample").addEventListener("click", () => load(SAMPLE, {}));
+  // ⭐ rm-audit M6 / M7 / M5 (46y): by itself, the editor carries Format (paste a résumé), the ATS panel and Tailor
+  // (public/editor/editor-side.js) — never when embedded, so rm-editor/1 is unchanged.
+  window.__rmEditorHtml = currentHtml;
+  import("/editor/editor-side.js").then(m => { window.__rmEditorSide = m.mountSide({ load, getText: () => (root.querySelector(".rm-doc")?.innerText || "").trim(), params }); })
+    .catch(err => { $("#start-error").textContent = String(err?.message || err); });
   $("#open-file").addEventListener("change", async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;

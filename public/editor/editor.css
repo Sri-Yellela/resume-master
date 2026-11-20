@@ -127,3 +127,26 @@ button, select, input { font: inherit; color: inherit; }
 .grp label.color input::-webkit-color-swatch-wrapper { padding: 0; } .grp label.color input::-webkit-color-swatch { border: 0; border-radius: 2px; }
 /* A203 (3): the icon buttons keep their 32 px box — .grp button (all: unset) outranked .ib, squeezing B I U together */
 .grp button.ib { width: 32px; height: 32px; padding: 0; display: grid; place-items: center; box-sizing: border-box; }
+/* ⭐ rm-audit M5 / M6 / M7 (46y) · by itself, a properties column beside the page: the ATS panel and Tailor; and the paste form
+   (Format, merged). Never drawn when draft embeds the editor. Depth boxes, tokens only, no capsule (D60). */
+.wrap.wrap--side { grid-template-columns: 250px minmax(0, 816px) 300px; }
+.side { position: sticky; top: 88px; align-self: start; max-height: calc(100vh - 100px); overflow: auto; background: var(--card); border-radius: 18px; padding: 14px; display: grid; gap: 12px; }
+.side__tabs { display: flex; gap: 4px; align-items: center; }
+.side__tab { font: inherit; border: 0; background: transparent; padding: 6px 10px; border-radius: 8px; font-weight: 700; font-size: 12.5px; color: var(--body); cursor: pointer; }
+.side__tab[aria-selected="true"] { background: var(--raise); color: var(--ink); box-shadow: var(--rest); }
+.side__set { margin-left: auto; font: inherit; width: 32px; height: 32px; border: 1px solid var(--line); background: var(--raise); color: var(--ink); border-radius: 9px; cursor: pointer; box-shadow: var(--rest); }
+.side__panel { display: grid; gap: 10px; }
+.side .ws-b { display: inline-flex; align-items: center; justify-content: center; height: 32px; padding: 0 12px; border: 1px solid var(--line); background: var(--raise); color: var(--ink);
+  border-radius: 9px; box-shadow: var(--rest); font: 700 12.5px/1 var(--font); cursor: pointer; justify-self: start; }
+.side .ws-b.ws-p { background: var(--accent); color: var(--on-accent); border-color: var(--accent2); box-shadow: var(--glow-accent); }
+.side .ws-b:disabled { opacity: .5; cursor: default; }
+.tailor__chk { display: flex; gap: 8px; align-items: center; }
+.tailor__chk input { width: auto; }
+.tailor__ok { color: var(--good); margin: 0; font-size: 13px; }
+.tailor__out { display: grid; gap: 8px; }
+.paste { display: grid; gap: 10px; margin-top: 16px; }
+.paste__l { display: grid; gap: 6px; font-size: 13px; color: var(--body); }
+.paste__t { font: inherit; font-size: 13px; color: var(--ink); background: var(--raise); border: 1px solid var(--line); border-radius: 11px; padding: 9px 11px; resize: vertical; }
+.paste .btnlike { justify-self: start; }
+@media (max-width: 1240px) { .wrap.wrap--side { grid-template-columns: 220px minmax(0, 1fr); } .wrap.wrap--side .side { grid-column: 1 / -1; position: static; max-height: none; } }
+@media (max-width: 860px) { .wrap.wrap--side { grid-template-columns: 1fr; } }
