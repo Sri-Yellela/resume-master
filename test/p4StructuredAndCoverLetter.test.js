@@ -37,3 +37,32 @@ test("p4StructuredMode: the workspace's sixth mode tab hands the open document t
   const ed = read("public/editor/editor.js");
   assert.ok(ed.indexOf('import("/editor/editor-side.js")') > ed.indexOf("} else if (embedded) {"));
 });
+
+// ── round 2 (46y, coordinator): the shell, the kind across a reload, Tailor and letters, the editor's ATS text ──
+test("p4EditorInWorkspaceShell: by itself the editor wears the workspace's top bar, mode tabs (Structured selected) and its bar as the tool bar", () => {
+  assert.match(SIDE, /export function mountShell\(\)/);
+  assert.match(SIDE, /\["edit", "Edit"\], \["annotate", "Annotate"\], \["sign", "Fill & sign"\], \["pages", "Pages"\], \["convert", "Convert"\]\]/);
+  assert.match(SIDE, /"data-mode": "structured" \}, "Structured"\)/);
+  assert.match(SIDE, /href: `\/workspace\/\?mode=\$\{m\}`/, "a PDF mode opens the workspace");
+  assert.match(SIDE, /"Download ▾"/);
+  assert.match(read("public/editor/editor.css"), /html\[data-shell\] \.bar \{ position: sticky; top: 0; width: 100%;/);
+});
+
+test("p4CoverLetterKeptAcrossReload: the kind is kept beside the document in this browser, standalone only", () => {
+  const ed = read("public/editor/editor.js");
+  assert.match(ed, /const KIND_KEY = "rm-editor:kind";/);
+  assert.match(ed, /if \(!embedded\) \{ document\.documentElement\.dataset\.kind = meta\.kind; try \{ localStorage\.setItem\(KIND_KEY, meta\.kind\); \}/);
+  assert.match(ed, /else if \(saved\) \{ let kind = null; try \{ kind = localStorage\.getItem\(KIND_KEY\); \}[^\n]*load\(saved, \{ kind \}\); \}/);
+});
+
+test("p4TailorAndLetters: Tailor sends no letter through the résumé prompt — a letter would need a new model prompt, which is not added (D190)", () => {
+  assert.match(SIDE, /if \(window\.__rmEditorKind\?\.\(\) === "cover-letter"\) \{ put\(out, el\("p", \{ class: "note", "data-tailor-letter": "" \}/);
+  assert.equal((SIDE.match(/call\("\/tools\/generate"/g) || []).length, 1, "still the one existing Tailor call — no new model route");
+});
+
+test("editorAtsReadsTheDocument: the editor hands the ATS panel the document's own words — not the shadow-rooted page (#paper.innerText is empty) with its section labels", () => {
+  const ed = read("public/editor/editor.js");
+  assert.match(ed, /const d = new DOMParser\(\)\.parseFromString\(currentHtml\(\) \|\| "", "text\/html"\);/, "the document's sections, not the page's edit labels");
+  assert.match(ed, /getText: documentText, params/);
+  assert.doesNotMatch(ed, /\$\("#paper"\)\?\.innerText/);
+});

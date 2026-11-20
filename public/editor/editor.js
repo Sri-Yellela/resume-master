@@ -464,8 +464,16 @@ if (framed && !embedded) {
   // ⭐ rm-audit M6 / M7 / M5 (46y): by itself, the editor carries Format (paste a résumé), the ATS panel and Tailor
   // (public/editor/editor-side.js) — never when embedded, so rm-editor/1 is unchanged.
   window.__rmEditorHtml = currentHtml;
+  // the ATS panel reads the DOCUMENT (its sections' HTML), not the page on screen: the page lives in a shadow root (so
+  // #paper.innerText is empty) and carries the editor's own section labels ("Name and contact", "Skills"…), which are not
+  // the résumé's words. Block elements end their line.
+  const documentText = () => {
+    const d = new DOMParser().parseFromString(currentHtml() || "", "text/html");
+    for (const n of d.body.querySelectorAll("p, div, li, h1, h2, h3, h4, tr, br")) n.append("\n");
+    return d.body.textContent.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  };
   window.__rmEditorKind = () => meta.kind;
-  import("/editor/editor-side.js").then(m => { window.__rmEditorSide = m.mountSide({ load, getText: () => (root.querySelector(".rm-doc")?.innerText || "").trim(), params }); })
+  import("/editor/editor-side.js").then(m => { window.__rmEditorSide = m.mountSide({ load, getText: documentText, params }); })
     .catch(err => { $("#start-error").textContent = String(err?.message || err); });
   $("#open-file").addEventListener("change", async (e) => {
     const file = e.target.files?.[0];
