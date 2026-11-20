@@ -177,7 +177,10 @@ button, select, input { font: inherit; color: inherit; }
 .ws[data-ats="first"][data-state="empty"] .ws-strip,
 .ws[data-ats="first"][data-state="empty"] .ws-props,
 .ws[data-ats="first"][data-state="empty"] .ws-tools,
-.ws[data-ats="first"][data-state="empty"] .ws-sheetbar { display: none; }
+.ws[data-ats="first"][data-state="empty"] .ws-sheetbar,
+/* 46z (owner 11-20: "it has pdf editor related options in the top bar") — the PDF editor's modes and file actions wait for a document */
+.ws[data-ats="first"][data-state="empty"] .ws-modes,
+.ws[data-ats="first"][data-state="empty"] .ws-top > :not(.ws-stamp):not(.ws-grow):not(#ws-settings) { display: none; }
 .ws[data-ats="first"][data-state="empty"] .ws-body { grid-template-columns: minmax(0, 1fr); }
 .ws[data-ats="first"][data-state="empty"] .ws-canvas { overflow-y: auto; }
 .ws-atsfirst__t { font: 400 34px/1.15 "Instrument Serif", Georgia, serif; margin: 0; }

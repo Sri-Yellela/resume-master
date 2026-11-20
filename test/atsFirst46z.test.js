@@ -28,3 +28,11 @@ test("46z · with no document, ?panel=resume puts the check in the canvas (data-
   }
   assert.match(css, /\.ws\[data-ats="first"\]\[data-state="empty"\] \.ws-body \{ grid-template-columns: minmax\(0, 1fr\); \}/);
 });
+
+test("46z (owner 11-20: 'it has pdf editor related options in the top bar' · 'cant see it'): the ATS page shows no PDF editor controls, and the result is brought into view", () => {
+  const css = read("public/workspace/workspace.css"), js = read("public/ats-panel.js");
+  assert.match(css, /\.ws\[data-ats="first"\]\[data-state="empty"\] \.ws-modes,/);
+  assert.match(css, /\.ws\[data-ats="first"\]\[data-state="empty"\] \.ws-top > :not\(\.ws-stamp\):not\(\.ws-grow\):not\(#ws-settings\) \{ display: none; \}/);
+  assert.match(js, /last = await scoreAts\(\{ resumeText: resume, \.\.\.j \}\); draw\(\); showResult\(\);/);
+  assert.match(js, /if \(r\.top > innerHeight \* 0\.55\) out\.scrollIntoView\(\{ block: "start"/);
+});

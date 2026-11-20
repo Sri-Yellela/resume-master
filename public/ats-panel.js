@@ -197,6 +197,11 @@ export function mountAtsPanel(box, { resumeText = () => "", resumeLabel = () => 
     form.resume.required = !text;
     box.querySelector("[data-ats-source]").textContent = text ? resumeLabel() : "";
   };
+  // 46z (owner 11-20: "cant see it"): the result lands under the form — bring it into view when it is below the fold
+  const showResult = () => {
+    const r = out.getBoundingClientRect();
+    if (r.top > innerHeight * 0.55) out.scrollIntoView({ block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  };
   const draw = () => {
     if (!last) return;
     out.innerHTML = resultHtml(last, { dismissed: dismissedKeys(), showDismissed, dismissable: true });
@@ -216,7 +221,7 @@ export function mountAtsPanel(box, { resumeText = () => "", resumeLabel = () => 
     const j = { title: form.title.value.trim(), company: form.company.value.trim(), description: form.description.value };
     keepJob(j);
     out.innerHTML = '<p class="note">Scoring…</p>';
-    try { last = await scoreAts({ resumeText: resume, ...j }); draw(); }
+    try { last = await scoreAts({ resumeText: resume, ...j }); draw(); showResult(); }
     catch (err) { last = null; out.innerHTML = `<p class="ats-bad">${esc(err.message)}</p>`; }
   });
   form.addEventListener("focusin", refresh);   // the document may have changed since the panel was drawn
