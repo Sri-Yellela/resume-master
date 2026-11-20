@@ -76,8 +76,9 @@ test("d192RmPlausibility — standing alone, each employer is looked up and the 
   assert.ok(e.flags.some(f => f.kind === "domain"), "the owner's example: a sales-incentive bullet at an ML company");
   const v1 = scoreAts({ job, resumeText });
   assert.deepEqual(r.report, v1.report, "the skill match is unchanged");
-  const site = fs.readFileSync(path.join(import.meta.dirname, "..", "public", "site.js"), "utf8");
-  assert.ok(site.includes("atsCardHtml(rep, r.contextual) + plausibilityHtml(r.plausibility)"));
+  // moved on purpose (46y, D192 (3d)): the one ATS card module draws the flags (site check + workspace Résumé tab)
+  const view = fs.readFileSync(path.join(import.meta.dirname, "..", "public", "ats-panel.js"), "utf8");
+  assert.ok(view.includes("atsCardHtml(rep, r.contextual) + plausibilityHtml(r.plausibility, opts)"));
 });
 
 test("a failed lookup is no data, never an error", async () => {
@@ -98,18 +99,19 @@ test("the lookup is on in production (or with RM_COMPANY_STACK_URL), off in test
 });
 
 test("the site's ATS check is the ATS card (owner 11-19, option C): no band word, no term lists", () => {
-  const site = fs.readFileSync(path.join(import.meta.dirname, "..", "public", "site.js"), "utf8").replace(/\r\n/g, "\n");
-  assert.doesNotMatch(site, /Strong match|Moderate match|Weak match|bandOf\(/, "no band word or blurb");
-  assert.match(site, /const bandClass = \(s\) => \(typeof s !== "number" \? "nosignal" : s >= 44 \? "strong" : s >= 26 \? "moderate" : "weak"\);/, "draft's cutpoints");
-  // option C (owner 11-19): the ATS card — the number, four rows of bar + line, the biggest gain; no lists of terms
-  assert.match(site, /function atsCardHtml\(rep, c\)/);
-  assert.ok(site.includes('${r.outcome === "scored" ? atsCardHtml(rep, r.contextual)'));
-  for (const words of ['"Skills"', '"Role"', '"The work"', '"Their stack"', "Biggest gain: "]) assert.ok(site.includes(words), words);
-  assert.doesNotMatch(site, /contextualHtml|What fits|Skills the posting asks for that your résumé shows|Competencies shown/, "no lists of terms");
-  assert.match(site, /company: f\.company\.value\.trim\(\)/, "the optional company field feeds the lookup");
-  const css = fs.readFileSync(path.join(import.meta.dirname, "..", "public", "site.css"), "utf8");
-  assert.match(css, /\.ats-num\.strong \{ color: var\(--good\); \}/, "the colour is a token");
-  assert.match(css, /\.ctx-bar \{ height: 6px; border-radius: 2px;/, "D60: no capsule");
-  const html = fs.readFileSync(path.join(import.meta.dirname, "..", "public", "index.html"), "utf8");
-  assert.match(html, /name="company"/);
+  // Moved on purpose (draft D192 (3d), 46y): the card is ONE module, public/ats-panel.js — the home check, the workspace's
+  // Résumé tab and the structured editor all draw it from there; its stylesheet is public/ats-panel.css.
+  const view = fs.readFileSync(path.join(import.meta.dirname, "..", "public", "ats-panel.js"), "utf8").replace(/\r\n/g, "\n");
+  assert.doesNotMatch(view, /Strong match|Moderate match|Weak match|bandOf\(/, "no band word or blurb");
+  assert.match(view, /export const bandClass = \(s\) => \(typeof s !== "number" \? "nosignal" : s >= 44 \? "strong" : s >= 26 \? "moderate" : "weak"\);/, "draft's cutpoints");
+  assert.match(view, /export function atsCardHtml\(rep, c\)/);
+  assert.ok(view.includes('r.outcome === "scored" ? atsCardHtml(rep, r.contextual) + plausibilityHtml(r.plausibility, opts)'));
+  for (const words of ['"Skills"', '"Role"', '"The work"', '"Their stack"', "Biggest gain: "]) assert.ok(view.includes(words), words);
+  assert.doesNotMatch(view, /contextualHtml|What fits|Skills the posting asks for that your résumé shows|Competencies shown/, "no lists of terms");
+  assert.match(view, /job: \{ title, description, \.\.\.\(company \? \{ company \} : \{\}\) \}/, "the optional company field feeds the lookup");
+  const site = fs.readFileSync(path.join(import.meta.dirname, "..", "public", "site.js"), "utf8");
+  assert.doesNotMatch(site, /function atsCardHtml|function cardLines|const bandClass/, "the site keeps no second copy of the card");
+  const css = fs.readFileSync(path.join(import.meta.dirname, "..", "public", "ats-panel.css"), "utf8");
+  assert.match(css, /\.ats-num\.strong \{ color: var\(--band-strong\); \}/, "the colour is a token (draft's BAND_STRONG, per theme)");
+  assert.match(css, /\.ctx-bar \{ display: block; height: 6px; border-radius: 2px;/, "D60: no capsule");
 });

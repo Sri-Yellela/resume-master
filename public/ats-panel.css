@@ -1,0 +1,36 @@
+/* ⭐ draft D192 (3d) · the ATS panel and the ATS card (public/ats-panel.js) — drawn in the workspace's properties panel,
+   the structured editor's, and wherever else a résumé is open. Every colour is a token (public/tokens.css); no capsule
+   anywhere (draft D60): bars are 2 px-rounded strips, the number is painted by its band, a flag is a ⚠ and a word. */
+.ats-panel { display: grid; gap: 12px; }
+.ats-form { display: grid; gap: 10px; }
+.ats-f { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+.ats-f input, .ats-f textarea { font: inherit; font-size: 13px; color: var(--ink); background: var(--raise); border: 1px solid var(--line); border-radius: 9px; padding: 7px 9px; width: 100%; resize: vertical; }
+.ats-out:empty { display: none; }
+.ats-bad { color: var(--bad); margin: 0; }
+.ats-link { font: inherit; font-size: 12px; background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; text-align: left; justify-self: start; }
+.ats-link:hover, .ats-link:focus-visible { text-decoration: underline; }
+.ats-panel .note, .atsc .note, .plaus .note { font-size: 12px; color: var(--muted); }
+.ats-head { margin: 4px 0 10px; }
+/* the number's colour is its band — no band word, no badge (draft D192, owner 11-19) */
+.ats-num { font-weight: 700; font-size: 40px; line-height: 1.1; }
+.ats-num.sm { font-size: 13px; }
+.ats-num.strong { color: var(--band-strong); } .ats-num.moderate { color: var(--band-moderate); } .ats-num.weak { color: var(--band-weak); } .ats-num.nosignal { color: var(--body); }
+.ctx-bar { display: block; height: 6px; border-radius: 2px; background: var(--line); overflow: hidden; margin: 6px 0; }
+.ctx-bar i { display: block; height: 6px; background: var(--body); }
+.ctx-bar i.strong { background: var(--band-strong); } .ctx-bar i.moderate { background: var(--band-moderate); } .ctx-bar i.weak { background: var(--band-weak); }
+/* the ATS card (draft D192, option C): the number, rows of name · bar + line · number, the biggest gain */
+.atsc { display: flex; flex-direction: column; gap: 14px; margin: 4px 0 14px; }
+.atsc-num { margin: 0; } .atsc-num .ats-num { font-size: 44px; }
+.atsc-row { display: grid; grid-template-columns: minmax(84px, 110px) minmax(0, 1fr) 36px; align-items: center; gap: 12px; }
+.atsc-mid { display: flex; flex-direction: column; gap: 5px; min-width: 0; } .atsc-mid .ctx-bar { margin: 0; }
+.atsc-row .ats-num.sm { text-align: right; }
+.atsc-gain { margin: 0; border-top: 1px solid var(--line); padding-top: 12px; }
+/* does the résumé add up (D192 (4d)) — a quiet ⚠ per bullet, its reason, Dismiss */
+.plaus { display: flex; flex-direction: column; gap: 8px; margin: 0 0 14px; border-top: 1px solid var(--line); padding-top: 12px; }
+.plaus-head { margin: 0; }
+.plaus-row { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; font-size: 13px; }
+.plaus-row > span:last-child { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.plaus-mark { color: var(--warn); }
+/* in a narrow column (the properties panel, ~260 px) the rows tighten */
+.ats-panel .atsc-row { grid-template-columns: 64px minmax(0, 1fr) 26px; gap: 8px; }
+.ats-panel .atsc-num .ats-num { font-size: 38px; }
